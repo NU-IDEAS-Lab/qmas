@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flocking_zoo"
+version = "0.0.1"
+authors = [
+  { name="Anthony Goeckner" },
+  { name="Nicolas Martinet" },
+  { name="Xinliang Li" },
+  { name="Yueyuan Sui" },
+]
+description = "Flocking environment for PettingZoo."
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+
+[tool.setuptools]
+packages = [
+    "flocking_zoo",
+    "flocking_zoo.env",
+    "test",
+    "onpolicy",
+    "onpolicy.algorithms",
+    "onpolicy.algorithms.r_mappo",
+    "onpolicy.algorithms.r_mappo.algorithm",
+    "onpolicy.algorithms.utils",
+    "onpolicy.envs",
+    "onpolicy.envs.flocking",
+    "onpolicy.runner",
+    "onpolicy.runner.separated",
+    "onpolicy.runner.shared",
+    "onpolicy.scripts",
+    "onpolicy.scripts.render",
+    "onpolicy.scripts.train",
+    "onpolicy.utils",
+]
