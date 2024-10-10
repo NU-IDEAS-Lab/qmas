@@ -14,7 +14,7 @@ import wandb
 # code repository sub-packages
 from onpolicy.config import get_config
 from onpolicy.envs.patrolling.Patrolling_Env import PatrollingEnv
-from onpolicy.envs.env_wrappers import SubprocVecEnv, DummyVecEnv
+from onpolicy.envs.env_wrappers import ShareSubprocVecEnv, ShareDummyVecEnv
 
 
 def make_train_env(all_args):
@@ -30,9 +30,9 @@ def make_train_env(all_args):
             return env
         return init_env
     if all_args.n_rollout_threads == 1:
-        return DummyVecEnv([get_env_fn(0)])
+        return ShareDummyVecEnv([get_env_fn(0)])
     else:
-        return SubprocVecEnv([get_env_fn(i) for i in range(
+        return ShareSubprocVecEnv([get_env_fn(i) for i in range(
             all_args.n_rollout_threads)])
 
 

@@ -87,13 +87,11 @@ class PatrollingEnv(object):
         self.deltaSteps = {a: 0 for a in self.env.possible_agents}
         obs, _  = self.env.reset()
 
-        combined_obs = {
-            "obs": self._obs_wrapper(obs),
-            "share_obs": self._share_obs_wrapper(self.env.state_all()),
-            "available_actions": self._available_actions_wrapper(self.env.available_actions)
-        }
+        ret_obs = self._obs_wrapper(obs)
+        ret_share_obs = self._share_obs_wrapper(self.env.state_all())
+        ret_available_actions = self._available_actions_wrapper(self.env.available_actions)
 
-        return combined_obs
+        return ret_obs, ret_share_obs, ret_available_actions
 
     def step(self, action_metadata):
 
@@ -140,11 +138,9 @@ class PatrollingEnv(object):
             # Consider the agent done if done OR truncated flags set.
             done = [d or t for d, t in zip(done, trunc)]
 
-            combined_obs = {
-                "obs": self._obs_wrapper(obs),
-                "share_obs": self._share_obs_wrapper(self.env.state_all()),
-                "available_actions": self._available_actions_wrapper(self.env.available_actions)
-            }
+            ret_obs = self._obs_wrapper(obs)
+            ret_share_obs = self._share_obs_wrapper(self.env.state_all())
+            ret_available_actions = self._available_actions_wrapper(self.env.available_actions)
 
             # Increase reward.
             rewards += np.array([reward[a] for a in self.env.possible_agents]).reshape(-1, 1)
@@ -178,7 +174,7 @@ class PatrollingEnv(object):
         # Update the previous action.
         self.prevAction = actionPz
 
-        return combined_obs, rewards, done, info
+        return ret_obs, ret_share_obs, rewards, done, info, ret_available_actions
 
     def seed(self, seed=None):
         if seed is None:

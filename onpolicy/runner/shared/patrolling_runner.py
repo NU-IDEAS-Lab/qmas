@@ -44,15 +44,11 @@ class PatrollingRunner(Runner):
             # Set the delta steps to 1.
             delta_steps = np.ones((self.n_rollout_threads, self.num_agents, 1), dtype=np.int32)
             for step in range(self.episode_length):
-                # Sample actions
                 # Sample actions, collect values and probabilities.
                 values, actions, action_log_probs, rnn_states, rnn_states_critic, actions_env = self.collect(step)
-                    
-                # Obser reward and next obs
-                combined_obs, rewards, dones, infos = self.envs.step(actions_env)
-
-                # Split the combined observations into obs and share_obs, then combine across environments.
-                obs, share_obs, available_actions = self._process_combined_obs(combined_obs)
+                
+                # Take a step in the environment and get the results.
+                obs, share_obs, rewards, dones, infos, available_actions = self.envs.step(actions_env)
 
                 # Get the number of steps taken by each agent since the agent was last ready.
                 delta_steps = np.array([info["deltaSteps"] for info in infos])
@@ -97,13 +93,10 @@ class PatrollingRunner(Runner):
                 self.eval(total_num_steps)
 
     def warmup(self):
-        # reset env
-        combined_obs = self.envs.reset()
+        # Reset environment.
+        obs, share_obs, available_actions = self.envs.reset()
 
-        # Split the combined observations into obs and share_obs, then combine across environments.
-        obs, share_obs, available_actions = self._process_combined_obs(combined_obs)
-
-        # insert obs to buffer
+        # Initialize buffer.
         self.buffer.share_obs[0] = share_obs.copy()
         self.buffer.obs[0] = obs.copy()
         self.buffer.available_actions[0] = available_actions.copy()
@@ -274,8 +267,8 @@ class PatrollingRunner(Runner):
             rnn_states = np.zeros((self.n_render_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=np.float32)
             masks = np.ones((self.n_render_rollout_threads, self.num_agents, 1), dtype=np.float32)
 
-            # Split the combined observations into obs and share_obs, then combine across environments.
-            obs, share_obs, available_actions = self._process_combined_obs(combined_obs)
+            # Reset the environment and get the initial observations.
+            obs, share_obs, available_actions = render_env.reset()
 
             if self.all_args.save_gifs:        
                 frames = []
@@ -299,11 +292,8 @@ class PatrollingRunner(Runner):
 
                 actions_env = [actions[idx, :, 0] for idx in range(self.n_render_rollout_threads)]
 
-                # step
-                combined_obs, render_rewards, dones, infos = render_env.step(actions_env)
-
-                # Split the combined observations into obs and share_obs, then combine across environments.
-                obs, share_obs, available_actions = self._process_combined_obs(combined_obs)
+                # Take a step in the environment and get the results.
+                obs, share_obs, render_rewards, dones, infos, available_actions = render_env.step(actions_env)
 
                 if not np.all(dones):
                     if ipython_clear_output:
@@ -323,15 +313,3 @@ class PatrollingRunner(Runner):
                     format="GIF",
                     duration=self.all_args.ifi,
                 )
-    
-    def _process_combined_obs(self, combined_obs):
-        ''' Process the combined observations into obs and share_obs. '''
-        obs = []
-        share_obs = []
-        available_actions = []
-        for o in combined_obs:
-            obs.append(o["obs"])
-            share_obs.append(o["share_obs"])
-            available_actions.append(o["available_actions"])
-
-        return np.array(obs), np.array(share_obs), np.array(available_actions)
