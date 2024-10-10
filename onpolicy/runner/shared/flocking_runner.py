@@ -162,14 +162,13 @@ class FlockingRunner(Runner):
         self.buffer.insert(
             share_obs=share_obs,
             obs=obs,
-            rnn_states=rnn_states,
+            rnn_states_actor=rnn_states,
             rnn_states_critic=rnn_states_critic,
             actions=actions,
             action_log_probs=action_log_probs,
             value_preds=values,
             rewards=rewards,
             masks=masks,
-            deltaSteps=delta_steps,
             available_actions=available_actions
         )
 
