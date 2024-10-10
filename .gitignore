@@ -8,3 +8,5 @@ __pycache__/
 *.pt
 /results/
 .vscode/
+
+/onpolicy/scripts/results/
