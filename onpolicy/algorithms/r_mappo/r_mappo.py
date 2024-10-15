@@ -5,7 +5,7 @@ from onpolicy.utils.util import get_gard_norm, huber_loss, mse_loss
 from onpolicy.utils.valuenorm import ValueNorm
 from onpolicy.algorithms.utils.util import check
 import copy
-import diffuser.utils as utils
+import diffuser.utils
 
 class EMA():
     '''
@@ -77,7 +77,7 @@ class R_MAPPO():
         self.gradient_accumulate_every = args.gradient_accumulate_every
         
         # Diffuser components
-        self.model_config = utils.Config(
+        self.model_config = diffuser.utils.Config(
             args.model,
             savepath=(args.savepath, 'model_config.pkl'),
             horizon=args.horizon,
@@ -88,7 +88,7 @@ class R_MAPPO():
             device=args.device,
         )
 
-        self.diffusion_config = utils.Config(
+        self.diffusion_config = diffuser.utils.Config(
             args.diffusion,
             savepath=(args.savepath, 'diffusion_config.pkl'),
             horizon=args.horizon,
@@ -110,7 +110,7 @@ class R_MAPPO():
         self.ema = EMA(args.ema_decay)
         
         # Guide components
-        self.guide_config = utils.Config(
+        self.guide_config = diffuser.utils.Config(
             args.guide,
             savepath=(args.savepath, 'guide_config.pkl'),
             horizon=args.horizon,
@@ -325,11 +325,11 @@ class R_MAPPO():
                     = self.ppo_update(sample, update_actor)
 
                 # diffuser
-                diffuser_batch = utils.batchify(dataset[np.random.randint(len(dataset))])
+                diffuser_batch = diffuser.utils.batchify(dataset[np.random.randint(len(dataset))])
                 diffuser_loss = self.diffuser_update(diffuser_batch)
                 
                 # guide 
-                guide_batch = utils.batchify(dataset[np.random.randint(len(dataset))])
+                guide_batch = diffuser.utils.batchify(dataset[np.random.randint(len(dataset))])
                 guide_loss = self.guide_update(guide_batch)
                 
                 train_info['value_loss'] += value_loss.item()
