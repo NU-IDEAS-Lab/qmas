@@ -1,0 +1,3 @@
+[submodule "onpolicy/diffuser"]
+	path = onpolicy/diffuser
+	url = git@github.com:jannerm/diffuser.git
