@@ -18,5 +18,5 @@ classifiers = [
 ]
 
 [tool.setuptools.packages.find]
-where = ["diffuser", "flocking_zoo", "onpolicy", "patrolling_zoo", "test"]
+where = [".", "diffuser", "flocking_zoo", "onpolicy", "patrolling_zoo", "test"]
 namespaces = false
