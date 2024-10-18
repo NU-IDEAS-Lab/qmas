@@ -5,6 +5,26 @@ from torch_geometric.data import Batch
 from onpolicy.utils.util import get_grad_norm, huber_loss, mse_loss
 from onpolicy.utils.valuenorm import ValueNorm
 from onpolicy.algorithms.utils.util import check
+import copy
+import diffuser.utils
+
+class EMA():
+    '''
+        empirical moving average
+    '''
+    def __init__(self, beta):
+        super().__init__()
+        self.beta = beta
+
+    def update_model_average(self, ma_model, current_model):
+        for current_params, ma_params in zip(current_model.parameters(), ma_model.parameters()):
+            old_weight, up_weight = ma_params.data, current_params.data
+            ma_params.data = self.update_average(old_weight, up_weight)
+
+    def update_average(self, old, new):
+        if old is None:
+            return new
+        return old * self.beta + (1 - self.beta) * new
 
 class R_MAPPO():
     """
@@ -41,6 +61,67 @@ class R_MAPPO():
         self._use_valuenorm = args.use_valuenorm
         self._use_value_active_masks = args.use_value_active_masks
         self._use_policy_active_masks = args.use_policy_active_masks
+        
+        # diffuser training params
+        self.model = args.model
+        self.ema = EMA(args.ema_decay)
+        self.ema_model = copy.deepcopy(self.model)
+        self.update_ema_every = args.update_ema_every
+
+        self.step_start_ema = args.step_start_ema
+        self.log_freq = args.log_freq
+        self.sample_freq = args.sample_freq
+        self.save_freq = args.save_freq
+        self.label_freq = args.label_freq
+        self.save_parallel = args.save_parallel
+
+        self.batch_size = args.train_batch_size
+        self.gradient_accumulate_every = args.gradient_accumulate_every
+        
+        # Diffuser components
+        self.model_config = diffuser.utils.Config(
+            args.model,
+            savepath=(args.savepath, 'model_config.pkl'),
+            horizon=args.horizon,
+            transition_dim=args.observation_dim + args.action_dim,
+            cond_dim=args.observation_dim,
+            dim_mults=args.dim_mults,
+            attention=args.attention,
+            device=args.device,
+        )
+
+        self.diffusion_config = diffuser.utils.Config(
+            args.diffusion,
+            savepath=(args.savepath, 'diffusion_config.pkl'),
+            horizon=args.horizon,
+            observation_dim=args.observation_dim,
+            action_dim=args.action_dim,
+            n_timesteps=args.n_diffusion_steps,
+            loss_type=args.loss_type,
+            clip_denoised=args.clip_denoised,
+            predict_epsilon=args.predict_epsilon,
+            action_weight=args.action_weight,
+            loss_weights=args.loss_weights,
+            loss_discount=args.loss_discount,
+            device=args.device,
+        )
+
+        self.model = self.model_config()
+        self.diffusion = self.diffusion_config(self.model)
+        self.ema_model = copy.deepcopy(self.model)
+        self.ema = EMA(args.ema_decay)
+        
+        # Guide components
+        self.guide_config = diffuser.utils.Config(
+            args.guide,
+            savepath=(args.savepath, 'guide_config.pkl'),
+            horizon=args.horizon,
+            transition_dim=args.observation_dim + args.action_dim,
+            cond_dim=args.observation_dim,
+            dim_mults=args.guide_dim_mults,
+            device=args.device,
+        )
+        self.guide = self.guide_config()
         
         assert (self._use_popart and self._use_valuenorm) == False, ("self._use_popart and self._use_valuenorm can not be set True simultaneously")
         
@@ -172,6 +253,38 @@ class R_MAPPO():
 
         return value_loss, critic_grad_norm, policy_loss, dist_entropy, actor_grad_norm, imp_weights
 
+    def diffuser_update(self, batch):
+        self.model.train()
+        self.model.optimizer.zero_grad()
+
+        loss, _ = self.diffusion.loss(*batch)
+        loss.backward()
+
+        if self._use_max_grad_norm:
+            nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
+
+        self.model.optimizer.step()
+
+        if self.ema:
+            self.ema.update_model_average(self.ema_model, self.model)
+
+        return loss.item()
+
+    
+    def guide_update(self, batch):
+        self.guide.train()
+        self.guide.optimizer.zero_grad()
+
+        loss = self.guide.loss(*batch)
+        loss.backward()
+
+        if self._use_max_grad_norm:
+            nn.utils.clip_grad_norm_(self.guide.parameters(), self.max_grad_norm)
+
+        self.guide.optimizer.step()
+
+        return loss.item()
+    
     def train(self, buffer, update_actor=True, update_critic=True, last_step=-1):
         """
         Perform a training update using minibatch GD.
@@ -201,6 +314,8 @@ class R_MAPPO():
         train_info['actor_grad_norm'] = 0
         train_info['critic_grad_norm'] = 0
         train_info['ratio'] = 0
+        train_info['diffuser_loss'] = 0
+        train_info['guide_loss'] = 0
 
         num_updates = 0
 
@@ -217,12 +332,22 @@ class R_MAPPO():
                 value_loss, critic_grad_norm, policy_loss, dist_entropy, actor_grad_norm, imp_weights \
                     = self.ppo_update(sample, update_actor, update_critic)
 
+                # diffuser
+                diffuser_batch = diffuser.utils.batchify(dataset[np.random.randint(len(dataset))])
+                diffuser_loss = self.diffuser_update(diffuser_batch)
+                
+                # guide 
+                guide_batch = diffuser.utils.batchify(dataset[np.random.randint(len(dataset))])
+                guide_loss = self.guide_update(guide_batch)
+                
                 train_info['value_loss'] += value_loss.item()
                 train_info['policy_loss'] += policy_loss.item()
                 train_info['dist_entropy'] += dist_entropy.item()
                 train_info['actor_grad_norm'] += actor_grad_norm
                 train_info['critic_grad_norm'] += critic_grad_norm
                 train_info['ratio'] += imp_weights.mean()
+                train_info['diffuser_loss'] += diffuser_loss
+                train_info['guide_loss'] += guide_loss
 
                 num_updates += 1
 
