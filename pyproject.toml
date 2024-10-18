@@ -17,26 +17,6 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 
-[tool.setuptools]
-packages = [
-    "flocking_zoo",
-    "flocking_zoo.env",
-    "patrolling_zoo",
-    "patrolling_zoo.env",
-    "test",
-    "onpolicy",
-    "onpolicy.algorithms",
-    "onpolicy.algorithms.r_mappo",
-    "onpolicy.algorithms.r_mappo.algorithm",
-    "onpolicy.algorithms.utils",
-    "onpolicy.envs",
-    "onpolicy.envs.flocking",
-    "onpolicy.runner",
-    "onpolicy.runner.separated",
-    "onpolicy.runner.shared",
-    "onpolicy.scripts",
-    "onpolicy.scripts.render",
-    "onpolicy.scripts.train",
-    "onpolicy.utils",
-    "diffuser"
-]
+[tool.setuptools.packages.find]
+where = ["diffuser", "flocking_zoo", "onpolicy", "patrolling_zoo", "test"]
+namespaces = false
