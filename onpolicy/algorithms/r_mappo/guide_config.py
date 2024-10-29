@@ -1,3 +1,6 @@
+import diffuser.utils as utils
+import diffuser.models as models
+
 # Model settings
 model = models.ValueFunction()
 diffusion = models.ValueDiffusion()
