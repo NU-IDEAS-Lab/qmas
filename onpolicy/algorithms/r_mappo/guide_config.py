@@ -1,6 +1,6 @@
 # Model settings
-model = models.ValueFunction
-diffusion = models.ValueDiffusion
+model = models.ValueFunction()
+diffusion = models.ValueDiffusion()
 horizon = 32
 n_diffusion_steps = 20
 dim_mults = (1, 2, 4, 8)

@@ -2,8 +2,8 @@ import diffuser.utils as utils
 import diffuser.models as models
 
 # Model settings
-model = models.TemporalUnet
-diffusion = models.GaussianDiffusion
+model = models.TemporalUnet()
+diffusion = models.GaussianDiffusion()
 horizon = 32
 n_diffusion_steps = 20
 action_weight = 10

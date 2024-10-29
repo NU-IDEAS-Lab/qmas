@@ -51,7 +51,7 @@ class R_MAPPO():
         # need to define more model params
         # diffuser param
         self.diffuser_model = diffuser_config.model
-        self.diffuser_diffusion = diffuser_config.diffusion
+        self.diffuser_diffusion = diffuser_config.diffusion(self.diffuser_model)
         self.diffuser_n_train_steps = diffuser_config.n_train_steps
         self.diffuser_learning_rate = diffuser_config.learning_rate
         self.diffuser_gradient_accumulate_every = diffuser_config.gradient_accumulate_every
@@ -60,7 +60,7 @@ class R_MAPPO():
         
         # guide param
         self.guide_model = guide_config.model
-        self.guide_diffusion = guide_config.diffusion
+        self.guide_diffusion = guide_config.diffusion(self.guide_model)
         self.guide_n_train_steps = guide_config.n_train_steps
         self.guide_learning_rate = guide_config.learning_rate
         self.guide_gradient_accumulate_every = guide_config.gradient_accumulate_every
@@ -196,8 +196,10 @@ class R_MAPPO():
         return value_loss, critic_grad_norm, policy_loss, dist_entropy, actor_grad_norm, imp_weights
 
     def diffusion_update(self, sample, model, gradient_accumulate_every, optimizer, n_train_step):
+        # currently no EMA (do we need EMA?)
         for step in range(n_train_steps):
             for i in range(gradient_accumulate_every):
+                # PASS DATA 
                 batch = next(sample) ## DEFINE BATCH
                 batch = batch_to_device(batch)
 
