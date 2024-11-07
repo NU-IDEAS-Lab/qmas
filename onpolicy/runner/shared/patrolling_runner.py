@@ -122,7 +122,7 @@ class PatrollingRunner(Runner):
         rnn_states = np.array(np.split(_t2n(rnn_states), self.n_rollout_threads))
         rnn_states_critic = np.array(np.split(_t2n(rnn_states_critic), self.n_rollout_threads))
 
-        actions_env = [actions[idx, :, 0] for idx in range(self.n_rollout_threads)]
+        actions_env = [actions[idx, :, :] for idx in range(self.n_rollout_threads)]
 
         return values, actions, action_log_probs, rnn_states, rnn_states_critic, actions_env
 

@@ -19,9 +19,16 @@ class ACTLayer(nn.Module):
         if action_space.__class__.__name__ == "Discrete":
             action_dim = action_space.n
             self.action_out = Categorical(inputs_dim, action_dim, use_orthogonal, gain)
-        elif action_space.__class__.__name__ == "MultiDiscrete"  or (action_space.__class__.__name__ == "Box" and action_space.dtype == np.int64):
+        elif action_space.__class__.__name__ == "Box" and action_space.dtype == np.int64:
             self.multi_discrete = True
             action_dims = action_space.high - action_space.low + 1
+            self.action_outs = []
+            for action_dim in action_dims:
+                self.action_outs.append(Categorical(inputs_dim, action_dim, use_orthogonal, gain))
+            self.action_outs = nn.ModuleList(self.action_outs)
+        elif action_space.__class__.__name__ == "MultiDiscrete":
+            self.multi_discrete = True
+            action_dims = action_space.nvec
             self.action_outs = []
             for action_dim in action_dims:
                 self.action_outs.append(Categorical(inputs_dim, action_dim, use_orthogonal, gain))
