@@ -1,5 +1,6 @@
 import diffuser.models.base_temporal_models as base_models
-import diffuser.diffuser_models as diffuser_models
+import diffuser.models.diffusion_models as diffusion_models
+
 from diffuser.datasets.normalization import GaussianNormalizer
 from diffuser.datasets.sequence import SequenceDataset
 
@@ -12,9 +13,12 @@ args_to_watch = [
     ## value kwargs
     ('discount', 'd'),
 ]
-# model
+
+logbase = 'logs'
+
+## models
 base_model = base_models.TemporalUnet
-diffusion = diffuser_models.GaussianDiffusion
+diffusion_model = diffusion_models.GaussianDiffusion
 horizon = 32
 n_diffusion_steps = 20
 action_weight = 10
@@ -34,7 +38,7 @@ max_path_length = 1000
 
 ## serialization
 logbase = logbase
-prefix = diffusion/defaults
+prefix = 'diffusion/defaults'
 exp_name = watch(args_to_watch)
 
 ## training

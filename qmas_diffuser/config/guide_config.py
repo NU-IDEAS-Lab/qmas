@@ -1,6 +1,8 @@
 import diffuser.models.base_temporal_models as base_models
-import diffuser.diffuser_models as diffuser_models
+import diffuser.models.diffusion_models as diffusion_models
+
 from diffuser.utils.setup import watch
+
 from diffuser.datasets.normalization import GaussianNormalizer
 from diffuser.datasets.sequence import SequenceDataset
 
@@ -12,8 +14,11 @@ args_to_watch = [
     ('discount', 'd'),
 ]
 
-model = base_models.ValueFunction,
-diffusion = diffuser_models.ValueDiffusion
+logbase = 'logs'
+
+## models
+base_model = base_models.ValueFunction
+diffusion_model = diffusion_models.ValueDiffusion
 horizon = 32
 n_diffusion_steps = 20
 dim_mults = (1, 2, 4, 8)
@@ -32,7 +37,7 @@ max_path_length = 1000
 
 ## serialization
 logbase = logbase
-prefix = values/defaults
+prefix = 'values/defaults'
 exp_name = watch(args_to_watch)
 
 ## training
