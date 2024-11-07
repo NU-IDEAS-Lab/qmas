@@ -153,6 +153,10 @@ class parallel_env(ParallelEnv):
         elif action_method == "neighbors":
             maxDegree = self.action_neighbors_max_degree # just use a fixed size and mask it
             return spaces.Discrete(maxDegree)
+        
+        elif action_method == "neighbors_with_comm_boolean":
+            maxDegree = self.action_neighbors_max_degree
+            return spaces.MultiDiscrete([maxDegree, 2])
 
 
     def _buildStateSpace(self, observe_method):
@@ -875,7 +879,7 @@ class parallel_env(ParallelEnv):
             if agent in action_dict:
                 action = action_dict[agent]
 
-                if not np.issubdtype(type(action), np.integer):
+                if not self.action_space(agent).contains(action):
                     raise ValueError(f"Invalid action {action} of type {type(action)} provided.")
 
                 # Get the destination node.
@@ -1006,6 +1010,17 @@ class parallel_env(ParallelEnv):
                     raise ValueError(f"Invalid action {action} for agent {agent.name}. Must complete action {agent.currentAction} first.")
                 dstNode = list(self.pg.graph.neighbors(agent.lastNode))[action]
         
+        elif self.action_method == "neighbors_with_comm_boolean":
+            move, communicate = action
+            if agent.edge == None:
+                if move >= self.pg.graph.degree(agent.lastNode):
+                    raise ValueError(f"Invalid action {move} for agent {agent.name}. Node {agent.lastNode} has only {self.pg.graph.degree(agent.lastNode)} neighbors.")
+                dstNode = list(self.pg.graph.neighbors(agent.lastNode))[move]
+            else:
+                if move != agent.currentAction:
+                    raise ValueError(f"Invalid action {move} for agent {agent.name}. Must complete action {agent.currentAction} first.")
+                dstNode = list(self.pg.graph.neighbors(agent.lastNode))[move]
+
         else:
             raise ValueError(f"Invalid action method {self.action_method}")
         
@@ -1119,5 +1134,18 @@ class parallel_env(ParallelEnv):
                 actionMap = np.zeros(self.action_space(agent).n, dtype=np.float32)
                 actionMap[agent.currentAction] = 1.0
                 return actionMap
+            
+        elif self.action_method == "neighbors_with_comm_boolean":
+            result = np.zeros(self.action_space(agent).nvec, dtype=np.int32)
+            if agent.edge == None:
+                # All neighbors of the current node are available.
+                numNeighbors = self.pg.graph.degree(agent.lastNode)
+                result[0, :numNeighbors] = 1
+            else:
+                # Only the current action available (as it is still incomplete).
+                result[0, agent.currentAction] = 1
+            
+            result[1, :] = 1
+            return result
         else:
             raise ValueError(f"Invalid action method {self.action_method}")
