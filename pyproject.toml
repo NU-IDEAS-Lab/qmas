@@ -3,15 +3,13 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "flocking_zoo"
+name = "qmas_task_allocation"
 version = "0.0.1"
 authors = [
   { name="Anthony Goeckner" },
-  { name="Nicolas Martinet" },
-  { name="Xinliang Li" },
-  { name="Yueyuan Sui" },
+  { name="Aria Ruan" },
 ]
-description = "Flocking environment for PettingZoo."
+description = "QMAS task allocation project."
 readme = "README.md"
 requires-python = ">=3.10"
 classifiers = [
@@ -19,25 +17,6 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 
-[tool.setuptools]
-packages = [
-    "flocking_zoo",
-    "flocking_zoo.env",
-    "patrolling_zoo",
-    "patrolling_zoo.env",
-    "test",
-    "onpolicy",
-    "onpolicy.algorithms",
-    "onpolicy.algorithms.r_mappo",
-    "onpolicy.algorithms.r_mappo.algorithm",
-    "onpolicy.algorithms.utils",
-    "onpolicy.envs",
-    "onpolicy.envs.flocking",
-    "onpolicy.runner",
-    "onpolicy.runner.separated",
-    "onpolicy.runner.shared",
-    "onpolicy.scripts",
-    "onpolicy.scripts.render",
-    "onpolicy.scripts.train",
-    "onpolicy.utils",
-]
+[tool.setuptools.packages.find]
+where = [".", "diffuser", "flocking_zoo", "onpolicy", "patrolling_zoo", "comms_policy", "test"]
+namespaces = false
