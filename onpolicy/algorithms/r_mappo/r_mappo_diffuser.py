@@ -4,9 +4,13 @@ import torch.nn as nn
 from onpolicy.utils.util import get_gard_norm, huber_loss, mse_loss
 from onpolicy.utils.valuenorm import ValueNorm
 from onpolicy.algorithms.utils.util import check
-import diffuser_config
-import guide_config
 
+# import config
+from onpolicy.diffuser.config import diffuser_config
+from onpolicy.diffuser.config import guide_config
+
+# import trainer
+from onpolicy.diffuser.utils.training import Trainer
     
 class R_MAPPO():
     """
@@ -48,24 +52,102 @@ class R_MAPPO():
         self._use_policy_active_masks = args.use_policy_active_masks
         
         # Diffusion
-        # need to define more model params
-        # diffuser param
-        self.diffuser_model = diffuser_config.model
-        self.diffuser_diffusion = diffuser_config.diffusion(self.diffuser_model)
-        self.diffuser_n_train_steps = diffuser_config.n_train_steps
-        self.diffuser_learning_rate = diffuser_config.learning_rate
-        self.diffuser_gradient_accumulate_every = diffuser_config.gradient_accumulate_every
-        self.diffuser_optimizer = torch.optim.Adam(self.diffuser_diffusion.parameters(), lr=self.diffuser_learning_rate)
-        # diffuser_model or diffuser_diffusion
+        ## diffuser
+        self.diffuser_dataloader = diffuser_config.loader(
+                                        env=diffuser_config.dataset,
+                                        horizon=diffuser_config.horizon,
+                                        normalizer=diffuser_config.normalizer,
+                                        preprocess_fns=diffuser_config.preprocess_fns,
+                                        use_padding=diffuser_config.use_padding,
+                                        max_path_length=diffuser_config.max_path_length,
+                                    )
+        self.diffuser_observation_dim = self.diffuser_dataloader.observation_dim
+        self.diffuser_action_dim = self.diffuser_dataloader.action_dim
+        self.diffuser_model = diffuser_config.base_model(
+                                        horizon=diffuser_config.horizon,
+                                        transition_dim=self.diffuser_observation_dim + self.diffuser_action_dim,
+                                        cond_dim=self.diffuser_observation_dim,
+                                        dim_mults=diffuser_config.dim_mults,
+                                        attention=diffuser_config.attention
+                                    )
+        self.diffuser_diffusion_model = diffuser_config.diffusion_model(
+                                        horizon=diffuser_config.horizon,
+                                        observation_dim=self.diffuser_observation_dim,
+                                        action_dim=self.diffuser_action_dim,
+                                        transition_dim=self.diffuser_observation_dim + self.diffuser_action_dim,
+                                        model = self.diffuser_model,
+                                        n_timesteps=diffuser_config.n_diffusion_steps,
+                                        loss_type=diffuser_config.loss_type,
+                                        clip_denoised=diffuser_config.clip_denoised,
+                                        predict_epsilon=diffuser_config.predict_epsilon,
+                                        action_weight=diffuser_config.action_weight,
+                                        loss_weights=diffuser_config.loss_weights,
+                                        loss_discount=diffuser_config.loss_discount
+                                    )
+        self.diffuser_trainer = Trainer(
+                                        diffusion_model = self.diffuser_diffusion_model,
+                                        dataset = self.diffuser_dataloader
+                                        train_batch_size=diffuser_config.batch_size,
+                                        train_lr=diffuser_config.learning_rate,
+                                        gradient_accumulate_every=diffuser_config.gradient_accumulate_every,
+                                        ema_decay=diffuser_config.ema_decay,
+                                        sample_freq=diffuser_config.sample_freq,
+                                        save_freq=diffuser_config.save_freq,
+                                        log_freq=diffuser_config.lof_freq,
+                                        label_freq=int(diffuser_config.n_train_steps // diffuser_config.n_saves),
+                                        save_parallel=diffuser_config.save_parallel,
+                                        bucket=diffuser_config.bucket,
+                                        n_reference=diffuser_config.n_reference,
+                                    )
+                                            
         
-        # guide param
-        self.guide_model = guide_config.model
-        self.guide_diffusion = guide_config.diffusion(self.guide_model)
-        self.guide_n_train_steps = guide_config.n_train_steps
-        self.guide_learning_rate = guide_config.learning_rate
-        self.guide_gradient_accumulate_every = guide_config.gradient_accumulate_every
-        self.guide_optimizer = torch.optim.Adam(self.guide_diffusion.parameters(), lr=self.guide_learning_rate)
-        
+        ## guide
+        self.guide_dataloader = guide_config.loader(
+                                        env=guide_config.dataset,
+                                        horizon=guide_config.horizon,
+                                        normalizer=guide_config.normalizer,
+                                        preprocess_fns=guide_config.preprocess_fns,
+                                        use_padding=guide_config.use_padding,
+                                        max_path_length=guide_config.max_path_length,
+                                    )
+        self.guide_observation_dim = self.guide_dataloader.observation_dim
+        self.guide_action_dim = self.guide_dataloader.action_dim
+        self.guide_model = guide_config.base_model(
+                                        horizon=guide_config.horizon,
+                                        transition_dim=self.guide_observation_dim + self.guide_action_dim,
+                                        cond_dim=self.guide_observation_dim,
+                                        dim_mults=guide_config.dim_mults,
+                                        attention=guide_config.attention
+                                    )
+        self.guide_diffusion_model = guide_config.diffusion_model(
+                                        horizon=guide_config.horizon,
+                                        observation_dim=self.guide_observation_dim,
+                                        action_dim=self.guide_action_dim,
+                                        transition_dim=self.guide_observation_dim + self.guide_action_dim,
+                                        model = self.guide_model,
+                                        n_timesteps=guide_config.n_diffusion_steps,
+                                        loss_type=guide_config.loss_type,
+                                        clip_denoised=guide_config.clip_denoised,
+                                        predict_epsilon=guide_config.predict_epsilon,
+                                        action_weight=guide_config.action_weight,
+                                        loss_weights=guide_config.loss_weights,
+                                        loss_discount=guide_config.loss_discount
+                                    )
+        self.guide_trainer = Trainer(
+                                        diffusion_model = self.guide_diffusion_model,
+                                        dataset = self.guide_dataloader
+                                        train_batch_size=guide_config.batch_size,
+                                        train_lr=guide_config.learning_rate,
+                                        gradient_accumulate_every=guide_config.gradient_accumulate_every,
+                                        ema_decay=guide_config.ema_decay,
+                                        sample_freq=guide_config.sample_freq,
+                                        save_freq=guide_config.save_freq,
+                                        log_freq=guide_config.lof_freq,
+                                        label_freq=int(guide_config.n_train_steps // guide_config.n_saves),
+                                        save_parallel=guide_config.save_parallel,
+                                        bucket=guide_config.bucket,
+                                        n_reference=guide_config.n_reference,
+                                    )
         assert (self._use_popart and self._use_valuenorm) == False, ("self._use_popart and self._use_valuenorm can not be set True simultaneously")
         
         if self._use_popart:
@@ -195,24 +277,6 @@ class R_MAPPO():
 
         return value_loss, critic_grad_norm, policy_loss, dist_entropy, actor_grad_norm, imp_weights
 
-    def diffusion_update(self, sample, model, gradient_accumulate_every, optimizer, n_train_step):
-        # currently no EMA (do we need EMA?)
-        for step in range(n_train_steps):
-            for i in range(gradient_accumulate_every):
-                # PASS DATA 
-                batch = next(sample) ## DEFINE BATCH
-                batch = batch_to_device(batch)
-
-                loss, infos = model.loss(*batch)
-                loss, infos = model.loss(*batch)
-                loss = loss / gradient_accumulate_every
-                loss.backward()
-
-            optimizer.step()
-            optimizer.zero_grad()
-
-        return loss
-
 
     def train(self, buffer, update_actor=True):
         """
@@ -257,9 +321,9 @@ class R_MAPPO():
                 value_loss, critic_grad_norm, policy_loss, dist_entropy, actor_grad_norm, imp_weights \
                     = self.ppo_update(sample, update_actor)
 
-                diffuser_loss = self.diffusion_update(sample, self.diffuser_diffusion, self.diffuser_gradient_accumulate_every, self.diffuser_optimizer, self.diffuser_n_train_steps)
-                
-                guide_loss = self.diffusion_update(sample, self.guide_diffusion, self.guide_gradient_accumulate_every, self.guide_optimizer, self.guide_n_train_steps)
+            # for _ in range(n_epochs): 
+                diffuser_loss = self.diffuser_trainer.train()
+                guide_loss = self.guide_trainer.train()
                 
                 train_info['value_loss'] += value_loss.item()
                 train_info['policy_loss'] += policy_loss.item()
