@@ -4,7 +4,7 @@ from torch_geometric.nn import MessagePassing
 from torch_geometric.nn import GraphSAGE
 from torch_geometric.nn import GraphSAGE
 
-from onpolicy.algorithms.utils.gnn_conv import SAGEConvWithEdges
+from onpolicy.models.utils.gnn_conv import SAGEConvWithEdges
 
 from typing import Tuple, Union, Final
 

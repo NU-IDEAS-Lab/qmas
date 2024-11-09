@@ -68,7 +68,7 @@ class Runner(object):
             from onpolicy.algorithms.mat.algorithm.transformer_policy import TransformerPolicy as Policy
         else:
             from onpolicy.algorithms.r_mappo.r_mappo import R_MAPPO as TrainAlgo
-            from onpolicy.algorithms.r_mappo.algorithm.rMAPPOPolicy import R_MAPPOPolicy as Policy
+            from onpolicy.models.rMAPPOPolicy import R_MAPPOPolicy as Policy
 
         share_observation_space = self.envs.share_observation_space[0] if self.use_centralized_V else self.envs.observation_space[0]
 
