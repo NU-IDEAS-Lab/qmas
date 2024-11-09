@@ -879,14 +879,18 @@ class parallel_env(ParallelEnv):
             if agent in action_dict:
                 action = action_dict[agent]
 
+                # Check if the action is valid.
                 if not self.action_space(agent).contains(action):
                     raise ValueError(f"Invalid action {action} of type {type(action)} provided.")
 
+                # Store this as the agent's last action.
+                if self.action_method in ["neighbors", "full"]:
+                    agent.currentAction = action
+                else:
+                    agent.currentAction = action[0]
+
                 # Get the destination node.
                 dstNode = self.getDestinationNode(agent, action)
-
-                # Store this as the agent's last action.
-                agent.currentAction = action
                 
                 # Calculate the shortest path.
                 path = self._getPathToNode(agent, dstNode)
@@ -1136,16 +1140,18 @@ class parallel_env(ParallelEnv):
                 return actionMap
             
         elif self.action_method == "neighbors_with_comm_boolean":
-            result = np.zeros(self.action_space(agent).nvec, dtype=np.int32)
+            nvec = self.action_space(agent).nvec
+            result = np.zeros((len(nvec), max(nvec)), dtype=np.bool)
+
             if agent.edge == None:
                 # All neighbors of the current node are available.
                 numNeighbors = self.pg.graph.degree(agent.lastNode)
-                result[0, :numNeighbors] = 1
+                result[0, :numNeighbors] = True
             else:
                 # Only the current action available (as it is still incomplete).
-                result[0, agent.currentAction] = 1
+                result[0, agent.currentAction] = True
             
-            result[1, :] = 1
+            result[1, :] = True
             return result
         else:
             raise ValueError(f"Invalid action method {self.action_method}")

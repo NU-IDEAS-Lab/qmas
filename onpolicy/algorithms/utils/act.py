@@ -29,6 +29,7 @@ class ACTLayer(nn.Module):
         elif action_space.__class__.__name__ == "MultiDiscrete":
             self.multi_discrete = True
             action_dims = action_space.nvec
+            self.action_dims = action_dims
             self.action_outs = []
             for action_dim in action_dims:
                 self.action_outs.append(Categorical(inputs_dim, action_dim, use_orthogonal, gain))
@@ -73,12 +74,14 @@ class ACTLayer(nn.Module):
         elif self.multi_discrete:
             actions = []
             action_log_probs = []
+            i = 0
             for action_out in self.action_outs:
-                action_logit = action_out(x)
+                action_logit = action_out(x, available_actions[:, i, :self.action_dims[i]])
                 action = action_logit.mode() if deterministic else action_logit.sample()
                 action_log_prob = action_logit.log_probs(action)
                 actions.append(action)
                 action_log_probs.append(action_log_prob)
+                i += 1
 
             actions = torch.cat(actions, -1)
             action_log_probs = torch.cat(action_log_probs, -1)

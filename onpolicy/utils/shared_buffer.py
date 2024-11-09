@@ -2,6 +2,7 @@ import torch
 import numpy as np
 import torch.nn.functional as F
 from onpolicy.utils.util import get_shape_from_obs_space, get_shape_from_act_space, has_graph_obs_space
+from collections.abc import Iterable
 
 
 def _flatten(T, N, x):
@@ -74,15 +75,22 @@ class SharedReplayBuffer(object):
             self.available_actions = np.ones((self.episode_length + 1, self.n_rollout_threads, num_agents, act_space.n),
                                              dtype=np.float32)
         elif act_space.__class__.__name__ == 'MultiDiscrete':
-            self.available_actions = np.ones((self.episode_length + 1, self.n_rollout_threads, num_agents, *act_space.nvec),
+            action_space_shape = (len(act_space.nvec), np.max(act_space.nvec))
+            self.available_actions = np.ones((self.episode_length + 1, self.n_rollout_threads, num_agents, *action_space_shape),
                                              dtype=np.float32)
         else:
             self.available_actions = None
 
-        self.actions = np.zeros(
-            (self.episode_length, self.n_rollout_threads, num_agents, *act_shape), dtype=np.float32)
-        self.action_log_probs = np.zeros(
-            (self.episode_length, self.n_rollout_threads, num_agents, *act_shape), dtype=np.float32)
+        if isinstance(act_shape, Iterable):
+            self.actions = np.zeros(
+                (self.episode_length, self.n_rollout_threads, num_agents, *act_shape), dtype=np.float32)
+            self.action_log_probs = np.zeros(
+                (self.episode_length, self.n_rollout_threads, num_agents, *act_shape), dtype=np.float32)
+        else:
+            self.actions = np.zeros(
+                (self.episode_length, self.n_rollout_threads, num_agents, act_shape), dtype=np.float32)
+            self.action_log_probs = np.zeros(
+                (self.episode_length, self.n_rollout_threads, num_agents, act_shape), dtype=np.float32)
         self.rewards = np.zeros(
             (self.episode_length, self.n_rollout_threads, num_agents, 1), dtype=np.float32)
 
