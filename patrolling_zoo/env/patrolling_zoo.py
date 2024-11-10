@@ -1,6 +1,8 @@
-from pettingzoo.utils.env import ParallelEnv
+from pettingzoo import ParallelEnv
+from pettingzoo.utils import parallel_to_aec
+
 from patrolling_zoo.env.communication_model import CommunicationModel
-from patrolling_zoo.env.patrol_graph import NODE_TYPE
+from patrolling_zoo.env.patrol_graph import PatrolGraph, NODE_TYPE
 from gymnasium import spaces
 import random
 import numpy as np
@@ -14,9 +16,103 @@ from torch_geometric.utils.convert import from_networkx
 from torch_geometric.data import Data
 
 
-def env():
+def add_args(parser):
+    ''' Adds environment arguments. '''
+
+    # Define all arguments.
+    parser.add_argument("--alpha", type=float, default=1.0,
+                        help="Weight of local reward.")
+    parser.add_argument("--beta", type=float, default=1000.0,
+                        help="Weight of global reward.")
+    # parser.add_argument("--skip_steps_async", type=bool, default=False,
+    #                     help="Whether to skip steps with no action required (by any agent).")
+    # parser.add_argument("--skip_steps_sync", type=bool, default=False,
+    #                     help="Whether to skip steps with no action required (by any agent).")
+    parser.add_argument("--graph_file", type=str,
+                        default="", 
+                        help="The path to the graph file.")
+    parser.add_argument("--graph_name", type=str,
+                        default="4nodes", 
+                        help="which graph to run on.")
+    parser.add_argument("--graph_random", type=bool, default=False,
+                        help="Whether to use a random graph.")
+    parser.add_argument("--graph_random_nodes", type=int,
+                        default=40,
+                        help="The number of random nodes to generate.")
+    parser.add_argument("--max_cycles", type=int, default=1000,
+                        help="max number of cycles for the environment.")
+    parser.add_argument("--reward_method_terminal", type=str,
+                        default="average", 
+                        help="the method to use for terminal reward.")
+    parser.add_argument("--reward_interval", type=int, default=-1,
+                        help="number of steps between the periodic reward. -1 disables periodic reward")
+    parser.add_argument("--num_agents", type=int, default=3,
+                        help="number of controlled players.")
+    parser.add_argument("--agent_speed", type=float, default=10.0,
+                        help="the speed of each agent")
+    parser.add_argument("--action_method", type=str, default="full", 
+                        help="the action method to use")
+    parser.add_argument("--observe_method", type=str, default="ajg_new", 
+                        help="the observation method to use")
+    parser.add_argument("--observe_method_global", type=str, default="", 
+                        help="the observation method to use for global observation")
+    parser.add_argument("--observe_bitmap_size", type=int, default=50, 
+                        help="the size (squared) to which the bitmap should be scaled for observation")
+    parser.add_argument("--observation_radius", type=float, default=np.inf, 
+                        help="the observable radius for each agent")
+    parser.add_argument("--attrition_method", type=str, default="none", 
+                        help="the method to use for agent attrition")
+    parser.add_argument("--attrition_fixed_times", type=list, default=[], 
+                        help="the fixed attrition times")
+    parser.add_argument("--attrition_random_probability", type=float, default=0.0,
+                        help="the random attrition probability")
+    parser.add_argument("--attrition_min_agents", type=int, default=2,
+                        help="the minimum number of agents that must be present for attrition to occur")
+    parser.add_argument("--communication_model", type=str, default="none", 
+                        help="the model name to use for communication. The \"none\" model indicates no comms allowed")
+    parser.add_argument("--communication_probability", type=float, default=0.1, 
+                        help="the probability of successful communication")
+    parser.add_argument("--sep_share_policy", type=bool, default=True, 
+                        help="Whether to share the policy amongst agents (even though using the separated runner)")
+    parser.add_argument("--regenerate_graph_on_reset", type=bool, default=False,
+                        help="Whether to regenerate the graph on reset.")
+    parser.add_argument("--max_nodes", type=int, default=50,
+                        help="The maximum number of nodes in a single graph observation.")
+    parser.add_argument("--max_neighbors", type=int, default=10,
+                        help="The maximum number of neighbors per node in graph observations.")
+    parser.add_argument("--require_explicit_visit", type=bool, default=False,
+                        help="Whether to require explicit visitation of nodes.")
+    parser.add_argument("--action_full_max_nodes", type=int, default=0,
+                        help="The maximum number of nodes in the full action space.")
+    parser.add_argument("--action_neighbors_max_degree", type=int, default=10,
+                        help="The maximum degree of neighbors in the neighbors action space.")
+    
+
+def parse_args(args, parser):
+    ''' Parses environment arguments. '''
+
+    # Parse arguments from the command line.
+    parsed_args = parser.parse_known_args(args)[0]
+
+    return parsed_args
+
+
+def validate_args(parsed_args):
+    ''' Validates the arguments. '''
+    
+    if parsed_args.graph_random:
+        parsed_args.graph_name = f"random{parsed_args.graph_random_nodes}"
+
+
+def env(*args, **kwargs):
     ''' Returns the environment class. '''
-    return parallel_env()
+    return parallel_env(*args, **kwargs)
+
+def raw_env(*args, **kwargs):
+    ''' Returns the raw environment class. '''
+    env = parallel_env(*args, **kwargs)
+    env = parallel_to_aec(env)
+    return env
 
 
 class PatrolAgent():
@@ -47,6 +143,7 @@ class PatrolAgent():
 class parallel_env(ParallelEnv):
     metadata = {
         "name": "patrolling_zoo_environment_v0",
+        "render_modes": ["human", "rgb_array"],
     }
 
     class OBSERVATION_CHANNELS(IntEnum):
@@ -54,80 +151,63 @@ class parallel_env(ParallelEnv):
         IDLENESS = 1
         GRAPH = 2
 
-    def __init__(self, patrol_graph, num_agents,
-                 comms_model = CommunicationModel(model = "none"),
-                 require_explicit_visit = True,
-                 speed = 1.0,
-                 alpha = 10.0,
-                 beta = 100.0,
-                 action_method = "full",
-                 action_full_max_nodes = 40,
-                 action_neighbors_max_degree = 15,
-                 reward_method_terminal = "average",
-                 observation_radius = np.inf,
-                 observe_method = "ajg_new",
-                 observe_method_global = None,
-                 observe_bitmap_dims = (50, 50),
-                 attrition_method = "none",
-                 attrition_random_probability = 0.0,
-                 attrition_min_agents = 2,
-                 attrition_times = [],
-                 max_cycles: int = -1,
-                 max_nodes: int = 50,
-                 max_neighbors: int = 15,
-                 reward_interval: int = -1,
-                 regenerate_graph_on_reset: bool = False,
-                 *args,
-                 **kwargs):
+    def __init__(self, args=None):
         """
         Initialize the PatrolEnv object.
 
         Args:
-            patrol_graph (PatrolGraph): The patrol graph representing the environment.
-            num_agents (int): The number of agents in the environment.
+            args (argparse.ArgumentParser): All input arguments.
 
         Returns:
             None
         """
-        super().__init__(*args, **kwargs)
+        super().__init__()
 
-        self.pg = patrol_graph
+        # Use default arguments.
+        if args == None:
+            args = parse_args([])
 
         # Configuration.
-        self.requireExplicitVisit = require_explicit_visit
-        self.observationRadius = observation_radius
-        self.max_cycles = max_cycles
-        self.comms_model = comms_model
-        self.action_method = action_method
-        self.action_full_max_nodes = action_full_max_nodes
-        self.action_neighbors_max_degree = action_neighbors_max_degree
-        self.reward_method_terminal = reward_method_terminal
-        self.observe_method = observe_method
-        self.observe_method_global = observe_method_global if observe_method_global != None else observe_method
-        self.observe_bitmap_dims = observe_bitmap_dims
-        self.attrition_method = attrition_method
-        self.attrition_random_probability = attrition_random_probability
-        self.attrition_times = attrition_times
-        self.attrition_min_agents = attrition_min_agents
-        self.regenerate_graph_on_reset = regenerate_graph_on_reset
-        self.max_nodes = max_nodes
-        self.max_neighbors = max_neighbors
+        self.requireExplicitVisit = args.require_explicit_visit
+        self.observationRadius = args.observation_radius
+        self.max_cycles = args.max_cycles
+        self.comms_model = CommunicationModel(model=args.communication_model, p=args.communication_probability)
+        self.action_method = args.action_method
+        self.action_full_max_nodes = args.action_full_max_nodes
+        self.action_neighbors_max_degree = args.action_neighbors_max_degree
+        self.reward_method_terminal = args.reward_method_terminal
+        self.observe_method = args.observe_method
+        self.observe_method_global = args.observe_method_global if args.observe_method_global != "" else args.observe_method
+        self.observe_bitmap_dims = (args.observe_bitmap_size, args.observe_bitmap_size)
+        self.attrition_method = args.attrition_method
+        self.attrition_random_probability = args.attrition_random_probability
+        self.attrition_times = args.attrition_fixed_times
+        self.attrition_min_agents = args.attrition_min_agents
+        self.regenerate_graph_on_reset = args.regenerate_graph_on_reset
+        self.max_nodes = args.max_nodes
+        self.max_neighbors = args.max_neighbors
 
-        self.reward_interval = reward_interval
+        self.reward_interval = args.reward_interval
 
-        self.alpha = alpha
-        self.beta = beta
+        self.alpha = args.alpha
+        self.beta = args.beta
+
+        # Create patrol graph.
+        if args.graph_random:
+            self.pg = PatrolGraph(numNodes=args.graph_random_nodes)
+        else:
+            self.pg = PatrolGraph(args.graph_file)
 
         # Create the agents with random starting positions.
-        self.agentOrigins = random.sample(list(self.pg.graph.nodes), num_agents)
+        self.agentOrigins = random.sample(list(self.pg.graph.nodes), args.num_agents)
         startingPositions = [self.pg.getNodePosition(i) for i in self.agentOrigins]
         self.possible_agents = [
             PatrolAgent(i, startingPositions[i],
-                        speed = speed,
+                        speed = args.agent_speed,
                         startingNode = self.agentOrigins[i],
                         observationRadius = self.observationRadius,
                         max_nodes = self.max_nodes
-            ) for i in range(num_agents)
+            ) for i in range(args.num_agents)
         ]
 
         # Create the action space.

@@ -1,5 +1,8 @@
 from patrolling_zoo.env.patrolling_zoo import (
     env,
+    add_args,
+    parse_args,
+    validate_args,
     parallel_env
 )
 from patrolling_zoo.env.patrol_graph import (

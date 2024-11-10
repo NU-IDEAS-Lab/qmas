@@ -18,22 +18,45 @@ from onpolicy.envs.pettingzoo.Pettingzoo_Env import PettingzooEnv
 from onpolicy.envs.env_wrappers import ShareSubprocVecEnv, ShareDummyVecEnv, SubprocVecEnv, DummyVecEnv
 
 
-def get_environment_class(all_args):
-    ''' Dynamically imports correct environment class. '''
+def get_environment_module(all_args):
+    ''' Dynamically imports correct environment module. '''
 
     try:
         env_module = importlib.import_module(all_args.env_name)
-        if hasattr(env_module, "env"):
-            env_class = env_module.env
-        elif hasattr(env_module, "parallel_env"):
-            env_class = env_module.parallel_env
-        elif hasattr(env_module, "raw_env"):
-            env_class = env_module.raw_env
-        else:
-            raise ValueError("Environment module must have 'env', 'parallel_env', or 'raw_env' attribute")
-        return env_class
+        return env_module
     except ImportError as e:
         raise ValueError("Can not find the " + all_args.env_name + " environment. Check the environment name and try again.")
+
+
+def get_environment_class(all_args):
+    ''' Dynamically imports correct environment class. '''
+
+    env_module = get_environment_module(all_args)
+    if hasattr(env_module, "env"):
+        env_class = env_module.env
+    elif hasattr(env_module, "parallel_env"):
+        env_class = env_module.parallel_env
+    elif hasattr(env_module, "raw_env"):
+        env_class = env_module.raw_env
+    else:
+        raise ValueError("Environment module must have 'env', 'parallel_env', or 'raw_env' attribute")
+    return env_class
+
+
+def add_env_args(parsed_args, parser):
+    ''' Parses environment-specific arguments. '''
+
+    env_module = get_environment_module(parsed_args)
+    if hasattr(env_module, "add_args"):
+        env_module.add_args(parser)
+
+
+def validate_env_args(parsed_args):
+    ''' Parses environment-specific arguments. '''
+
+    env_module = get_environment_module(parsed_args)
+    if hasattr(env_module, "validate_args"):
+        return env_module.validate_args(parsed_args)
 
 
 def make_train_env(all_args):
@@ -91,22 +114,31 @@ def make_eval_env(all_args):
 def parse_args(args, parser):
     ''' Parses Pettingzoo-specific arguments. '''
 
-    parser.add_argument("--eval_deterministic", action="store_false", 
+    import argparse
+    
+    parser.add_argument("--eval_deterministic", action=argparse.BooleanOptionalAction, 
                         default=True, 
                         help="by default True. If False, sample action according to probability")
-    parser.add_argument("--share_reward", action='store_false', 
+    parser.add_argument("--share_reward", action=argparse.BooleanOptionalAction, 
                         default=True, 
                         help="by default true. If false, use different reward for each agent.")
-    parser.add_argument("--save_videos", action="store_true", default=False, 
+    parser.add_argument("--save_videos", action=argparse.BooleanOptionalAction, default=False, 
                         help="by default, do not save render video. If set, save video.")
     parser.add_argument("--video_dir", type=str, default="", 
                         help="directory to save videos.")
     parser.add_argument("--cuda_idx", type=int, default=0, 
                         help="Index of the GPU to use")
+    parser.add_argument("--state_per_agent", action=argparse.BooleanOptionalAction, default=False,
+                        help="Whether the environment `state` function returns a separate copy of the state per agent.")
     
-    all_args = parser.parse_known_args(args)[0]
+    # Parse once to get the environment name.
+    parsed_args, unknown_args = parser.parse_known_args(args)
+    add_env_args(parsed_args, parser)
 
-    return all_args
+    # Parse again to get environment-specific arguments.
+    parsed_args, _ = parser.parse_known_args(unknown_args, namespace=parsed_args)
+
+    return parsed_args
 
 
 def validateArgs(all_args):
@@ -132,13 +164,13 @@ def validateArgs(all_args):
     #     if not hasattr(env_class, "state") or not callable(env_class.state):
     #         raise ValueError(f"Environment class {env_class} does not have state function, but use_obs_instead_of_state is set false.")
 
+    # Validate environment arguments.
+    validate_env_args(all_args)
 
-def main(args, parsed_args=None):
-    if parsed_args is None:
-        parser = get_config()
-        all_args = parse_args(args, parser)
-    else:
-        all_args = parsed_args
+
+def main(args):
+    parser = get_config()
+    all_args = parse_args(args, parser)
     validateArgs(all_args)
 
     # cuda
