@@ -26,8 +26,8 @@ args = [
 	"--graph_name", "milwaukee",
 	"--graph_file", "../patrolling_zoo/env/milwaukee.graph",
 	"--num_env_steps", "100000",
-	"--episode_length", "50",
-	"--max_cycles", "50",
+	"--episode_length", "200",
+	"--max_cycles", "200",
 
 	"--algorithm_name", "mappo",
 	"--use_gnn_policy",
@@ -47,7 +47,7 @@ args = [
 	"--use_ReLU",
 	"--hidden_size", "512",
 
-	"--n_rollout_threads", "10",
+	"--n_rollout_threads", "5",
 	"--save_interval", "1000",
 	"--cuda",
 	"--cuda_idx", "2",
