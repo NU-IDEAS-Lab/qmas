@@ -14,6 +14,11 @@ from torch_geometric.utils.convert import from_networkx
 from torch_geometric.data import Data
 
 
+def env():
+    ''' Returns the environment class. '''
+    return parallel_env()
+
+
 class PatrolAgent():
     ''' This class stores all agent state. '''
 
@@ -376,14 +381,14 @@ class parallel_env(ParallelEnv):
         return self.action_spaces[agent]
 
 
-    def state(self):
+    def state_old(self):
         ''' Returns the global state of the environment.
             This is useful for centralized training, decentralized execution. '''
         
         return self._populateStateSpace(self.observe_method_global, self.possible_agents[0], radius=np.inf, allow_done_agents=True)
 
-    def state_all(self):
-        ''' Similar to the state() method, but this returns a customized copy of the state space for each agent.
+    def state(self):
+        ''' Similar to the state_old() method, but this returns a customized copy of the state space for each agent.
             This is useful for centralized training, decentralized execution. '''
         
         state = {}
