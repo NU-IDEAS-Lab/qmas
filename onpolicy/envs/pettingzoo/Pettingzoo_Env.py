@@ -20,6 +20,7 @@ class PettingzooEnv(object):
         self.action_space = []
         self.observation_space = []
         self.share_observation_space = []
+        self.use_obs_instead_of_state = args.use_obs_instead_of_state
 
         # Set up action space.
         self.action_space = [self.env.action_spaces[a] for a in self.env.possible_agents]
@@ -45,16 +46,13 @@ class PettingzooEnv(object):
             self.share_observation_space = [flatten_space(self.env.state_space) for a in self.env.possible_agents]
         else:
             self.share_observation_space = [self.env.state_space for a in self.env.possible_agents]
-        
-        # Check whether the environment uses global observations.
-        self.share_global_state = args.share_global_state
 
 
     def reset(self):
         obs, _  = self.env.reset()
 
         ret_obs = self._obs_wrapper(obs)
-        ret_share_obs = self._share_obs_wrapper(self.env.state_all())
+        ret_share_obs = self._share_obs_wrapper(obs) if self.use_obs_instead_of_state else self._share_state_wrapper(self.env.state())
         ret_available_actions = self._available_actions_wrapper(self.env.available_actions)
 
         return ret_obs, ret_share_obs, ret_available_actions
@@ -77,7 +75,7 @@ class PettingzooEnv(object):
         done = [d or t for d, t in zip(done, trunc)]
 
         ret_obs = self._obs_wrapper(obs)
-        ret_share_obs = self._share_obs_wrapper(self.env.state_all())
+        ret_share_obs = self._share_obs_wrapper(obs) if self.use_obs_instead_of_state else self._share_state_wrapper(self.env.state())
         ret_available_actions = self._available_actions_wrapper(self.env.available_actions)
         info = self._info_wrapper(info)
 
@@ -118,6 +116,16 @@ class PettingzooEnv(object):
         
         return obs
     
+    def _share_state_wrapper(self, obs):
+
+        # Flatten the PZ observation.
+        if self.flatten_observations_global:
+            # Flatten the PZ observation.
+            obs = flatten(self.env.state_space, obs)
+        else:
+            obs = obs
+        return obs
+
     def _share_obs_wrapper(self, obs):
 
         # Flatten the PZ observation.
@@ -127,22 +135,13 @@ class PettingzooEnv(object):
                 res.append(flatten(self.env.state_space, obs[a]))
             res = np.array(res)
             res = np.reshape(res, (self.num_agents, -1))
-            return res
-
-            #This older code below is for use with the state_old() method. Above code is for the state_all() method.
-            # Flatten the PZ observation.
-            obs = flatten(self.env.state_space, obs)
         else:
             res = []
             for a in self.env.possible_agents:
                 res.append(obs[a])
             res = np.array(res)
-            return res
-        
-            #This older code below is for use with the state_old() method. Above code is for the state_all() method.
-            # obs = obs
-
         return obs
+
 
     def _info_wrapper(self, info):
         return info

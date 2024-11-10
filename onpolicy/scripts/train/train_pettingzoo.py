@@ -22,7 +22,15 @@ def get_environment_class(all_args):
     ''' Dynamically imports correct environment class. '''
 
     try:
-        env_class = importlib.import_module(all_args.env_name)
+        env_module = importlib.import_module(all_args.env_name)
+        if hasattr(env_module, "env"):
+            env_class = env_module.env
+        elif hasattr(env_module, "parallel_env"):
+            env_class = env_module.parallel_env
+        elif hasattr(env_module, "raw_env"):
+            env_class = env_module.raw_env
+        else:
+            raise ValueError("Environment module must have 'env', 'parallel_env', or 'raw_env' attribute")
         return env_class
     except ImportError as e:
         raise ValueError("Can not find the " + all_args.env_name + " environment. Check the environment name and try again.")
@@ -66,12 +74,12 @@ def make_eval_env(all_args):
             return env
         return init_env
     
-    if all_args.share_global_state:
-        single_vecenv_class = ShareDummyVecEnv
-        multi_vecenv_class = ShareSubprocVecEnv
-    else:
+    if all_args.use_obs_instead_of_state:
         single_vecenv_class = DummyVecEnv
         multi_vecenv_class = SubprocVecEnv
+    else:
+        single_vecenv_class = ShareDummyVecEnv
+        multi_vecenv_class = ShareSubprocVecEnv
 
     if all_args.n_rollout_threads == 1:
         return single_vecenv_class([get_env_fn(0)])
@@ -119,10 +127,10 @@ def validateArgs(all_args):
         raise ValueError(f"Algorithm name {all_args.algorithm_name} not recognized.")
     
     # Check whether the environment has a callable state function.
-    if not all_args.use_obs_instead_of_state:
-        env_class = get_environment_class(all_args)
-        if not hasattr(env_class, "state") or not callable(env_class.state):
-            raise ValueError(f"Environment class {env_class} does not have state function, but use_obs_instead_of_state is set false.")
+    # if not all_args.use_obs_instead_of_state:
+    #     env_class = get_environment_class(all_args)
+    #     if not hasattr(env_class, "state") or not callable(env_class.state):
+    #         raise ValueError(f"Environment class {env_class} does not have state function, but use_obs_instead_of_state is set false.")
 
 
 def main(args, parsed_args=None):
@@ -215,7 +223,8 @@ def main(args, parsed_args=None):
     if all_args.share_policy:
         from onpolicy.runner.shared.pettingzoo_runner import PettingzooRunner as Runner
     else:
-        from onpolicy.runner.separated.patrolling_runner import PatrollingRunner as Runner
+        raise NotImplementedError("Pettingzoo wrapper does not yet support separate policies.")
+        from onpolicy.runner.separated.pettingzoo_runner import PettingzooRunner as Runner
 
     try:
         runner = Runner(config)
