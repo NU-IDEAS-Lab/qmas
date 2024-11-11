@@ -50,6 +50,7 @@ class PettingzooEnv(object):
 
 
     def reset(self):
+        self.deltaSteps = {a: 0 for a in self.env.possible_agents}
         obs, _  = self.env.reset()
 
         ret_obs = self._obs_wrapper(obs)
@@ -64,34 +65,50 @@ class PettingzooEnv(object):
         return ret_obs, ret_share_obs, ret_available_actions
 
     def step(self, action):
-        # Convert actions to dictionary.
-        actionPz = {}
+
+        ready = False
+        done = []
+
+        # Set up PZ action dictionary.
+        actionPz = {a: None for a in self.env.possible_agents}
+
+        # For any agents which are ready, use the new action.
         for i in range(self.num_agents):
             actionPz[self.env.possible_agents[i]] = action[i]
-            
-        # Take a step.
-        obs, reward, done, trunc, info = self.env.step(actionPz)
+        rewards = np.zeros((self.num_agents, 1), dtype=np.float32)
 
-        # Convert the done dict to a list.
-        done = [done[a] for a in self.env.possible_agents]
-        # Convert the trunc dict to a list.
-        trunc = [trunc[a] for a in self.env.possible_agents]
+        while not ready and (not all(done) or done == []):
+            # Take a step.
+            obs, reward, done, trunc, info = self.env.step(actionPz)
 
-        # Consider the agent done if done OR truncated flags set.
-        done = [d or t for d, t in zip(done, trunc)]
+            # Convert the done dict to a list.
+            done = [done[a] for a in self.env.possible_agents]
+            # Convert the trunc dict to a list.
+            trunc = [trunc[a] for a in self.env.possible_agents]
 
-        ret_obs = self._obs_wrapper(obs)
-        if self.use_obs_instead_of_state:
-            ret_share_obs = self._share_obs_wrapper(obs)
-        elif self.state_per_agent:
-            ret_share_obs = self._share_obs_wrapper(self.env.state())
-        else:
-            ret_share_obs = self._share_state_wrapper(self.env.state())
-        ret_available_actions = self._available_actions_wrapper(self.env.available_actions)
-        info = self._info_wrapper(info)
+            # Consider the agent done if done OR truncated flags set.
+            done = [d or t for d, t in zip(done, trunc)]
 
-        # Convert reward.
-        rewards = np.array([reward[a] for a in self.env.possible_agents]).reshape(-1, 1)
+            ret_obs = self._obs_wrapper(obs)
+            if self.use_obs_instead_of_state:
+                ret_share_obs = self._share_obs_wrapper(obs)
+            elif self.state_per_agent:
+                ret_share_obs = self._share_obs_wrapper(self.env.state())
+            else:
+                ret_share_obs = self._share_state_wrapper(self.env.state())
+            ret_available_actions = self._available_actions_wrapper(self.env.available_actions)
+            info = self._info_wrapper(info)
+
+            # Convert reward.
+            rewards += np.array([reward[a] for a in self.env.possible_agents]).reshape(-1, 1)
+
+            # Increase the step count.
+            for a in self.env.possible_agents:
+                self.deltaSteps[a] += 1
+
+            # Check if any agents are ready.
+            # All agents are considered ready if step skipping is disabled.
+            ready = not self.args.skip_steps or any([info[a.id]["ready"] for a in self.env.agents])
 
         # If we are sharing the reward, then we need to sum the rewards.
         if self.share_reward:
@@ -100,6 +117,9 @@ class PettingzooEnv(object):
         
         # Convert back from numpy to list.
         rewards = [rewards[i] for i in range(self.num_agents)]
+
+        info["deltaSteps"] = [[self.deltaSteps[a]] for a in self.env.possible_agents]
+        info["ready"] = [info[a.id]["ready"] for a in self.env.possible_agents]
 
         return ret_obs, ret_share_obs, rewards, done, info, ret_available_actions
 

@@ -116,6 +116,9 @@ def parse_args(args, parser):
 
     import argparse
     
+    parser.add_argument("--skip_steps", action=argparse.BooleanOptionalAction, 
+                    default=False, 
+                    help="by default False. If True, skips steps for which no agents are ready to take an action.")
     parser.add_argument("--eval_deterministic", action=argparse.BooleanOptionalAction, 
                         default=True, 
                         help="by default True. If False, sample action according to probability")

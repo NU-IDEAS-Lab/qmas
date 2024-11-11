@@ -41,6 +41,8 @@ class PettingzooRunner(Runner):
             if self.use_linear_lr_decay:
                 self.trainer.policy.lr_decay(episode, episodes)
 
+            # Set the delta steps to 1.
+            delta_steps = np.ones((self.n_rollout_threads, self.num_agents, 1), dtype=np.int32)
             for step in range(self.episode_length):
                 # Sample actions, collect values and probabilities.
                 values, actions, action_log_probs, rnn_states, rnn_states_critic, actions_env = self.collect(step)
@@ -48,8 +50,11 @@ class PettingzooRunner(Runner):
                 # Take a step in the environment and get the results.
                 obs, share_obs, rewards, dones, infos, available_actions = self.envs.step(actions_env)
 
+                # Get the number of steps taken by each agent since the agent was last ready.
+                delta_steps = np.array([info["deltaSteps"] for info in infos])
+
                 # insert data into buffer
-                data = obs, share_obs, rewards, dones, infos, values, actions, action_log_probs, rnn_states, rnn_states_critic, available_actions
+                data = obs, share_obs, rewards, dones, infos, values, actions, action_log_probs, rnn_states, rnn_states_critic, delta_steps, available_actions
                 self.insert(data)
 
             # compute return and update network
@@ -126,7 +131,7 @@ class PettingzooRunner(Runner):
         return values, actions, action_log_probs, rnn_states, rnn_states_critic, actions_env
 
     def insert(self, data):
-        obs, share_obs, rewards, dones, infos, values, actions, action_log_probs, rnn_states, rnn_states_critic, available_actions = data
+        obs, share_obs, rewards, dones, infos, values, actions, action_log_probs, rnn_states, rnn_states_critic, delta_steps, available_actions = data
         
         # update env_infos if done
         dones_env = np.all(dones, axis=-1)
@@ -159,6 +164,7 @@ class PettingzooRunner(Runner):
             value_preds=values,
             rewards=rewards,
             masks=masks,
+            delta_steps=delta_steps,
             available_actions=available_actions
         )
 
