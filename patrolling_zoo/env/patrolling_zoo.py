@@ -72,15 +72,13 @@ def add_args(parser):
                         help="the model name to use for communication. The \"none\" model indicates no comms allowed")
     parser.add_argument("--communication_probability", type=float, default=0.1, 
                         help="the probability of successful communication")
-    parser.add_argument("--sep_share_policy", type=bool, default=True, 
-                        help="Whether to share the policy amongst agents (even though using the separated runner)")
     parser.add_argument("--regenerate_graph_on_reset", type=bool, default=False,
                         help="Whether to regenerate the graph on reset.")
     parser.add_argument("--max_nodes", type=int, default=50,
                         help="The maximum number of nodes in a single graph observation.")
     parser.add_argument("--max_neighbors", type=int, default=10,
                         help="The maximum number of neighbors per node in graph observations.")
-    parser.add_argument("--require_explicit_visit", type=bool, default=False,
+    parser.add_argument("--require_explicit_visit", type=bool, default=True,
                         help="Whether to require explicit visitation of nodes.")
     parser.add_argument("--action_full_max_nodes", type=int, default=0,
                         help="The maximum number of nodes in the full action space.")
