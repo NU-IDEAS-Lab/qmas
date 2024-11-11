@@ -78,7 +78,14 @@ class Runner(object):
             from onpolicy.algorithms.r_mappo.rMAPPOPolicy import R_MAPPOPolicy as Policy
 
         # Determine training algorithm.
-        if self.algorithm_name == "mat" or self.algorithm_name == "mat_dec":
+        if self.all_args.algorithm_class != "":
+            module_name, class_name = self.all_args.algorithm_class.rsplit(".", 1)
+            try:
+                algorithm_module = importlib.import_module(module_name)
+                TrainAlgo = getattr(algorithm_module, class_name)
+            except (ImportError, AttributeError):
+                raise ValueError(f"Invalid policy module: {module_name}. Import failed.")
+        elif self.algorithm_name == "mat" or self.algorithm_name == "mat_dec":
             from onpolicy.algorithms.mat.mat_trainer import MATTrainer as TrainAlgo
         else:
             from onpolicy.algorithms.r_mappo.r_mappo import R_MAPPO as TrainAlgo

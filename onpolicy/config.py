@@ -159,6 +159,7 @@ def get_config():
     # prepare parameters
     parser.add_argument("--algorithm_name", type=str,
                         default='mappo', choices=["rmappo", "mappo", "happo", "hatrpo", "mat", "mat_dec"])
+    parser.add_argument("--algorithm_class", type=str, default='', help="specify the policy class")
     parser.add_argument("--policy_class", type=str, default='', help="specify the policy class")
 
     parser.add_argument("--experiment_name", type=str, default="check", help="an identifier to distinguish different experiment.")
