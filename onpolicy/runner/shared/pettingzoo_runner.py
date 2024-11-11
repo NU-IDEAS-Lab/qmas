@@ -77,6 +77,7 @@ class PettingzooRunner(Runner):
                                 int(total_num_steps / (end - start))))
                 
                 train_infos["average_episode_rewards"] = np.mean(self.buffer.rewards) * self.episode_length
+                train_infos["fps"] = total_num_steps / (end - start)
                 print("average episode reward is {}".format(train_infos["average_episode_rewards"]))
                 self.log_train(train_infos, total_num_steps)
                 self.log_env(self.env_infos, total_num_steps)
