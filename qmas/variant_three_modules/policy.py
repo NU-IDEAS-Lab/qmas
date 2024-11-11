@@ -9,9 +9,14 @@ class QmasPolicy(R_MAPPOPolicy):
         super().__init__(args, obs_space, cent_obs_space, act_space, device)
 
         # Initialize the communication module.
-        self.comm = torch.nn.Linear(args.hidden_size, args.num_agents)
-        self.comm_optimizer = torch.optim.Adam(self.comm.parameters(),
+        self.comms = torch.nn.Linear(args.hidden_size, args.num_agents)
+        self.comms_optimizer = torch.optim.Adam(self.comms.parameters(),
                                                lr=args.lr, eps=args.opti_eps,
                                                weight_decay=args.weight_decay)
         
         print("Initialized QMAS policy.")
+    
+    def comms_update(sample):
+        ''' Updates the communication module. '''
+        
+        raise NotImplementedError("Communication update not implemented.")
