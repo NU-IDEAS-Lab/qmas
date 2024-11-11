@@ -50,6 +50,7 @@ class PettingzooEnv(object):
 
 
     def reset(self):
+        self.ppoSteps = 0
         self.deltaSteps = {a: 0 for a in self.env.possible_agents}
         obs, _  = self.env.reset()
 
@@ -78,8 +79,11 @@ class PettingzooEnv(object):
         rewards = np.zeros((self.num_agents, 1), dtype=np.float32)
 
         while not ready and (not all(done) or done == []):
+            # We want to determine if this is the last step when using syncronized step skipping.
+            lastStep = self.args.skip_steps and self.ppoSteps >= self.args.episode_length - 1
+            
             # Take a step.
-            obs, reward, done, trunc, info = self.env.step(actionPz)
+            obs, reward, done, trunc, info = self.env.step(actionPz, lastStep=lastStep)
 
             # Convert the done dict to a list.
             done = [done[a] for a in self.env.possible_agents]
@@ -109,6 +113,8 @@ class PettingzooEnv(object):
             # Check if any agents are ready.
             # All agents are considered ready if step skipping is disabled.
             ready = not self.args.skip_steps or any([info[a.id]["ready"] for a in self.env.agents])
+
+        self.ppoSteps += 1
 
         # If we are sharing the reward, then we need to sum the rewards.
         if self.share_reward:

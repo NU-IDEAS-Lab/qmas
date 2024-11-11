@@ -168,7 +168,7 @@ class parallel_env(ParallelEnv):
         # Configuration.
         self.requireExplicitVisit = args.require_explicit_visit
         self.observationRadius = args.observation_radius
-        self.max_cycles = args.max_cycles
+        self.max_cycles = -1 if args.skip_steps else args.max_cycles
         self.comms_model = CommunicationModel(model=args.communication_model, p=args.communication_probability)
         self.action_method = args.action_method
         self.action_full_max_nodes = args.action_full_max_nodes
