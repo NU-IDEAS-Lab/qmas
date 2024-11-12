@@ -76,6 +76,7 @@ class PettingzooEnv(object):
         # For any agents which are ready, use the new action.
         for i in range(self.num_agents):
             actionPz[self.env.possible_agents[i]] = action[i]
+            self.deltaSteps[self.env.possible_agents[i]] = 0
         rewards = np.zeros((self.num_agents, 1), dtype=np.float32)
 
         while not ready and (not all(done) or done == []):
