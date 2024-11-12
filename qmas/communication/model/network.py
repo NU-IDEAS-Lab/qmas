@@ -3,11 +3,9 @@ import networkx as nx
 class CommunicationNetwork(nx.Graph):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._node_id = 0
 
-    def add_node(self, *args, **kwargs):
-        super().add_node(self._node_id, *args, **kwargs)
-        self._node_id += 1
+    def add_node(self, node_id, *args, **kwargs):
+        super().add_node(node_id, *args, **kwargs)
 
     def add_edge(self, *args, **kwargs):
         super().add_edge(*args, **kwargs)
@@ -17,6 +15,9 @@ class CommunicationNetwork(nx.Graph):
 
     def get_edge(self, node_id1, node_id2):
         return self.edges[node_id1, node_id2]
+
+    def calculate_edge_qos(self, node_id1, node_id2):
+        raise NotImplementedError("Edge QoS not implemented.")
 
     def get_nodes(self):
         return self.nodes

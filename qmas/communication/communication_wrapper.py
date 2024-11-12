@@ -56,3 +56,11 @@ class CommunicationWrapper(BaseWrapper):
                 "observation": obs,
                 "communication": self.communication_model(self.env, agent)
             }
+    
+    
+    def step(self, action):
+        ''' Updates the communication network upon environment step. '''
+
+        ret = super().step(action)
+        self.communication_model.on_step(self.env)
+        return ret
