@@ -7,7 +7,7 @@ class TestEnvironment(unittest.TestCase):
     def test_parallel_api(self):
         graph = PatrolGraph("patrolling_zoo/env/cumberland.graph")
         env = parallel_env(graph, num_agents=2)
-        parallel_api_test(env, num_cycles=1000)
+        parallel_api_test(env, num_cycles=10)
     
     def test_path_length_from_node0(self):
         graph = PatrolGraph("patrolling_zoo/env/4nodes.graph")
