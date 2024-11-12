@@ -2,7 +2,7 @@ import torch
 import numpy as np
 from onpolicy.utils.util import update_linear_schedule
 from onpolicy.utils.util import get_shape_from_obs_space, get_shape_from_act_space
-from onpolicy.algorithms.utils.util import check
+from onpolicy.models.utils.util import check
 from onpolicy.algorithms.mat.algorithm.ma_transformer import MultiAgentTransformer
 
 

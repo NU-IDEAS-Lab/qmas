@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 from onpolicy.utils.util import get_gard_norm, huber_loss, mse_loss
 from onpolicy.utils.valuenorm import ValueNorm
-from onpolicy.algorithms.utils.util import check
+from onpolicy.models.utils.util import check
 
 
 class MATTrainer:

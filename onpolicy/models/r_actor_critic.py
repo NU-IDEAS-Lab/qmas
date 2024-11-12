@@ -1,14 +1,14 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from onpolicy.algorithms.utils.util import init, check
-from onpolicy.algorithms.utils.cnn import CNNBase
-from onpolicy.algorithms.utils.mlp import MLPBase, MLPLayer
-from onpolicy.algorithms.utils.gnn import GNNBase
-from onpolicy.algorithms.utils.rnn import RNNLayer
-from onpolicy.algorithms.utils.rnn import RNNLayer
-from onpolicy.algorithms.utils.act import ACTLayer
-from onpolicy.algorithms.utils.popart import PopArt
+from onpolicy.models.utils.util import init, check
+from onpolicy.models.utils.cnn import CNNBase
+from onpolicy.models.utils.mlp import MLPBase, MLPLayer
+from onpolicy.models.utils.gnn import GNNBase
+from onpolicy.models.utils.rnn import RNNLayer
+from onpolicy.models.utils.rnn import RNNLayer
+from onpolicy.models.utils.act import ACTLayer
+from onpolicy.models.utils.popart import PopArt
 from onpolicy.utils.util import get_shape_from_obs_space, get_graph_obs_space, strip_graph_obs_space, get_graph_obs_space_idx
 
 from torch_geometric.data import Batch

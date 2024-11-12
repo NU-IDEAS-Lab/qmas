@@ -4,7 +4,7 @@ import torch.nn as nn
 from torch_geometric.data import Batch
 from onpolicy.utils.util import get_grad_norm, huber_loss, mse_loss
 from onpolicy.utils.valuenorm import ValueNorm
-from onpolicy.algorithms.utils.util import check
+from onpolicy.models.utils.util import check
 
 class R_MAPPO():
     """
