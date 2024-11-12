@@ -7,7 +7,7 @@ class CommunicationWrapper(BaseWrapper):
     def __init__(self, env, communication_model):
         super().__init__(env)
         self.communication_model = communication_model
-        self.communication_space = communication_model.communication_space
+        self.communication_space = communication_model.communication_space()
     
 
     def action_space(self, agent):
@@ -57,7 +57,7 @@ class CommunicationWrapper(BaseWrapper):
                 "communication": self.communication_model(self.env, agent)
             }
     
-    
+
     def step(self, action):
         ''' Updates the communication network upon environment step. '''
 
