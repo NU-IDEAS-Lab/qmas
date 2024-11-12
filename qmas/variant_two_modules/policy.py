@@ -1,7 +1,6 @@
 import torch
 from onpolicy.algorithms.r_mappo.rMAPPOPolicy import R_MAPPOPolicy
-from onpolicy.models.r_actor_critic import R_Critic
-from .actor_critic import Actor
+from .actor_critic import QmasActor, QmasCritic
 
 class QmasPolicy(R_MAPPOPolicy):
     ''' This class implements the QMAS policy, including communication. '''
@@ -18,8 +17,8 @@ class QmasPolicy(R_MAPPOPolicy):
         self.act_space = act_space
 
         # We use the QMAS actor, but the default MAPPO critic.
-        self.actor = Actor(args, self.obs_space, self.act_space, self.device)
-        self.critic = R_Critic(args, self.share_obs_space, self.device)
+        self.actor = QmasActor(args, self.obs_space, self.act_space, self.device)
+        self.critic = QmasCritic(args, self.share_obs_space, self.device)
 
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(),
                                                 lr=self.lr, eps=self.opti_eps,
