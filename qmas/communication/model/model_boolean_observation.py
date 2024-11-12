@@ -1,6 +1,6 @@
 from gymnasium import spaces
 
-from .base_model import CommunicationBaseModel
+from .model_base import CommunicationBaseModel
 
 class BooleanObservationModel(CommunicationBaseModel):
     ''' This model uses predefined messages - the sender's observations.
