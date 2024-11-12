@@ -18,7 +18,6 @@ class CommunicationWrapper(BaseWrapper):
             action_space.spaces["communication"] = self.communication_space
             return action_space
         else:
-            #TODO: May need a way to mark that this dictionary is not original to the environment.
             action_space_dict = spaces.Dict({
                 "action": action_space,
                 "communication": self.communication_space
@@ -61,6 +60,24 @@ class CommunicationWrapper(BaseWrapper):
     def step(self, action):
         ''' Updates the communication network upon environment step. '''
 
-        ret = super().step(action)
+        # Process the action.
+        action_new = {}
+        for agent in self.agents:
+            if agent in action:
+                # Process the communication.
+                communication = action.pop("communication")
+                self.communication_model.on_action(self.env, agent, communication)
+
+                # Restore the action to what the underlying environment expects.
+                action_space = super().action_space(agent)
+                if isinstance(action_space, spaces.Dict):
+                    action_new[agent] = action
+                else:
+                    action_new[agent] = action["action"]
+
+        # Perform environment step.
+        ret = super().step(action_new)
+
+        # Update the communication model.
         self.communication_model.on_step(self.env)
         return ret
