@@ -11,14 +11,20 @@ class CommunicationBaseModel:
         self.network = CommunicationNetwork()
     
 
-    def communication_space(self):
+    def communication_space(self, env, agent):
         ''' Returns the communication space. '''
 
         raise NotImplementedError('This method must be implemented in the derived class.')
 
 
+    def communication_action_space(self, env, agent):
+        ''' Returns the communication action space. '''
+
+        raise NotImplementedError('This method must be implemented in the derived class.')
+
+
     def __call__(self, env, agent):
-        ''' Returns the communication for the agent. '''
+        ''' Returns the communications received by the agent. '''
         
         return self.communicated_messages_get(agent)
 
@@ -44,6 +50,9 @@ class CommunicationBaseModel:
     
     def on_step(self, env):
         ''' Updates the communication network upon environment step. '''
+
+        # Reset communicated messages.
+        self.communicated_messages_reset()
 
         # Update positions.
         for agent in env.agents:

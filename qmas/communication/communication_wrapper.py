@@ -7,20 +7,21 @@ class CommunicationWrapper(BaseWrapper):
     def __init__(self, env, communication_model):
         super().__init__(env)
         self.communication_model = communication_model
-        self.communication_space = communication_model.communication_space()
     
 
     def action_space(self, agent):
         ''' Adds communication space to the action space. '''
 
         action_space = super().action_space(agent)
+        comms_action_space = self.communication_model.communication_action_space(self.env, agent)
+
         if isinstance(action_space, spaces.Dict):
-            action_space.spaces["communication"] = self.communication_space
+            action_space.spaces["communication"] = comms_action_space
             return action_space
         else:
             action_space_dict = spaces.Dict({
                 "action": action_space,
-                "communication": self.communication_space
+                "communication": comms_action_space
             })
             return action_space_dict
 
@@ -29,11 +30,14 @@ class CommunicationWrapper(BaseWrapper):
         ''' Adds communication space to the observation space. '''
 
         obs_space = super().observation_space(agent)
+
+        # The received communication space is the communication space of all other agents.
         received_communication_space = spaces.Dict({
-            a: self.communication_space for a in self.agents if a != agent
+            a: self.communication_model.communication_space(self.env, a) for a in self.agents if a != agent
         })
+
         if isinstance(obs_space, spaces.Dict):
-            obs_space.spaces["communication"] = self.communication_space
+            obs_space.spaces["communication"] = received_communication_space
             return obs_space
         else:
             obs_space_dict = spaces.Dict({
