@@ -24,7 +24,7 @@ args = [
 	"--reward_method_terminal", "average",
 
 	"--graph_name", "milwaukee",
-	"--graph_file", "../patrolling_zoo/env/milwaukee.graph",
+	"--graph_file", "../patrolling_zoo/graphs/milwaukee.graph",
 	"--num_env_steps", "1000000",
 	"--episode_length", "200",
 	"--max_cycles", "200",
