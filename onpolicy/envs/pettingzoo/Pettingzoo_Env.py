@@ -6,7 +6,7 @@ import numpy as np
 
 
 class PettingzooEnv(object):
-    '''Wrapper to make Pettingzoo environments compatible'''
+    ''' Wrapper to make Pettingzoo environments compatible with the onpolicy algorithms. '''
 
     def __init__(self, environment_class, args):
         self.args = args

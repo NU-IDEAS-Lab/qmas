@@ -4,10 +4,10 @@ from pettingzoo.utils.wrappers.base import BaseWrapper
 class CommunicationWrapper(BaseWrapper):
     ''' Performs communication between agents and adds to agents' observations. '''
 
-    def __init__(self, env, communication_space, communication_model):
+    def __init__(self, env, communication_model):
         super().__init__(env)
-        self.communication_space = communication_space
         self.communication_model = communication_model
+        self.communication_space = communication_model.communication_space
     
 
     def action_space(self, agent):
@@ -49,10 +49,10 @@ class CommunicationWrapper(BaseWrapper):
 
         obs = super().observe(agent)
         if isinstance(obs, dict):
-            obs["communication"] = self.communication_model(agent)
+            obs["communication"] = self.communication_model(self.env, agent)
             return obs
         else:
             return {
                 "observation": obs,
-                "communication": self.communication_model(agent)
+                "communication": self.communication_model(self.env, agent)
             }
