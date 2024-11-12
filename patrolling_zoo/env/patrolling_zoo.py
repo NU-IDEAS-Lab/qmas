@@ -19,16 +19,19 @@ from torch_geometric.data import Data
 def add_args(parser):
     ''' Adds environment arguments. '''
 
+    import os.path
+    import patrolling_zoo.graphs
+
     # Define all arguments.
     parser.add_argument("--alpha", type=float, default=1.0,
                         help="Weight of local reward.")
     parser.add_argument("--beta", type=float, default=1000.0,
                         help="Weight of global reward.")
     parser.add_argument("--graph_file", type=str,
-                        default="", 
+                        default=os.path.join(os.path.dirname(patrolling_zoo.graphs.__file__), "cumberland.graph"), 
                         help="The path to the graph file.")
     parser.add_argument("--graph_name", type=str,
-                        default="4nodes", 
+                        default="cumberland", 
                         help="which graph to run on.")
     parser.add_argument("--graph_random", type=bool, default=False,
                         help="Whether to use a random graph.")
@@ -76,7 +79,7 @@ def add_args(parser):
                         help="The maximum number of neighbors per node in graph observations.")
     parser.add_argument("--require_explicit_visit", type=bool, default=True,
                         help="Whether to require explicit visitation of nodes.")
-    parser.add_argument("--action_full_max_nodes", type=int, default=0,
+    parser.add_argument("--action_full_max_nodes", type=int, default=40,
                         help="The maximum number of nodes in the full action space.")
     parser.add_argument("--action_neighbors_max_degree", type=int, default=10,
                         help="The maximum degree of neighbors in the neighbors action space.")
@@ -159,12 +162,15 @@ class parallel_env(ParallelEnv):
 
         # Use default arguments.
         if args == None:
-            args = parse_args([])
+            import argparse
+            parser = argparse.ArgumentParser()
+            add_args(parser)
+            args = parse_args([], parser)
 
         # Configuration.
         self.requireExplicitVisit = args.require_explicit_visit
         self.observationRadius = args.observation_radius
-        self.max_cycles = -1 if args.skip_steps else args.max_cycles
+        self.max_cycles = args.max_cycles
         self.comms_model = CommunicationModel(model=args.communication_model, p=args.communication_probability)
         self.action_method = args.action_method
         self.action_full_max_nodes = args.action_full_max_nodes

@@ -1,14 +1,15 @@
+import functools
 from gymnasium import spaces
-from pettingzoo.utils.wrappers.base import BaseWrapper
+from pettingzoo.utils import BaseParallelWrapper
 
-class CommunicationWrapper(BaseWrapper):
+class CommunicationWrapper(BaseParallelWrapper):
     ''' Performs communication between agents and adds to agents' observations. '''
 
     def __init__(self, env, communication_model):
         super().__init__(env)
         self.communication_model = communication_model
     
-
+    @functools.lru_cache(maxsize=None)
     def action_space(self, agent):
         ''' Adds communication space to the action space. '''
 
@@ -26,6 +27,7 @@ class CommunicationWrapper(BaseWrapper):
             return action_space_dict
 
 
+    @functools.lru_cache(maxsize=None)
     def observation_space(self, agent):
         ''' Adds communication space to the observation space. '''
 
@@ -46,6 +48,14 @@ class CommunicationWrapper(BaseWrapper):
             })
             return obs_space_dict
     
+
+    def reset(self, *args, **kwargs):
+        ''' Resets the environment and communication network. '''
+
+        res = super().reset(*args, **kwargs)
+        self.communication_model.on_reset(self.env)
+        return res
+
 
     def observe(self, agent):
         ''' Adds communicated information to the observation. '''
@@ -69,15 +79,15 @@ class CommunicationWrapper(BaseWrapper):
         for agent in self.agents:
             if agent in action:
                 # Process the communication.
-                communication = action.pop("communication")
+                communication = action[agent].pop("communication")
                 self.communication_model.on_communicate_action(self.env, agent, communication)
 
                 # Restore the action to what the underlying environment expects.
                 action_space = super().action_space(agent)
                 if isinstance(action_space, spaces.Dict):
-                    action_new[agent] = action
+                    action_new[agent] = action[agent]
                 else:
-                    action_new[agent] = action["action"]
+                    action_new[agent] = action[agent]["action"]
 
         # Perform environment step.
         ret = super().step(action_new)

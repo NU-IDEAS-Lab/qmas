@@ -161,6 +161,10 @@ def validateArgs(all_args):
     else:
         raise ValueError(f"Algorithm name {all_args.algorithm_name} not recognized.")
     
+    # Set max_cycles to -1 if skip_steps is set.
+    if all_args.skip_steps:
+        all_args.max_cycles = -1
+
     # Check whether the environment has a callable state function.
     # if not all_args.use_obs_instead_of_state:
     #     env_class = get_environment_class(all_args)
