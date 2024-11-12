@@ -11,7 +11,7 @@ class CommunicationBaseModel:
         self.network = CommunicationNetwork()
     
 
-    def communication_space(self, env, agent):
+    def communication_message_space(self, env, agent):
         ''' Returns the communication space. '''
 
         raise NotImplementedError('This method must be implemented in the derived class.')

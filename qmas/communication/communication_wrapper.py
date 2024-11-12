@@ -33,7 +33,7 @@ class CommunicationWrapper(BaseWrapper):
 
         # The received communication space is the communication space of all other agents.
         received_communication_space = spaces.Dict({
-            a: self.communication_model.communication_space(self.env, a) for a in self.agents if a != agent
+            a: self.communication_model.communication_message_space(self.env, a) for a in self.agents if a != agent
         })
 
         if isinstance(obs_space, spaces.Dict):

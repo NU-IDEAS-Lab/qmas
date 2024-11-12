@@ -6,7 +6,7 @@ class BooleanObservationModel(CommunicationBaseModel):
     ''' This model uses predefined messages - the sender's observations.
         The only decision is a boolean whether to communicate or not. '''
 
-    def communication_space(self, env, agent):
+    def communication_message_space(self, env, agent):
         ''' Returns the communication space. '''
 
         return env.observation_space(agent)
