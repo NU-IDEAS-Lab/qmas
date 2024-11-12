@@ -24,10 +24,6 @@ def add_args(parser):
                         help="Weight of local reward.")
     parser.add_argument("--beta", type=float, default=1000.0,
                         help="Weight of global reward.")
-    # parser.add_argument("--skip_steps_async", type=bool, default=False,
-    #                     help="Whether to skip steps with no action required (by any agent).")
-    # parser.add_argument("--skip_steps_sync", type=bool, default=False,
-    #                     help="Whether to skip steps with no action required (by any agent).")
     parser.add_argument("--graph_file", type=str,
                         default="", 
                         help="The path to the graph file.")
