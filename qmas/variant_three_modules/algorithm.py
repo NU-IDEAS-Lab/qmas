@@ -37,6 +37,9 @@ class QmasAlgorithm(R_MAPPO):
         train_info['critic_grad_norm'] = 0
         train_info['ratio'] = 0
 
+        train_info['comms_loss'] = 0
+        train_info['comms_grad_norm'] = 0
+
         num_updates = 0
 
         for _ in range(self.ppo_epoch):
