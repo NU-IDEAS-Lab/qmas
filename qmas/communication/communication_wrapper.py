@@ -66,7 +66,7 @@ class CommunicationWrapper(BaseWrapper):
             if agent in action:
                 # Process the communication.
                 communication = action.pop("communication")
-                self.communication_model.on_action(self.env, agent, communication)
+                self.communication_model.on_communicate_action(self.env, agent, communication)
 
                 # Restore the action to what the underlying environment expects.
                 action_space = super().action_space(agent)

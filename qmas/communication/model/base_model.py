@@ -14,12 +14,13 @@ class CommunicationBaseModel:
     def communication_space(self):
         ''' Returns the communication space. '''
 
-        return spaces.Box(low=-1.0, high=1.0)
+        raise NotImplementedError('This method must be implemented in the derived class.')
 
 
     def __call__(self, env, agent):
         ''' Returns the communication for the agent. '''
-        raise NotImplementedError("Communication not implemented.")
+        
+        return self.communicated_messages_get(agent)
 
 
     def on_reset(self, env):
@@ -36,6 +37,9 @@ class CommunicationBaseModel:
             for neighbor in env.possible_agents:
                 if agent != neighbor:
                     self.network.add_edge(agent, neighbor, qos=self.network.calculate_edge_qos(agent, neighbor))
+        
+        # Reset communicated messages.
+        self.communicated_messages_reset()
     
     
     def on_step(self, env):
@@ -50,3 +54,29 @@ class CommunicationBaseModel:
             for neighbor in env.agents:
                 if agent != neighbor:
                     self.network.get_edge(agent, neighbor)["qos"] = self.network.calculate_edge_qos(agent, neighbor)
+
+
+    def on_communicate_action(env, agent, communication):
+        ''' Processes the communication action. '''
+
+        raise NotImplementedError('This method must be implemented in the derived class.')
+
+
+    def communicate(self, sender, receiver, message):
+        ''' Communicates a message from the sender to the receiver. '''
+
+        self.communications[receiver][sender] = message
+
+
+    def communicated_messages_get(self, agent):
+        ''' Returns messages which were sent to the agent in this time step. '''
+
+        return self.communications[agent]
+
+
+    def communicated_messages_reset(self):
+        ''' Resets the communicated messages. '''
+
+        self.communications = {
+            agent: {} for agent in self.env.possible_agents
+        }
