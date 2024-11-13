@@ -15,7 +15,7 @@ args = [
 	"--observe_method", "pyg",
 	"--observe_method_global", "adjacency",
 	"--observation_radius", "400.0",
-	"--observation_bitmap_size", "40",
+	"--observe_bitmap_size", "40",
     "--state_per_agent",
 	"--communication_model", "none",
 	"--communication_probability", "0.0",

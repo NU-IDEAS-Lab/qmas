@@ -1,7 +1,7 @@
 from patrolling_zoo.env.patrolling_zoo import (
     env,
-    add_args,
     parse_args,
+    add_args,
     validate_args,
     parallel_env
 )

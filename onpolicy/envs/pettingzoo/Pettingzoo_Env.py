@@ -12,9 +12,18 @@ class PettingzooEnv(object):
         self.args = args
         self.num_agents = args.num_agents
         
-        self.env = environment_class(
-            args=args
-        )
+        if "args" in environment_class.__init__.__code__.co_varnames:
+            print("PettingzooEnv: Attempting to pass argparse namespace directly to environment.")
+            self.env = environment_class(
+                args=args
+            )
+        else:
+            print("PettingzooEnv: Attempting to pass unpacked argparse namespace to environment.")
+            args_dict = self._get_matching_arg_dict(environment_class.__init__, vars(args))
+            print(f"PettingzooEnv: Passing the following arguments to the environment: {args_dict}")
+            self.env = environment_class(
+                **args_dict
+            )
         
         self.share_reward = args.share_reward
         self.action_space = []
@@ -183,3 +192,14 @@ class PettingzooEnv(object):
 
     def _info_wrapper(self, info):
         return info
+
+    def _get_matching_arg_dict(self, fn, args_input):
+        ''' Returns a dictionary of arguments that are in both the args_input Namespace and the fn signature. '''
+        arg_count = fn.__code__.co_argcount
+        args = fn.__code__.co_varnames[:arg_count]
+
+        args_dict = {}
+        for k, v in args_input.items():
+            if k in args:
+                args_dict[k] = v
+        return args_dict
