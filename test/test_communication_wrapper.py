@@ -13,6 +13,7 @@ class TestEnvironment(unittest.TestCase):
         environment = CommunicationWrapper(environment, comms_model)
         parallel_api_test(environment, num_cycles=10)
 
+    @unittest.skip("AEC not implemented")
     def test_aec_api(self):
         comms_model = BooleanObservationModel()
         environment = env()

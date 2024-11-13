@@ -163,7 +163,7 @@ class parallel_env(ParallelEnv):
                  reward_method_terminal = "average",
                  observation_radius = np.inf,
                  observe_method = "ajg_new",
-                 observe_method_global = None,
+                 observe_method_global = "",
                  observe_bitmap_size = 50,
                  attrition_method = "none",
                  attrition_random_probability = 0.0,
@@ -915,7 +915,7 @@ class parallel_env(ParallelEnv):
 
 
         if (type(obs) == dict and obs == {}) or (type(obs) != dict and len(obs) < 1):
-            raise ValueError(f"Invalid observation method {self.observe_method}")
+            raise ValueError(f"Invalid observation method {observe_method}")
         
 
         # Check if type of any values in obs is a graph.
