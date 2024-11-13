@@ -86,6 +86,12 @@ class CommunicationBaseModel:
         return self.communications[agent]
 
 
+    def communicated_messages_get_count(self):
+        ''' Returns the number of messages sent in this time step. '''
+
+        return sum(len(self.communications[agent]) for agent in self.communications)
+
+
     def communicated_messages_reset(self, possible_agents):
         ''' Resets the communicated messages. '''
 

@@ -88,10 +88,17 @@ class CommunicationWrapper(BaseParallelWrapper):
                     action_new[agent] = action[agent]
                 else:
                     action_new[agent] = action[agent]["action"]
+        
+        # Count messages sent.
+        messages_sent = self.communication_model.communicated_messages_get_count()
 
         # Perform environment step.
-        ret = super().step(action_new)
+        obs, reward, terminated, truncated, info = super().step(action_new)
 
         # Update the communication model.
         self.communication_model.on_step(self.env)
-        return ret
+
+        # Add information.
+        info["messages_sent"] = messages_sent
+
+        return obs, reward, terminated, truncated, info
