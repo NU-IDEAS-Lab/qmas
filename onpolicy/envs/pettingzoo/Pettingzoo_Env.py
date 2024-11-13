@@ -33,7 +33,7 @@ class PettingzooEnv(object):
         self.state_per_agent = args.state_per_agent
 
         # Set up action space.
-        self.action_space = [self.env.action_spaces[a] for a in self.env.possible_agents]
+        self.action_space = [self.env.action_space(a) for a in self.env.possible_agents]
 
         # Determine whether observations should be flattened.
         ospace = self.env.observation_spaces[self.env.possible_agents[0]]
