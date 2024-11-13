@@ -71,7 +71,7 @@ class CommunicationWrapper(BaseParallelWrapper):
             }
     
 
-    def step(self, action):
+    def step(self, action, *args, **kwargs):
         ''' Updates the communication network upon environment step. '''
 
         # Process the action.
@@ -93,7 +93,7 @@ class CommunicationWrapper(BaseParallelWrapper):
         messages_sent = self.communication_model.communicated_messages_get_count()
 
         # Perform environment step.
-        obs, reward, terminated, truncated, info = super().step(action_new)
+        obs, reward, terminated, truncated, info = super().step(action_new, *args, **kwargs)
 
         # Update the communication model.
         self.communication_model.on_step(self.env)
