@@ -3,6 +3,7 @@ import random
 from gymnasium.spaces.utils import flatten, flatten_space
 from gymnasium.spaces import Dict, Graph
 import numpy as np
+from torch_geometric.data import Data
 
 
 class PettingzooEnv(object):
@@ -36,7 +37,7 @@ class PettingzooEnv(object):
         self.action_space = [self.env.action_space(a) for a in self.env.possible_agents]
 
         # Determine whether observations should be flattened.
-        ospace = self.env.observation_spaces[self.env.possible_agents[0]]
+        ospace = self.env.observation_space(self.env.possible_agents[0])
         self.flatten_observations = type(ospace) == Dict
         if self.flatten_observations:
             for k, v in ospace.spaces.items():
@@ -46,12 +47,20 @@ class PettingzooEnv(object):
 
         # Set up observation space.
         if self.flatten_observations:
-            self.observation_space = [flatten_space(self.env.observation_spaces[a]) for a in self.env.possible_agents]
+            self.observation_space = [flatten_space(self.env.observation_space(a)) for a in self.env.possible_agents]
         else:
-            self.observation_space = [self.env.observation_spaces[a] for a in self.env.possible_agents]
+            self.observation_space = [self.env.observation_space(a) for a in self.env.possible_agents]
         
+        # Determine whether global observations should be flattened.
+        ospace = self.env.state_space
+        self.flatten_observations_global = type(ospace) == Dict
+        if self.flatten_observations_global:
+            for v in ospace.spaces.values():
+                if type(v) == Graph:
+                    self.flatten_observations_global = False
+                    break
+
         # Set up global observation space.
-        self.flatten_observations_global = type(self.env.state_space) == Dict
         if self.flatten_observations_global:
             self.share_observation_space = [flatten_space(self.env.state_space) for a in self.env.possible_agents]
         else:
@@ -70,7 +79,8 @@ class PettingzooEnv(object):
             ret_share_obs = self._share_obs_wrapper(self.env.state())
         else:
             ret_share_obs = self._share_state_wrapper(self.env.state())
-        ret_available_actions = self._available_actions_wrapper(self.env.available_actions)
+        available_actions = {a: self.env.available_actions(a) for a in self.env.possible_agents}
+        ret_available_actions = self._available_actions_wrapper(available_actions)
 
         return ret_obs, ret_share_obs, ret_available_actions
 
@@ -110,7 +120,8 @@ class PettingzooEnv(object):
                 ret_share_obs = self._share_obs_wrapper(self.env.state())
             else:
                 ret_share_obs = self._share_state_wrapper(self.env.state())
-            ret_available_actions = self._available_actions_wrapper(self.env.available_actions)
+            available_actions = {a: self.env.available_actions(a) for a in self.env.possible_agents}
+            ret_available_actions = self._available_actions_wrapper(available_actions)
             info = self._info_wrapper(info)
 
             # Convert reward.
@@ -157,11 +168,27 @@ class PettingzooEnv(object):
         # Flatten the PZ observation.
         if self.flatten_observations:
             obs = flatten(self.env.observation_spaces, obs)
-            obs = np.reshape(obs, (self.num_agents, -1))
+            res = np.reshape(obs, (self.num_agents, -1))
         else:
-            obs = [obs[a] for a in self.env.possible_agents]
+            res = []
+            for a in self.env.possible_agents:
+                # Check if type of any values in obs is a graph.
+                obs_a = obs[a]
+                if type(obs_a) == dict:
+                    # Ensure dictionary ordering.
+                    obs_a = dict(sorted(obs_a.items()))
+
+                    typeSet = set([type(v) for v in obs_a.values()])
+                    if Data in typeSet:
+                        # If so, we want the observation to be a single-element array of objects.
+                        o = np.empty((len(obs_a),), dtype=object)
+                        for i, k in enumerate(obs_a.keys()):
+                            o[i] = obs_a[k]
+                        obs_a = o
+                res.append(obs_a)
+
         
-        return obs
+        return res
     
     def _share_state_wrapper(self, obs):
 

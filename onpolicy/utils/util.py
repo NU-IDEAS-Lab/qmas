@@ -2,6 +2,7 @@ import numpy as np
 import math
 import torch
 from copy import copy
+from gymnasium import spaces
 
 def check(input):
     if type(input) == np.ndarray:
@@ -74,21 +75,49 @@ def get_graph_obs_space_idx(obs):
     else:
         raise NotImplementedError(f"Not implemented for obs type {obs.__class__.__name__}")
 
-def get_shape_from_obs_space(obs_space):
-    if obs_space.__class__.__name__ == 'Box':
+def get_shape_from_obs_space(obs_space, flatten_dicts=True):
+    if type(obs_space) == spaces.Box:
         obs_shape = obs_space.shape
     elif obs_space.__class__.__name__ == 'list':
         obs_shape = obs_space
-    elif obs_space.__class__.__name__ == 'Graph':
+    elif type(obs_space) == spaces.Graph:
         obs_shape = (1, ) # the observation is a single PyG data object
-    elif obs_space.__class__.__name__ == 'Dict':
-        obs_shape = (len(obs_space.spaces), ) # the observation is a single dictionary data object
+    elif type(obs_space) == spaces.Dict:
+        if flatten_dicts and len(obs_space.spaces) > 0:
+            obs_shape = get_shape_from_obs_space(spaces.flatten_space(obs_space))
+        else:
+            obs_shape = (len(obs_space.spaces), ) # the observation is a single dictionary data object
     else:
         raise NotImplementedError(f"Not implemented for obs_space type {obs_space.__class__.__name__}")
     return obs_shape
 
-def get_shape_from_act_space(act_space):
-    if act_space.__class__.__name__ == 'Discrete':
+def get_shape_from_act_space(act_space, flatten_dicts=True):
+    if act_space.__class__.__name__ == 'Dict':
+        if flatten_dicts:
+            act_shape = get_shape_from_act_space(spaces.flatten_space(act_space))
+        else:
+            act_shape = (len(act_space.spaces), ) # the action is a single dictionary data object
+    elif act_space.__class__.__name__ == 'Discrete':
+        act_shape = 1
+    elif act_space.__class__.__name__ == "MultiDiscrete":
+        act_shape = act_space.shape
+    elif act_space.__class__.__name__ == "Box":
+        act_shape = act_space.shape[0]
+    elif act_space.__class__.__name__ == "MultiBinary":
+        act_shape = act_space.shape[0]
+    else:  # agar
+        act_shape = act_space[0].shape[0] + 1  
+    return act_shape
+
+
+def get_shape_from_available_actions_space(act_space):
+    if act_space.__class__.__name__ == 'Dict':
+        dim0 = len(act_space.spaces)
+        dim1 = 0
+        for k, v in act_space.spaces.items():
+            dim1 = max(dim1, get_shape_from_available_actions_space(v))
+        act_shape = (dim0, dim1)
+    elif act_space.__class__.__name__ == 'Discrete':
         act_shape = 1
     elif act_space.__class__.__name__ == "MultiDiscrete":
         act_shape = act_space.shape

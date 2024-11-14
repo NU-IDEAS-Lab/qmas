@@ -409,7 +409,7 @@ class parallel_env(ParallelEnv):
         self.dones = dict.fromkeys(self.agents, False)
 
         # Set available actions.
-        self.available_actions = {agent: self._getAvailableActions(agent) for agent in self.agents}
+        self.available_actions_dict = {agent: self._getAvailableActions(agent) for agent in self.agents}
 
         # Return the initial observation.
         observation = {agent: self.observe(agent) for agent in self.agents}
@@ -477,6 +477,22 @@ class parallel_env(ParallelEnv):
         return self.action_spaces[agent]
 
 
+    def available_actions_space(self, agent):
+        ''' Generate a Space for the available actions, given the action space. '''
+
+        action_space = self.action_space(agent)
+        def get_available_action_space(action_space):
+            if action_space.__class__.__name__ in ["Tuple", "Dict"]:
+                return spaces.Dict({k: get_available_action_space(v) for k, v in action_space.spaces.items()})
+            elif action_space.__class__.__name__ == "Discrete":
+                return spaces.MultiBinary(action_space.n)
+            elif action_space.__class__.__name__ == "MultiDiscrete":
+                return spaces.MultiBinary(len(action_space.nvec), np.max(action_space.nvec))
+            else:
+                raise NotImplementedError(f"Action space {action_space} not supported for action masking.")
+        return get_available_action_space(action_space)
+
+
     def state_old(self):
         ''' Returns the global state of the environment.
             This is useful for centralized training, decentralized execution. '''
@@ -497,6 +513,12 @@ class parallel_env(ParallelEnv):
         ''' Returns the observation for the given agent.'''
 
         return self._populateStateSpace(self.observe_method, agent, radius, allow_done_agents)
+
+
+    def available_actions(self, agent):
+        ''' Returns the dictionary of available actions for all agents.
+            This is not standard in the Pettingzoo API but is useful. '''
+        return self.available_actions_dict[agent]
 
 
     def communicate(self, receiver=None, allow_done_agents=False):
@@ -917,20 +939,6 @@ class parallel_env(ParallelEnv):
         if (type(obs) == dict and obs == {}) or (type(obs) != dict and len(obs) < 1):
             raise ValueError(f"Invalid observation method {observe_method}")
         
-
-        # Check if type of any values in obs is a graph.
-        if type(obs) == dict:
-            # Ensure dictionary ordering.
-            obs = dict(sorted(obs.items()))
-
-            typeSet = set([type(v) for v in obs.values()])
-            if Data in typeSet:
-                # If so, we want the observation to be a single-element array of objects.
-                o = np.empty((len(obs),), dtype=object)
-                for i, k in enumerate(obs.keys()):
-                    o[i] = obs[k]
-                obs = o
-
         return obs
     
     def _calculateEdgeWeight(self, pos1, pos2):
@@ -1070,7 +1078,7 @@ class parallel_env(ParallelEnv):
         done_dict = {agent: self.dones[agent] for agent in self.possible_agents}
 
         # Set available actions.
-        self.available_actions = {agent: self._getAvailableActions(agent) for agent in self.possible_agents}
+        self.available_actions_dict = {agent: self._getAvailableActions(agent) for agent in self.possible_agents}
 
         return obs_dict, reward_dict, done_dict, truncated_dict, info_dict
 

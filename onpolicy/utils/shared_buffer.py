@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 import torch.nn.functional as F
-from onpolicy.utils.util import get_shape_from_obs_space, get_shape_from_act_space, has_graph_obs_space
+from onpolicy.utils.util import get_shape_from_obs_space, get_shape_from_act_space, get_shape_from_available_actions_space, has_graph_obs_space
 from collections.abc import Iterable
 
 
@@ -44,8 +44,8 @@ class SharedReplayBuffer(object):
         self.algo = args.algorithm_name
         self.num_agents = num_agents
 
-        obs_shape = get_shape_from_obs_space(obs_space)
-        share_obs_shape = get_shape_from_obs_space(cent_obs_space)
+        obs_shape = get_shape_from_obs_space(obs_space, flatten_dicts=False)
+        share_obs_shape = get_shape_from_obs_space(cent_obs_space, flatten_dicts=False)
         act_shape = get_shape_from_act_space(act_space)
 
         if type(obs_shape[-1]) == list:
@@ -72,13 +72,41 @@ class SharedReplayBuffer(object):
         self.advantages = np.zeros(
             (self.episode_length, self.n_rollout_threads, num_agents, 1), dtype=np.float32)
 
-        if act_space.__class__.__name__ == 'Discrete':
-            self.available_actions = np.ones((self.episode_length + 1, self.n_rollout_threads, num_agents, act_space.n),
-                                             dtype=np.float32)
-        elif act_space.__class__.__name__ == 'MultiDiscrete':
-            action_space_shape = (len(act_space.nvec), np.max(act_space.nvec))
-            self.available_actions = np.ones((self.episode_length + 1, self.n_rollout_threads, num_agents, *action_space_shape),
-                                             dtype=np.float32)
+        # Store available actions.
+        def get_available_actions_space(action_space):
+            ''' Generate a Space for the available actions, given the action space. '''
+            try:
+                from gymnasium import spaces
+            except ImportError:
+                return None
+            def _get(action_space):
+                if action_space.__class__.__name__ in ["Tuple", "Dict"]:
+                    return spaces.Dict({k: _get(v) for k, v in action_space.spaces.items()})
+                elif action_space.__class__.__name__ == "Discrete":
+                    return spaces.MultiBinary(action_space.n)
+                elif action_space.__class__.__name__ == "MultiDiscrete":
+                    return spaces.MultiBinary(len(action_space.nvec), np.max(action_space.nvec))
+                elif action_space.__class__.__name__ == "Box" and np.issubdtype(action_space.dtype, np.integer):
+                    return spaces.MultiBinary(action_space.high - action_space.low + 1)
+                else:
+                    raise ValueError("Action space not supported.")
+            try:
+                res = _get(action_space)
+                return spaces.flatten_space(res)
+                # return res
+            except ValueError:
+                return None
+
+        available_actions_space = get_available_actions_space(act_space)
+        if available_actions_space != None:
+            available_actions_shape = get_shape_from_act_space(available_actions_space)
+            # available_actions_shape = get_shape_from_available_actions_space(available_actions_space)
+            if isinstance(available_actions_shape, Iterable):
+                self.available_actions = np.ones((self.episode_length + 1, self.n_rollout_threads, num_agents, *available_actions_shape),
+                                                 dtype=np.float32)
+            else:
+                self.available_actions = np.ones((self.episode_length + 1, self.n_rollout_threads, num_agents, available_actions_shape),
+                                                 dtype=np.float32)
         else:
             self.available_actions = None
 

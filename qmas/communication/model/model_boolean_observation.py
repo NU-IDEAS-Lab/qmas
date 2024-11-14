@@ -9,13 +9,13 @@ class BooleanObservationModel(CommunicationBaseModel):
     def communication_message_space(self, env, agent):
         ''' Returns the communication space. '''
 
-        return env.observation_space(agent)
+        return spaces.Discrete(start=-1, n=len(env.pg.graph) + 1)
     
     
     def communication_action_space(self, env, agent):
         ''' Returns the communication action space. '''
 
-        return spaces.Discrete(2)
+        return spaces.Box(low=0, high=1, shape=(1, ), dtype=int)
 
     
     def on_communicate_action(self, env, agent, communication):
@@ -23,7 +23,10 @@ class BooleanObservationModel(CommunicationBaseModel):
 
         # Check whether we should communicate.
         if communication == 1:
-            message = env.observe(agent)
+            # We just tell people where we last visited.
+            message = agent.lastNodeVisited
+            if message is None:
+                message = -1
 
             # Perform broadcast communication.
             for neighbor in env.possible_agents:

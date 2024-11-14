@@ -6,7 +6,7 @@ os.environ["WANDB__SERVICE_WAIT"] = "300"
 args = [
 	"--experiment_name", "pettingzoo-test",
     "--project_name", "qmas",
-	"--env_name", "patrolling_zoo.patrolling_zoo_v0",
+	"--env_class", "patrolling_zoo.patrolling_zoo_v0.parallel_env",
 	"--user_name", "ideas-mas",
 
 	"--num_agents", "4",
