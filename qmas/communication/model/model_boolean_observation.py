@@ -9,7 +9,7 @@ class BooleanObservationModel(CommunicationBaseModel):
     def communication_message_space(self, env, agent):
         ''' Returns the communication space. '''
 
-        return spaces.Discrete(start=-1, n=len(env.pg.graph) + 1)
+        return spaces.Box(low=-1, high=len(env.pg.graph) - 1, shape=(1, ), dtype=int)
     
     
     def communication_action_space(self, env, agent):
