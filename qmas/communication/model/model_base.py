@@ -110,6 +110,7 @@ class CommunicationBaseModel:
         ''' Communicates a message from the sender to the receiver. '''
 
         self.communications[receiver][sender] = message
+        self.messages_sent += 1
 
 
     def communicated_messages_get(self, agent):
@@ -121,13 +122,14 @@ class CommunicationBaseModel:
     def communicated_messages_get_count(self):
         ''' Returns the number of messages sent in this time step. '''
 
-        return sum(len(self.communications[agent]) for agent in self.communications)
+        return self.messages_sent
 
 
     def communicated_messages_reset(self, env, possible_agents):
         ''' Resets the communicated messages. '''
 
         self.communications = {}
+        self.messages_sent = 0
         for agent in possible_agents:
             self.communications[agent] = {}
             for neighbor in possible_agents:
