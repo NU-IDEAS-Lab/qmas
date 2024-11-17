@@ -109,27 +109,6 @@ def get_shape_from_act_space(act_space, flatten_dicts=True):
         act_shape = act_space[0].shape[0] + 1  
     return act_shape
 
-
-def get_shape_from_available_actions_space(act_space):
-    if act_space.__class__.__name__ == 'Dict':
-        dim0 = len(act_space.spaces)
-        dim1 = 0
-        for k, v in act_space.spaces.items():
-            dim1 = max(dim1, get_shape_from_available_actions_space(v))
-        act_shape = (dim0, dim1)
-    elif act_space.__class__.__name__ == 'Discrete':
-        act_shape = 1
-    elif act_space.__class__.__name__ == "MultiDiscrete":
-        act_shape = act_space.shape
-    elif act_space.__class__.__name__ == "Box":
-        act_shape = act_space.shape[0]
-    elif act_space.__class__.__name__ == "MultiBinary":
-        act_shape = act_space.shape[0]
-    else:  # agar
-        act_shape = act_space[0].shape[0] + 1  
-    return act_shape
-
-
 def tile_images(img_nhwc):
     """
     Tile N images into one big PxQ image

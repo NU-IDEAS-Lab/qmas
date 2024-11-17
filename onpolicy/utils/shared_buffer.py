@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 import torch.nn.functional as F
-from onpolicy.utils.util import get_shape_from_obs_space, get_shape_from_act_space, get_shape_from_available_actions_space, has_graph_obs_space
+from onpolicy.utils.util import get_shape_from_obs_space, get_shape_from_act_space, has_graph_obs_space
 from collections.abc import Iterable
 
 
@@ -100,7 +100,6 @@ class SharedReplayBuffer(object):
         available_actions_space = get_available_actions_space(act_space)
         if available_actions_space != None:
             available_actions_shape = get_shape_from_act_space(available_actions_space)
-            # available_actions_shape = get_shape_from_available_actions_space(available_actions_space)
             if isinstance(available_actions_shape, Iterable):
                 self.available_actions = np.ones((self.episode_length + 1, self.n_rollout_threads, num_agents, *available_actions_shape),
                                                  dtype=np.float32)
