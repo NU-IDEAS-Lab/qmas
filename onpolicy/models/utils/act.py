@@ -97,7 +97,8 @@ class ACTLayer(nn.Module):
             action_log_probs.append(action_log_prob)
         
         actions = torch.cat(actions, -1)
-        action_log_probs = torch.sum(torch.cat(action_log_probs, -1), -1, keepdim=True)
+        # action_log_probs = torch.sum(torch.cat(action_log_probs, -1), -1, keepdim=True)
+        action_log_probs = torch.cat(action_log_probs, -1)
         
         return actions, action_log_probs
 
@@ -110,6 +111,8 @@ class ACTLayer(nn.Module):
 
         :return action_probs: (torch.Tensor)
         """
+        action_probs = []
+
         available_actions_idx = 0
         for module in self.action_outs:
             if isinstance(module, DiagGaussian):
@@ -136,8 +139,11 @@ class ACTLayer(nn.Module):
         :return action_log_probs: (torch.Tensor) log probabilities of the input actions.
         :return dist_entropy: (torch.Tensor) action distribution entropy for the given inputs.
         """
+        action_log_probs = []
+        dist_entropy = 0
         action_idx = 0
         available_actions_idx = 0
+
         for module in self.action_outs:
             if isinstance(module, DiagGaussian):
                 action_logits = module(x)
@@ -147,10 +153,12 @@ class ACTLayer(nn.Module):
                 action_logits = module(x, aa)
             a = action[:, action_idx:action_idx + module.action_dim]
             action_idx += module.action_dim
-            action_log_probs = action_logits.log_probs(a)
+            action_log_probs.append(action_logits.log_probs(a))
             if active_masks is not None:
-                dist_entropy = (action_logits.entropy()*active_masks.squeeze(-1)).sum()/active_masks.sum()
+                dist_entropy += (action_logits.entropy()*active_masks.squeeze(-1)).sum()/active_masks.sum()
             else:
-                dist_entropy = action_logits.entropy().mean()
+                dist_entropy += action_logits.entropy().mean()
         
+        action_log_probs = torch.cat(action_log_probs, -1)
+
         return action_log_probs, dist_entropy
