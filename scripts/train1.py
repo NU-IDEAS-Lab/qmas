@@ -4,9 +4,9 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-	"--experiment_name", "pettingzoo-test",
+	"--experiment_name", "commswrapper-test",
     "--project_name", "qmas",
-	"--env_class", "patrolling_zoo.patrolling_zoo_v0.parallel_env",
+	"--env_class", "qmas.env_patrolling.env",
 	"--user_name", "ideas-mas",
 
 	"--num_agents", "4",
@@ -49,7 +49,7 @@ args = [
 	"--n_rollout_threads", "5",
 	"--save_interval", "1000",
 	"--cuda",
-	"--cuda_idx", "2",
+	"--cuda_idx", "7",
 
 	"--use_wandb",
 ]

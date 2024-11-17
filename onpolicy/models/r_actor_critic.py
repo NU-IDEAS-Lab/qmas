@@ -108,6 +108,12 @@ class R_Actor(nn.Module):
             obs_graph = obs[:, self.obs_space_graph_idx]
             nonGraphIdx = [i for i in range(obs.shape[1]) if i != self.obs_space_graph_idx]
             obs_nongraph = obs[:, nonGraphIdx]
+            if len(obs_nongraph.shape) > 1 and obs_nongraph.shape[1] > 0:
+                # The non-graph data is stored as an object dtype. Need to convert to float32.
+                obs_non_graph_float = np.zeros((obs_nongraph.shape[0], *obs_nongraph[0,0].shape), dtype=np.float32)
+                for i in range(obs_nongraph.shape[0]):
+                    obs_non_graph_float[i] = obs_nongraph[i, 0]
+                obs_nongraph = obs_non_graph_float
             obs_nongraph = check(obs_nongraph.astype(np.float32)).to(**self.tpdv)
 
             # Batch the graphs and pass through GNN.
@@ -184,6 +190,12 @@ class R_Actor(nn.Module):
             obs_graph = obs[:, self.obs_space_graph_idx]
             nonGraphIdx = [i for i in range(obs.shape[1]) if i != self.obs_space_graph_idx]
             obs_nongraph = obs[:, nonGraphIdx]
+            if len(obs_nongraph.shape) > 1 and obs_nongraph.shape[1] > 0:
+                # The non-graph data is stored as an object dtype. Need to convert to float32.
+                obs_non_graph_float = np.zeros((obs_nongraph.shape[0], *obs_nongraph[0,0].shape), dtype=np.float32)
+                for i in range(obs_nongraph.shape[0]):
+                    obs_non_graph_float[i] = obs_nongraph[i, 0]
+                obs_nongraph = obs_non_graph_float
             obs_nongraph = check(obs_nongraph.astype(np.float32)).to(**self.tpdv)
 
             # Batch the graphs and pass through GNN.

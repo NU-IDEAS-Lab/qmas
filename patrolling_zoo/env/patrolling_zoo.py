@@ -1,6 +1,8 @@
 from pettingzoo import ParallelEnv
 from pettingzoo.utils import parallel_to_aec
 
+import os
+import patrolling_zoo.graphs
 from patrolling_zoo.env.communication_model import CommunicationModel
 from patrolling_zoo.env.patrol_graph import PatrolGraph, NODE_TYPE
 from gymnasium import spaces
@@ -19,31 +21,30 @@ from torch_geometric.data import Data
 def add_args(parser):
     ''' Adds environment arguments. '''
 
+    import os.path
+    import patrolling_zoo.graphs
+
     # Define all arguments.
     parser.add_argument("--alpha", type=float, default=1.0,
                         help="Weight of local reward.")
     parser.add_argument("--beta", type=float, default=1000.0,
                         help="Weight of global reward.")
     parser.add_argument("--graph_file", type=str,
-                        default="", 
+                        default=os.path.join(os.path.dirname(patrolling_zoo.graphs.__file__), "cumberland.graph"), 
                         help="The path to the graph file.")
     parser.add_argument("--graph_name", type=str,
-                        default="4nodes", 
+                        default="cumberland", 
                         help="which graph to run on.")
     parser.add_argument("--graph_random", type=bool, default=False,
                         help="Whether to use a random graph.")
     parser.add_argument("--graph_random_nodes", type=int,
                         default=40,
                         help="The number of random nodes to generate.")
-    parser.add_argument("--max_cycles", type=int, default=1000,
-                        help="max number of cycles for the environment.")
     parser.add_argument("--reward_method_terminal", type=str,
                         default="average", 
                         help="the method to use for terminal reward.")
     parser.add_argument("--reward_interval", type=int, default=-1,
                         help="number of steps between the periodic reward. -1 disables periodic reward")
-    parser.add_argument("--num_agents", type=int, default=3,
-                        help="number of controlled players.")
     parser.add_argument("--agent_speed", type=float, default=10.0,
                         help="the speed of each agent")
     parser.add_argument("--action_method", type=str, default="full", 
@@ -54,7 +55,7 @@ def add_args(parser):
                         help="the observation method to use for global observation")
     parser.add_argument("--observe_bitmap_size", type=int, default=50, 
                         help="the size (squared) to which the bitmap should be scaled for observation")
-    parser.add_argument("--observation_radius", type=float, default=np.inf, 
+    parser.add_argument("--observation_radius", type=float, default=999999, 
                         help="the observable radius for each agent")
     parser.add_argument("--attrition_method", type=str, default="none", 
                         help="the method to use for agent attrition")
@@ -76,19 +77,21 @@ def add_args(parser):
                         help="The maximum number of neighbors per node in graph observations.")
     parser.add_argument("--require_explicit_visit", type=bool, default=True,
                         help="Whether to require explicit visitation of nodes.")
-    parser.add_argument("--action_full_max_nodes", type=int, default=0,
+    parser.add_argument("--action_full_max_nodes", type=int, default=40,
                         help="The maximum number of nodes in the full action space.")
     parser.add_argument("--action_neighbors_max_degree", type=int, default=10,
                         help="The maximum degree of neighbors in the neighbors action space.")
-    
 
-def parse_args(args, parser):
+
+def parse_args(args):
     ''' Parses environment arguments. '''
 
-    # Parse arguments from the command line.
-    parsed_args = parser.parse_known_args(args)[0]
-
-    return parsed_args
+    import argparse
+    parser = argparse.ArgumentParser()
+    add_args(parser)
+    parsed_args, unknown_args = parser.parse_known_args(args)
+    validate_args(parsed_args)
+    return parsed_args, unknown_args
 
 
 def validate_args(parsed_args):
@@ -101,6 +104,7 @@ def validate_args(parsed_args):
 def env(*args, **kwargs):
     ''' Returns the environment class. '''
     return parallel_env(*args, **kwargs)
+
 
 def raw_env(*args, **kwargs):
     ''' Returns the raw environment class. '''
@@ -136,7 +140,7 @@ class PatrolAgent():
 
 class parallel_env(ParallelEnv):
     metadata = {
-        "name": "patrolling_zoo_environment_v0",
+        "name": "patrolling_zoo_v0",
         "render_modes": ["human", "rgb_array"],
     }
 
@@ -145,63 +149,81 @@ class parallel_env(ParallelEnv):
         IDLENESS = 1
         GRAPH = 2
 
-    def __init__(self, args=None):
+    def __init__(self,
+                 num_agents = 3,
+                 communication_model = "none",
+                 communication_probability = 0.0,
+                 require_explicit_visit = True,
+                 agent_speed = 1.0,
+                 alpha = 10.0,
+                 beta = 100.0,
+                 action_method = "full",
+                 action_full_max_nodes = 40,
+                 action_neighbors_max_degree = 15,
+                 reward_method_terminal = "average",
+                 observation_radius = np.inf,
+                 observe_method = "ajg_new",
+                 observe_method_global = "",
+                 observe_bitmap_size = 50,
+                 attrition_method = "none",
+                 attrition_random_probability = 0.0,
+                 attrition_min_agents = 2,
+                 attrition_fixed_times = [],
+                 max_cycles: int = -1,
+                 max_nodes: int = 50,
+                 max_neighbors: int = 15,
+                 reward_interval: int = -1,
+                 regenerate_graph_on_reset: bool = False,
+                 graph_random = False,
+                 graph_random_nodes = 40,
+                 graph_file = os.path.join(os.path.dirname(patrolling_zoo.graphs.__file__), "cumberland.graph"),
+                ):
         """
-        Initialize the PatrolEnv object.
-
-        Args:
-            args (argparse.ArgumentParser): All input arguments.
-
-        Returns:
-            None
+        Initialize the patrolling environment.
         """
         super().__init__()
 
-        # Use default arguments.
-        if args == None:
-            args = parse_args([])
-
         # Configuration.
-        self.requireExplicitVisit = args.require_explicit_visit
-        self.observationRadius = args.observation_radius
-        self.max_cycles = -1 if args.skip_steps else args.max_cycles
-        self.comms_model = CommunicationModel(model=args.communication_model, p=args.communication_probability)
-        self.action_method = args.action_method
-        self.action_full_max_nodes = args.action_full_max_nodes
-        self.action_neighbors_max_degree = args.action_neighbors_max_degree
-        self.reward_method_terminal = args.reward_method_terminal
-        self.observe_method = args.observe_method
-        self.observe_method_global = args.observe_method_global if args.observe_method_global != "" else args.observe_method
-        self.observe_bitmap_dims = (args.observe_bitmap_size, args.observe_bitmap_size)
-        self.attrition_method = args.attrition_method
-        self.attrition_random_probability = args.attrition_random_probability
-        self.attrition_times = args.attrition_fixed_times
-        self.attrition_min_agents = args.attrition_min_agents
-        self.regenerate_graph_on_reset = args.regenerate_graph_on_reset
-        self.max_nodes = args.max_nodes
-        self.max_neighbors = args.max_neighbors
+        self.requireExplicitVisit = require_explicit_visit
+        self.observationRadius = observation_radius
+        self.max_cycles = max_cycles
+        self.comms_model = CommunicationModel(model=communication_model, p=communication_probability)
+        self.action_method = action_method
+        self.action_full_max_nodes = action_full_max_nodes
+        self.action_neighbors_max_degree = action_neighbors_max_degree
+        self.reward_method_terminal = reward_method_terminal
+        self.observe_method = observe_method
+        self.observe_method_global = observe_method_global if observe_method_global != "" else observe_method
+        self.observe_bitmap_dims = (observe_bitmap_size, observe_bitmap_size)
+        self.attrition_method = attrition_method
+        self.attrition_random_probability = attrition_random_probability
+        self.attrition_times = attrition_fixed_times
+        self.attrition_min_agents = attrition_min_agents
+        self.regenerate_graph_on_reset = regenerate_graph_on_reset
+        self.max_nodes = max_nodes
+        self.max_neighbors = max_neighbors
 
-        self.reward_interval = args.reward_interval
+        self.reward_interval = reward_interval
 
-        self.alpha = args.alpha
-        self.beta = args.beta
+        self.alpha = alpha
+        self.beta = beta
 
         # Create patrol graph.
-        if args.graph_random:
-            self.pg = PatrolGraph(numNodes=args.graph_random_nodes)
+        if graph_random:
+            self.pg = PatrolGraph(numNodes=graph_random_nodes)
         else:
-            self.pg = PatrolGraph(args.graph_file)
+            self.pg = PatrolGraph(graph_file)
 
         # Create the agents with random starting positions.
-        self.agentOrigins = random.sample(list(self.pg.graph.nodes), args.num_agents)
+        self.agentOrigins = random.sample(list(self.pg.graph.nodes), num_agents)
         startingPositions = [self.pg.getNodePosition(i) for i in self.agentOrigins]
         self.possible_agents = [
             PatrolAgent(i, startingPositions[i],
-                        speed = args.agent_speed,
+                        speed = agent_speed,
                         startingNode = self.agentOrigins[i],
                         observationRadius = self.observationRadius,
                         max_nodes = self.max_nodes
-            ) for i in range(args.num_agents)
+            ) for i in range(num_agents)
         ]
 
         # Create the action space.
@@ -387,7 +409,7 @@ class parallel_env(ParallelEnv):
         self.dones = dict.fromkeys(self.agents, False)
 
         # Set available actions.
-        self.available_actions = {agent: self._getAvailableActions(agent) for agent in self.agents}
+        self.available_actions_dict = {agent: self._getAvailableActions(agent) for agent in self.agents}
 
         # Return the initial observation.
         observation = {agent: self.observe(agent) for agent in self.agents}
@@ -455,6 +477,22 @@ class parallel_env(ParallelEnv):
         return self.action_spaces[agent]
 
 
+    def available_actions_space(self, agent):
+        ''' Generate a Space for the available actions, given the action space. '''
+
+        action_space = self.action_space(agent)
+        def get_available_action_space(action_space):
+            if action_space.__class__.__name__ in ["Tuple", "Dict"]:
+                return spaces.Dict({k: get_available_action_space(v) for k, v in action_space.spaces.items()})
+            elif action_space.__class__.__name__ == "Discrete":
+                return spaces.MultiBinary(action_space.n)
+            elif action_space.__class__.__name__ == "MultiDiscrete":
+                return spaces.MultiBinary(len(action_space.nvec), np.max(action_space.nvec))
+            else:
+                raise NotImplementedError(f"Action space {action_space} not supported for action masking.")
+        return get_available_action_space(action_space)
+
+
     def state_old(self):
         ''' Returns the global state of the environment.
             This is useful for centralized training, decentralized execution. '''
@@ -475,6 +513,12 @@ class parallel_env(ParallelEnv):
         ''' Returns the observation for the given agent.'''
 
         return self._populateStateSpace(self.observe_method, agent, radius, allow_done_agents)
+
+
+    def available_actions(self, agent):
+        ''' Returns the dictionary of available actions for all agents.
+            This is not standard in the Pettingzoo API but is useful. '''
+        return self.available_actions_dict[agent]
 
 
     def communicate(self, receiver=None, allow_done_agents=False):
@@ -893,22 +937,8 @@ class parallel_env(ParallelEnv):
 
 
         if (type(obs) == dict and obs == {}) or (type(obs) != dict and len(obs) < 1):
-            raise ValueError(f"Invalid observation method {self.observe_method}")
+            raise ValueError(f"Invalid observation method {observe_method}")
         
-
-        # Check if type of any values in obs is a graph.
-        if type(obs) == dict:
-            # Ensure dictionary ordering.
-            obs = dict(sorted(obs.items()))
-
-            typeSet = set([type(v) for v in obs.values()])
-            if Data in typeSet:
-                # If so, we want the observation to be a single-element array of objects.
-                o = np.empty((len(obs),), dtype=object)
-                for i, k in enumerate(obs.keys()):
-                    o[i] = obs[k]
-                obs = o
-
         return obs
     
     def _calculateEdgeWeight(self, pos1, pos2):
@@ -1048,7 +1078,7 @@ class parallel_env(ParallelEnv):
         done_dict = {agent: self.dones[agent] for agent in self.possible_agents}
 
         # Set available actions.
-        self.available_actions = {agent: self._getAvailableActions(agent) for agent in self.possible_agents}
+        self.available_actions_dict = {agent: self._getAvailableActions(agent) for agent in self.possible_agents}
 
         return obs_dict, reward_dict, done_dict, truncated_dict, info_dict
 

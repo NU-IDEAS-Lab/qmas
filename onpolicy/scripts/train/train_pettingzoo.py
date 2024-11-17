@@ -19,27 +19,26 @@ from onpolicy.envs.env_wrappers import ShareSubprocVecEnv, ShareDummyVecEnv, Sub
 
 
 def get_environment_module(all_args):
-    ''' Dynamically imports correct environment module. '''
+    ''' Dynamically imports correct environment class. '''
 
+    module_name, _ = all_args.env_class.rsplit(".", 1)
     try:
-        env_module = importlib.import_module(all_args.env_name)
-        return env_module
-    except ImportError as e:
-        raise ValueError("Can not find the " + all_args.env_name + " environment. Check the environment name and try again.")
-
+        env_module = importlib.import_module(module_name) 
+    except ImportError:
+        raise ValueError(f"Invalid environment module: {module_name}. Import failed.")
+    return env_module
 
 def get_environment_class(all_args):
     ''' Dynamically imports correct environment class. '''
 
-    env_module = get_environment_module(all_args)
-    if hasattr(env_module, "env"):
-        env_class = env_module.env
-    elif hasattr(env_module, "parallel_env"):
-        env_class = env_module.parallel_env
-    elif hasattr(env_module, "raw_env"):
-        env_class = env_module.raw_env
-    else:
-        raise ValueError("Environment module must have 'env', 'parallel_env', or 'raw_env' attribute")
+    module_name, class_name = all_args.env_class.rsplit(".", 1)
+    try:
+        env_module = importlib.import_module(module_name)
+        env_class = getattr(env_module, class_name)
+    except ImportError:
+        raise ValueError(f"Invalid environment module: {module_name}. Import failed.")
+    except AttributeError:
+        raise ValueError(f"Invalid environment class: {all_args.env_class}. Import failed.")
     return env_class
 
 
@@ -49,6 +48,7 @@ def add_env_args(parsed_args, parser):
     env_module = get_environment_module(parsed_args)
     if hasattr(env_module, "add_args"):
         env_module.add_args(parser)
+        print(f"Pettingzoo environment {parsed_args.env_class} has additional arguments.")
 
 
 def validate_env_args(parsed_args):
@@ -56,6 +56,7 @@ def validate_env_args(parsed_args):
 
     env_module = get_environment_module(parsed_args)
     if hasattr(env_module, "validate_args"):
+        print(f"Pettingzoo environment {parsed_args.env_class} has additional arguments validation function.")
         return env_module.validate_args(parsed_args)
 
 
@@ -116,6 +117,11 @@ def parse_args(args, parser):
 
     import argparse
     
+    parser.add_argument("--env_class", type=str, default='', help="specify the environment class")
+    parser.add_argument("--max_cycles", type=int, default=1000,
+                        help="max number of cycles for the environment.")
+    parser.add_argument("--num_agents", type=int, default=3,
+                        help="number of controlled players.")
     parser.add_argument("--skip_steps", action=argparse.BooleanOptionalAction, 
                     default=False, 
                     help="by default False. If True, skips steps for which no agents are ready to take an action.")
@@ -139,7 +145,11 @@ def parse_args(args, parser):
     add_env_args(parsed_args, parser)
 
     # Parse again to get environment-specific arguments.
-    parsed_args, _ = parser.parse_known_args(unknown_args, namespace=parsed_args)
+    parsed_args, unknown_args = parser.parse_known_args(unknown_args, namespace=parsed_args)
+
+    if unknown_args:
+        import warnings
+        warnings.warn(f"Unknown arguments: {unknown_args}")
 
     return parsed_args
 
@@ -161,14 +171,29 @@ def validateArgs(all_args):
     else:
         raise ValueError(f"Algorithm name {all_args.algorithm_name} not recognized.")
     
+    # Set max_cycles to -1 if skip_steps is set.
+    if all_args.skip_steps:
+        all_args.max_cycles = -1
+
+    # Create an environment object to validate it.
+    env_class = get_environment_class(all_args)
+    env = env_class() # use default arguments
+
+    # Set the environment name if it is not set.
+    if all_args.env_name == "" and hasattr(env, "metadata") and "name" in env.metadata:
+        all_args.env_name = env.metadata["name"]
+
     # Check whether the environment has a callable state function.
-    # if not all_args.use_obs_instead_of_state:
-    #     env_class = get_environment_class(all_args)
-    #     if not hasattr(env_class, "state") or not callable(env_class.state):
-    #         raise ValueError(f"Environment class {env_class} does not have state function, but use_obs_instead_of_state is set false.")
+    if not all_args.use_obs_instead_of_state:
+        if not hasattr(env, "state") or not callable(env.state):
+            raise ValueError(f"Environment class {env_class} does not have state function, but use_obs_instead_of_state is set false.")
+
+    print("Pettingzoo arguments validated: base")
 
     # Validate environment arguments.
     validate_env_args(all_args)
+
+    print(f"Pettingzoo arguments validated: {all_args.env_class}")
 
 
 def main(args):
@@ -191,7 +216,7 @@ def main(args):
 
     # run dir
     run_dir = Path(os.path.split(os.path.dirname(os.path.abspath(__file__)))[
-                   0] + "/results") / all_args.env_name / all_args.graph_name / all_args.algorithm_name / all_args.experiment_name
+                   0] + "/results") / all_args.project_name / all_args.env_name / all_args.algorithm_name / all_args.experiment_name
     if not run_dir.exists():
         os.makedirs(str(run_dir))
 
@@ -211,7 +236,7 @@ def main(args):
                                 str(date_time),
                                 "seed" + str(all_args.seed)
                             ]),
-                            group=all_args.graph_name,
+                            group=all_args.env_name,
                             dir=str(run_dir),
                             job_type="training",
                             reinit=True)
@@ -229,8 +254,8 @@ def main(args):
             os.makedirs(str(run_dir))
 
     setproctitle.setproctitle("-".join([
+        all_args.project_name, 
         all_args.env_name, 
-        all_args.graph_name, 
         all_args.algorithm_name, 
         all_args.experiment_name
     ]) + "@" + all_args.user_name)
