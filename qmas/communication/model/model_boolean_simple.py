@@ -2,8 +2,8 @@ from gymnasium import spaces
 
 from .model_base import CommunicationBaseModel
 
-class BooleanObservationModel(CommunicationBaseModel):
-    ''' This model uses predefined messages - the sender's observations.
+class BooleanSimpleMsgModel(CommunicationBaseModel):
+    ''' This model uses predefined messages - the sender's last node visited.
         The only decision is a boolean whether to communicate or not. '''
 
     def communication_message_space(self, env, agent):

@@ -2,7 +2,7 @@
 
 from functools import wraps
 from .communication.communication_wrapper import CommunicationWrapper
-from .communication.model.model_boolean_observation import BooleanObservationModel
+from .communication.model.model_boolean_simple import BooleanSimpleMsgModel
 
 from patrolling_zoo.env.patrolling_zoo import parallel_env as base_env
 
@@ -14,7 +14,7 @@ from patrolling_zoo.env.patrolling_zoo import add_args, validate_args
 def env(*args, **kwargs):
     ''' Creates the environment with the specified wrappers. '''
 
-    comms_model = BooleanObservationModel()
+    comms_model = BooleanSimpleMsgModel()
 
     environment = base_env(*args, **kwargs)
     environment = CommunicationWrapper(environment, comms_model)
