@@ -3,14 +3,8 @@ import torch
 import torch.nn as nn
 from onpolicy.utils.util import get_gard_norm, huber_loss, mse_loss
 from onpolicy.utils.valuenorm import ValueNorm
-from onpolicy.algorithms.utils.util import check
+from onpolicy.models.utils.util import check
 
-# import config
-from onpolicy.diffuser.config import diffuser_config
-from onpolicy.diffuser.config import guide_config
-
-# import trainer
-from onpolicy.diffuser.utils.training import Trainer
     
 class R_MAPPO():
     """
@@ -29,8 +23,6 @@ class R_MAPPO():
         self.device = device
         self.tpdv = dict(dtype=torch.float32, device=device)
         self.policy = policy
-        self.diffuser_config = diffuser_config
-        self.guide_config = guide_config
 
         self.clip_param = args.clip_param
         self.ppo_epoch = args.ppo_epoch
