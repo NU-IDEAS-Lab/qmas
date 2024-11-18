@@ -3,6 +3,7 @@ import functools
 import numpy as np
 
 from .network import CommunicationNetwork
+from .qos import LinkQoSBernoulli as LinkQoS
 
 class CommunicationBaseModel:
     ''' Defines the base model for the communication module. '''
@@ -77,7 +78,9 @@ class CommunicationBaseModel:
         for agent in env.possible_agents:
             for neighbor in env.possible_agents:
                 if agent != neighbor:
-                    self.network.add_edge(agent, neighbor, qos=self.network.calculate_edge_qos(agent, neighbor))
+                    self.network.add_edge(agent, neighbor,
+                        qos=LinkQoS(agent, neighbor, 1.0)
+                    )
         
         # Reset communicated messages.
         self.communicated_messages_reset(env, env.possible_agents)
@@ -97,7 +100,7 @@ class CommunicationBaseModel:
         for agent in env.agents:
             for neighbor in env.agents:
                 if agent != neighbor:
-                    self.network.edges[agent, neighbor]["qos"] = self.network.calculate_edge_qos(agent, neighbor)
+                    self.network.edges[agent, neighbor]["qos"].on_step()
 
 
     def on_communicate_action(env, agent, communication):
@@ -108,6 +111,16 @@ class CommunicationBaseModel:
 
     def communicate(self, sender, receiver, message):
         ''' Communicates a message from the sender to the receiver. '''
+
+        if not self.network.has_edge(sender, receiver):
+            raise ValueError(f'No edge between {sender} and {receiver}.')
+        
+        # Check QoS.
+        if not self.network.edges[sender, receiver]["qos"].can_communicate():
+            return
+
+        # Mangle message.
+        message = self.network.edges[sender, receiver]["qos"].mangle_message(message)
 
         self.communications[receiver][sender] = message
         self.messages_sent += 1
