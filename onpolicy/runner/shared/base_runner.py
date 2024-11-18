@@ -1,5 +1,6 @@
 import wandb
 import os
+import importlib
 import numpy as np
 import torch
 from tensorboardX import SummaryWriter
@@ -62,19 +63,38 @@ class Runner(object):
             self.save_dir = str(self.run_dir / 'models')
             if not os.path.exists(self.save_dir):
                 os.makedirs(self.save_dir)
-
-        if self.algorithm_name == "mat" or self.algorithm_name == "mat_dec":
-            from onpolicy.algorithms.mat.mat_trainer import MATTrainer as TrainAlgo
+        
+        # Determine policy module.
+        if self.all_args.policy_class != "":
+            module_name, class_name = self.all_args.policy_class.rsplit(".", 1)
+            try:
+                policy_module = importlib.import_module(module_name)
+                Policy = getattr(policy_module, class_name)
+            except (ImportError, AttributeError):
+                raise ValueError(f"Invalid policy module: {module_name}. Import failed.")
+        elif self.algorithm_name == "mat" or self.algorithm_name == "mat_dec":
             from onpolicy.algorithms.mat.algorithm.transformer_policy import TransformerPolicy as Policy
         else:
+            from onpolicy.algorithms.r_mappo.rMAPPOPolicy import R_MAPPOPolicy as Policy
+
+        # Determine training algorithm.
+        if self.all_args.algorithm_class != "":
+            module_name, class_name = self.all_args.algorithm_class.rsplit(".", 1)
+            try:
+                algorithm_module = importlib.import_module(module_name)
+                TrainAlgo = getattr(algorithm_module, class_name)
+            except (ImportError, AttributeError):
+                raise ValueError(f"Invalid policy module: {module_name}. Import failed.")
+        elif self.algorithm_name == "mat" or self.algorithm_name == "mat_dec":
+            from onpolicy.algorithms.mat.mat_trainer import MATTrainer as TrainAlgo
+        else:
             from onpolicy.algorithms.r_mappo.r_mappo import R_MAPPO as TrainAlgo
-            from onpolicy.algorithms.r_mappo.algorithm.rMAPPOPolicy import R_MAPPOPolicy as Policy
 
         share_observation_space = self.envs.share_observation_space[0] if self.use_centralized_V else self.envs.observation_space[0]
 
-        print("obs_space: ", self.envs.observation_space)
-        print("share_obs_space: ", self.envs.share_observation_space)
-        print("act_space: ", self.envs.action_space)
+        # print("obs_space: ", self.envs.observation_space)
+        # print("share_obs_space: ", self.envs.share_observation_space)
+        # print("act_space: ", self.envs.action_space)
         
         # policy network
         if self.algorithm_name == "mat" or self.algorithm_name == "mat_dec":

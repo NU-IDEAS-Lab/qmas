@@ -75,7 +75,7 @@ class Runner(object):
             from onpolicy.algorithms.hatrpo.policy import HATRPO_Policy as Policy
         else:
             from onpolicy.algorithms.r_mappo.r_mappo import R_MAPPO as TrainAlgo
-            from onpolicy.algorithms.r_mappo.algorithm.rMAPPOPolicy import R_MAPPOPolicy as Policy
+            from onpolicy.algorithms.r_mappo.rMAPPOPolicy import R_MAPPOPolicy as Policy
 
 
         print("share_observation_space: ", self.envs.share_observation_space)

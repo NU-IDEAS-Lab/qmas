@@ -1,5 +1,10 @@
 import math
+import networkx as nx
 import random 
+
+class CommunicationGraph(nx.Graph):
+    def add_agent(self, agent):
+        self.add_node(agent)
 
 class CommunicationModel():
     def __init__(self, model, p=0.1, alpha=0.3, beta=0.7, gamma=3, pt = 30.0, ps=-65.0):

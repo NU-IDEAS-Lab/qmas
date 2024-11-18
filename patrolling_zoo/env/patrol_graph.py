@@ -12,8 +12,6 @@ class NODE_TYPE(IntEnum):
 
 
 class PatrolGraph():
-    ''' This reads a graph file of the format provided by
-        https://github.com/davidbsp/patrolling_sim '''
     
     def __init__(self, filepath = None, numNodes = 40):
         self.graph = nx.Graph()
@@ -24,6 +22,9 @@ class PatrolGraph():
 
 
     def loadFromFile(self, filepath: str):
+        ''' This reads a graph file of the format provided by
+            https://github.com/davidbsp/patrolling_sim '''
+
         with open(filepath, "r") as file:
             # Read graph information.
             self.graphDimension = int(file.readline())

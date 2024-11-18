@@ -2,6 +2,7 @@ import torch
 import numpy as np
 import torch.nn.functional as F
 from onpolicy.utils.util import get_shape_from_obs_space, get_shape_from_act_space, has_graph_obs_space
+from collections.abc import Iterable
 
 
 def _flatten(T, N, x):
@@ -36,14 +37,16 @@ class SharedReplayBuffer(object):
         self.gamma = args.gamma
         self.gae_lambda = args.gae_lambda
         self._use_gae = args.use_gae
+        self._use_gae_amadm = args.use_gae_amadm
         self._use_popart = args.use_popart
         self._use_valuenorm = args.use_valuenorm
         self._use_proper_time_limits = args.use_proper_time_limits
         self.algo = args.algorithm_name
         self.num_agents = num_agents
 
-        obs_shape = get_shape_from_obs_space(obs_space)
-        share_obs_shape = get_shape_from_obs_space(cent_obs_space)
+        obs_shape = get_shape_from_obs_space(obs_space, flatten_dicts=False)
+        share_obs_shape = get_shape_from_obs_space(cent_obs_space, flatten_dicts=False)
+        act_shape = get_shape_from_act_space(act_space)
 
         if type(obs_shape[-1]) == list:
             obs_shape = obs_shape[:1]
@@ -69,20 +72,57 @@ class SharedReplayBuffer(object):
         self.advantages = np.zeros(
             (self.episode_length, self.n_rollout_threads, num_agents, 1), dtype=np.float32)
 
-        if act_space.__class__.__name__ == 'Discrete':
-            self.available_actions = np.ones((self.episode_length + 1, self.n_rollout_threads, num_agents, act_space.n),
-                                             dtype=np.float32)
+        # Store available actions.
+        def get_available_actions_space(action_space):
+            ''' Generate a Space for the available actions, given the action space. '''
+            try:
+                from gymnasium import spaces
+            except ImportError:
+                return None
+            def _get(action_space):
+                if action_space.__class__.__name__ in ["Tuple", "Dict"]:
+                    return spaces.Dict({k: _get(v) for k, v in action_space.spaces.items()})
+                elif action_space.__class__.__name__ == "Discrete":
+                    return spaces.MultiBinary(action_space.n)
+                elif action_space.__class__.__name__ == "MultiDiscrete":
+                    return spaces.MultiBinary(len(action_space.nvec), np.max(action_space.nvec))
+                elif action_space.__class__.__name__ == "Box" and np.issubdtype(action_space.dtype, np.integer):
+                    return spaces.MultiBinary(action_space.high - action_space.low + 1)
+                else:
+                    raise ValueError("Action space not supported.")
+            try:
+                res = _get(action_space)
+                return spaces.flatten_space(res)
+                # return res
+            except ValueError:
+                return None
+
+        available_actions_space = get_available_actions_space(act_space)
+        if available_actions_space != None:
+            available_actions_shape = get_shape_from_act_space(available_actions_space)
+            if isinstance(available_actions_shape, Iterable):
+                self.available_actions = np.ones((self.episode_length + 1, self.n_rollout_threads, num_agents, *available_actions_shape),
+                                                 dtype=np.float32)
+            else:
+                self.available_actions = np.ones((self.episode_length + 1, self.n_rollout_threads, num_agents, available_actions_shape),
+                                                 dtype=np.float32)
         else:
             self.available_actions = None
 
-        act_shape = get_shape_from_act_space(act_space)
-
-        self.actions = np.zeros(
-            (self.episode_length, self.n_rollout_threads, num_agents, act_shape), dtype=np.float32)
-        self.action_log_probs = np.zeros(
-            (self.episode_length, self.n_rollout_threads, num_agents, act_shape), dtype=np.float32)
+        if isinstance(act_shape, Iterable):
+            self.actions = np.zeros(
+                (self.episode_length, self.n_rollout_threads, num_agents, *act_shape), dtype=np.float32)
+            self.action_log_probs = np.zeros(
+                (self.episode_length, self.n_rollout_threads, num_agents, *act_shape), dtype=np.float32)
+        else:
+            self.actions = np.zeros(
+                (self.episode_length, self.n_rollout_threads, num_agents, act_shape), dtype=np.float32)
+            self.action_log_probs = np.zeros(
+                (self.episode_length, self.n_rollout_threads, num_agents, act_shape), dtype=np.float32)
         self.rewards = np.zeros(
             (self.episode_length, self.n_rollout_threads, num_agents, 1), dtype=np.float32)
+        self.deltaSteps = np.zeros(
+            (self.episode_length, self.n_rollout_threads, num_agents, 1), dtype=np.int32)
 
         self.masks = np.ones((self.episode_length + 1, self.n_rollout_threads, num_agents, 1), dtype=np.float32)
         self.bad_masks = np.ones_like(self.masks)
@@ -91,7 +131,7 @@ class SharedReplayBuffer(object):
         self.step = 0
 
     def insert(self, share_obs, obs, rnn_states_actor, rnn_states_critic, actions, action_log_probs,
-               value_preds, rewards, masks, bad_masks=None, active_masks=None, available_actions=None):
+               value_preds, rewards, masks, bad_masks=None, active_masks=None, delta_steps=None, available_actions=None):
         """
         Insert data into the buffer.
         :param share_obs: (argparse.Namespace) arguments containing relevant model, policy, and env information.
@@ -122,6 +162,8 @@ class SharedReplayBuffer(object):
             self.active_masks[self.step + 1] = active_masks.copy()
         if available_actions is not None:
             self.available_actions[self.step + 1] = available_actions.copy()
+        if delta_steps is not None:
+            self.deltaSteps[self.step] = delta_steps.copy()
 
         self.step = (self.step + 1) % self.episode_length
 
@@ -185,9 +227,30 @@ class SharedReplayBuffer(object):
         :param next_value: (np.ndarray) value predictions for the step after the last episode step.
         :param value_normalizer: (PopArt) If not None, PopArt value normalizer instance.
         """
+
         if last_step == -1:
             last_step = self.episode_length
-        if self._use_proper_time_limits:
+
+        # Check whether we should use the AMADM GAE modification from https://arxiv.org/abs/2308.06036
+        # Unfortunately, I don't have time to implement for all of the other options (like use_proper_time_limits),
+        # so I just ignore them!
+        if self._use_gae_amadm:
+            self.value_preds[last_step] = next_value
+            gae = 0
+            for step in reversed(range(last_step)):
+                if self._use_popart or self._use_valuenorm:
+                    delta = self.rewards[step] + np.power(self.gamma, self.deltaSteps[step]) * value_normalizer.denormalize(
+                        self.value_preds[step + 1]) * self.masks[step + 1] \
+                            - value_normalizer.denormalize(self.value_preds[step])
+                    gae = delta + np.power(self.gamma * self.gae_lambda, self.deltaSteps[step]) * self.masks[step + 1] * gae
+                    self.returns[step] = gae + value_normalizer.denormalize(self.value_preds[step])
+                else:
+                    delta = self.rewards[step] + np.power(self.gamma, self.deltaSteps[step]) * self.value_preds[step + 1] * self.masks[step + 1] - \
+                            self.value_preds[step]
+                    gae = delta + np.power(self.gamma * self.gae_lambda, self.deltaSteps[step]) * self.masks[step + 1] * gae
+                    self.returns[step] = gae + self.value_preds[step]
+        
+        elif self._use_proper_time_limits:
             if self._use_gae:
                 self.value_preds[last_step] = next_value
                 gae = 0
