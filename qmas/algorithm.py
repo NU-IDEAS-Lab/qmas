@@ -1,0 +1,86 @@
+import torch
+
+from onpolicy.algorithms.r_mappo.r_mappo import R_MAPPO
+from onpolicy.utils.util import get_grad_norm
+
+
+class QmasAlgorithm(R_MAPPO):
+    ''' This is the highest level class for the QMAS algorithm. It wraps the MAPPO algorithm and adds the diffusion model.
+        This class may be wrapped by other variants (so-called 2- or 3-module) to implement communication. '''
+
+    def __init__(self,
+                 args,
+                 policy,
+                 device=torch.device("cpu")):
+
+        super().__init__(args, policy, device)
+
+        self.diffuser = DIFFUSER #TODO add diffuser initialization
+        self.guide = GUIDE #TODO add guide initialization
+
+
+    def diffusion_update(self, diffusion_model, sample):
+        """
+        Update diffuser network.
+        :param sample: (Tuple) contains data batch with which to update networks.
+
+        :return value_loss: (torch.Tensor) diffusion loss value.
+        :return model_grad_norm: (torch.Tensor) gradient norm from model update.
+        """
+        gradient_accumulate_every = 2
+        diffusion_optimizer = torch.optim.Adam(diffusion_model.parameters(), lr=2e-4)
+        
+        share_obs_batch, obs_batch, rnn_states_batch, rnn_states_critic_batch, actions_batch, \
+        value_preds_batch, return_batch, masks_batch, active_masks_batch, old_action_log_probs_batch, \
+        adv_targ, available_actions_batch = sample
+
+        # Combine observations and actions for the diffuser input
+        # Assuming obs_batch and actions_batch are properly shaped
+        trajectories = torch.cat([obs_batch, actions_batch], dim=-1)
+    
+        for i in range(gradient_accumulate_every):
+            batch_size = trajectories.shape[0]
+            t = torch.randint(0, diffusion_model.n_timesteps, (batch_size,), device=trajectories.device).long()
+            
+            loss, info = diffusion_model.loss(trajectories, obs_batch, t)
+            loss = loss / gradient_accumulate_every
+            loss.backward()
+        
+        model_grad_norm = get_grad_norm(diffusion_model.model.parameters())
+
+        # Optimizer step
+        diffusion_optimizer.step()
+        diffusion_optimizer.zero_grad()
+
+        return loss.item(), model_grad_norm, info
+
+
+    def train_initialize_info(self, train_info):
+        super().train_initialize_info(train_info)
+        train_info['diffuser_loss'] = 0
+        train_info['guide_loss'] = 0
+
+
+    def train_sample(self, sample, train_info, update_actor=True, update_critic=True):
+        ''' Performs update for a single sample. '''
+        
+        super().train_sample(sample, train_info, update_actor, update_critic)
+
+        diffuser_loss, model_grad_norm, info = self.diffusion_update(self.diffuser, sample, update_model=True)
+        guide_loss, model_grad_norm, info = self.diffusion_update(self.guide, sample, update_model=True)
+
+        train_info['diffuser_loss'] += diffuser_loss.item()
+        train_info['guide_loss'] += guide_loss.item()
+
+
+
+    def prep_training(self):
+        super().prep_training()
+        self.diffuser.train()
+        self.guide.train()
+    
+
+    def prep_rollout(self):
+        super().prep_rollout()
+        self.diffuser.eval()
+        self.guide.eval()

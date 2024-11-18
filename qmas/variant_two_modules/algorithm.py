@@ -4,7 +4,7 @@ import numpy as np
 
 class QmasAlgorithm(R_MAPPO):
     """
-    Trainer class for QMAS to update policies.
+    Trainer class for QMAS to update policies. Also trains the diffusion model.
     """
 
     # The two-module variant actually uses the same algorithm as regular MAPPO. We just need to update the Actor class.
