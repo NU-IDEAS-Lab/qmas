@@ -51,6 +51,7 @@ class R_MAPPO():
         else:
             self.value_normalizer = None
 
+
     def cal_value_loss(self, values, value_preds_batch, return_batch, active_masks_batch, update_value_normalizer=True):
         """
         Calculate value function loss.
@@ -90,6 +91,7 @@ class R_MAPPO():
             value_loss = value_loss.mean()
 
         return value_loss
+
 
     def ppo_update(self, sample, update_actor=True, update_critic=True):
         """
@@ -172,6 +174,7 @@ class R_MAPPO():
 
         return value_loss, critic_grad_norm, policy_loss, dist_entropy, actor_grad_norm, imp_weights
 
+
     def train(self, buffer, update_actor=True, update_critic=True, last_step=-1):
         """
         Perform a training update using minibatch GD.
@@ -213,17 +216,7 @@ class R_MAPPO():
                 data_generator = buffer.feed_forward_generator(advantages, self.num_mini_batch, last_step=last_step)
 
             for sample in data_generator:
-
-                value_loss, critic_grad_norm, policy_loss, dist_entropy, actor_grad_norm, imp_weights \
-                    = self.ppo_update(sample, update_actor, update_critic)
-
-                train_info['value_loss'] += value_loss.item()
-                train_info['policy_loss'] += policy_loss.item()
-                train_info['dist_entropy'] += dist_entropy.item()
-                train_info['actor_grad_norm'] += actor_grad_norm
-                train_info['critic_grad_norm'] += critic_grad_norm
-                train_info['ratio'] += imp_weights.mean()
-
+                self.train_sample(sample, train_info, update_actor, update_critic)
                 num_updates += 1
 
         for k in train_info.keys():
@@ -231,9 +224,26 @@ class R_MAPPO():
  
         return train_info
 
+
+    def train_sample(self, sample, train_info, update_actor=True, update_critic=True):
+        ''' Performs training for a single sample.
+            Results are stored in train_info. '''
+
+        value_loss, critic_grad_norm, policy_loss, dist_entropy, actor_grad_norm, imp_weights \
+                    = self.ppo_update(sample, update_actor, update_critic)
+
+        train_info['value_loss'] += value_loss.item()
+        train_info['policy_loss'] += policy_loss.item()
+        train_info['dist_entropy'] += dist_entropy.item()
+        train_info['actor_grad_norm'] += actor_grad_norm
+        train_info['critic_grad_norm'] += critic_grad_norm
+        train_info['ratio'] += imp_weights.mean()
+
+
     def prep_training(self):
         self.policy.actor.train()
         self.policy.critic.train()
+
 
     def prep_rollout(self):
         self.policy.actor.eval()
