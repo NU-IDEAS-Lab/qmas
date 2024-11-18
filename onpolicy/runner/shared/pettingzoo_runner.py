@@ -15,14 +15,14 @@ from onpolicy.runner.shared.base_runner import Runner
 def _t2n(x):
     return x.detach().cpu().numpy()
 
-class PatrollingRunner(Runner):
+class PettingzooRunner(Runner):
     def __init__(self, config):
 
         # The default restore functionality is broken. Disable it and do it ourselves.
         model_dir = config['all_args'].model_dir
         config['all_args'].model_dir = None
 
-        super(PatrollingRunner, self).__init__(config)
+        super(PettingzooRunner, self).__init__(config)
         self.env_infos = defaultdict(list)
        
         # Perform restoration.
@@ -53,9 +53,8 @@ class PatrollingRunner(Runner):
                 # Get the number of steps taken by each agent since the agent was last ready.
                 delta_steps = np.array([info["deltaSteps"] for info in infos])
 
-                data = obs, share_obs, rewards, dones, infos, values, actions, action_log_probs, rnn_states, rnn_states_critic, delta_steps, available_actions
-                
                 # insert data into buffer
+                data = obs, share_obs, rewards, dones, infos, values, actions, action_log_probs, rnn_states, rnn_states_critic, delta_steps, available_actions
                 self.insert(data)
 
             # compute return and update network
@@ -83,7 +82,8 @@ class PatrollingRunner(Runner):
                                 int(total_num_steps / (end - start))))
                 
                 train_infos["average_episode_rewards"] = np.mean(self.buffer.rewards) * self.episode_length
-                print("average episode rewards is {} and idleness is {}".format(train_infos["average_episode_rewards"], np.mean(self.env_infos["avg_idleness"])))
+                train_infos["fps"] = total_num_steps / (end - start)
+                print("average episode reward is {}".format(train_infos["average_episode_rewards"]))
                 self.log_train(train_infos, total_num_steps)
                 self.log_env(self.env_infos, total_num_steps)
                 self.env_infos = defaultdict(list)
@@ -122,7 +122,11 @@ class PatrollingRunner(Runner):
         rnn_states = np.array(np.split(_t2n(rnn_states), self.n_rollout_threads))
         rnn_states_critic = np.array(np.split(_t2n(rnn_states_critic), self.n_rollout_threads))
 
-        actions_env = [actions[idx, :, 0] for idx in range(self.n_rollout_threads)]
+        if actions.shape[-1] == 1:
+            actions_env = [actions[idx, :, 0] for idx in range(self.n_rollout_threads)]
+        else:
+            actions_env = [actions[idx, :, :] for idx in range(self.n_rollout_threads)]
+        
 
         return values, actions, action_log_probs, rnn_states, rnn_states_critic, actions_env
 
@@ -160,6 +164,7 @@ class PatrollingRunner(Runner):
             value_preds=values,
             rewards=rewards,
             masks=masks,
+            delta_steps=delta_steps,
             available_actions=available_actions
         )
 
@@ -263,12 +268,10 @@ class PatrollingRunner(Runner):
         # init goal
         render_goals = np.zeros(self.all_args.render_episodes)
         for i_episode in range(self.all_args.render_episodes):
-            combined_obs = render_env.reset()
-            rnn_states = np.zeros((self.n_render_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=np.float32)
-            masks = np.ones((self.n_render_rollout_threads, self.num_agents, 1), dtype=np.float32)
-
             # Reset the environment and get the initial observations.
             obs, share_obs, available_actions = render_env.reset()
+            rnn_states = np.zeros((self.n_render_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=np.float32)
+            masks = np.ones((self.n_render_rollout_threads, self.num_agents, 1), dtype=np.float32)
 
             if self.all_args.save_gifs:        
                 frames = []

@@ -113,7 +113,7 @@ class PatrollingEnv(object):
 
         # For any agents which are ready, use the new action.
         for i in range(self.num_agents):
-            if action[i] != None:
+            if np.all(action[i]) != None:
                 actionPz[self.env.possible_agents[i]] = action[i]
 
                 # Reset step count.
@@ -187,7 +187,7 @@ class PatrollingEnv(object):
 
     def _available_actions_wrapper(self, available_actions):
         res = np.array([available_actions[a] for a in self.env.possible_agents])
-        res = np.reshape(res, (self.num_agents, -1))
+        # res = np.reshape(res, (self.num_agents, -1))
         return res
 
     def _obs_wrapper(self, obs):

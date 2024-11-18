@@ -1,3 +1,9 @@
+Code in this folder is derived from work by Yu et al. in https://arxiv.org/abs/2103.01955.
+
+Original readme file follows.
+
+---
+
 # MAPPO
 
 ## New Update！！！We support SMAC V2 now～

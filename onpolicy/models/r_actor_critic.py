@@ -1,14 +1,14 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from onpolicy.algorithms.utils.util import init, check
-from onpolicy.algorithms.utils.cnn import CNNBase
-from onpolicy.algorithms.utils.mlp import MLPBase, MLPLayer
-from onpolicy.algorithms.utils.gnn import GNNBase
-from onpolicy.algorithms.utils.rnn import RNNLayer
-from onpolicy.algorithms.utils.rnn import RNNLayer
-from onpolicy.algorithms.utils.act import ACTLayer
-from onpolicy.algorithms.utils.popart import PopArt
+from onpolicy.models.utils.util import init, check
+from onpolicy.models.utils.cnn import CNNBase
+from onpolicy.models.utils.mlp import MLPBase, MLPLayer
+from onpolicy.models.utils.gnn import GNNBase
+from onpolicy.models.utils.rnn import RNNLayer
+from onpolicy.models.utils.rnn import RNNLayer
+from onpolicy.models.utils.act import ACTLayer
+from onpolicy.models.utils.popart import PopArt
 from onpolicy.utils.util import get_shape_from_obs_space, get_graph_obs_space, strip_graph_obs_space, get_graph_obs_space_idx
 
 from torch_geometric.data import Batch
@@ -108,6 +108,12 @@ class R_Actor(nn.Module):
             obs_graph = obs[:, self.obs_space_graph_idx]
             nonGraphIdx = [i for i in range(obs.shape[1]) if i != self.obs_space_graph_idx]
             obs_nongraph = obs[:, nonGraphIdx]
+            if len(obs_nongraph.shape) > 1 and obs_nongraph.shape[1] > 0:
+                # The non-graph data is stored as an object dtype. Need to convert to float32.
+                obs_non_graph_float = np.zeros((obs_nongraph.shape[0], *obs_nongraph[0,0].shape), dtype=np.float32)
+                for i in range(obs_nongraph.shape[0]):
+                    obs_non_graph_float[i] = obs_nongraph[i, 0]
+                obs_nongraph = obs_non_graph_float
             obs_nongraph = check(obs_nongraph.astype(np.float32)).to(**self.tpdv)
 
             # Batch the graphs and pass through GNN.
@@ -184,6 +190,12 @@ class R_Actor(nn.Module):
             obs_graph = obs[:, self.obs_space_graph_idx]
             nonGraphIdx = [i for i in range(obs.shape[1]) if i != self.obs_space_graph_idx]
             obs_nongraph = obs[:, nonGraphIdx]
+            if len(obs_nongraph.shape) > 1 and obs_nongraph.shape[1] > 0:
+                # The non-graph data is stored as an object dtype. Need to convert to float32.
+                obs_non_graph_float = np.zeros((obs_nongraph.shape[0], *obs_nongraph[0,0].shape), dtype=np.float32)
+                for i in range(obs_nongraph.shape[0]):
+                    obs_non_graph_float[i] = obs_nongraph[i, 0]
+                obs_nongraph = obs_non_graph_float
             obs_nongraph = check(obs_nongraph.astype(np.float32)).to(**self.tpdv)
 
             # Batch the graphs and pass through GNN.
