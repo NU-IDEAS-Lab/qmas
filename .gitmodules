@@ -1,3 +1,0 @@
-[submodule "onpolicy/diffuser"]
-	path = diffuser
-	url = git@github.com:jannerm/diffuser.git
