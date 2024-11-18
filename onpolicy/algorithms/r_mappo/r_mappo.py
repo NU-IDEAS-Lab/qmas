@@ -197,13 +197,7 @@ class R_MAPPO():
         
 
         train_info = {}
-
-        train_info['value_loss'] = 0
-        train_info['policy_loss'] = 0
-        train_info['dist_entropy'] = 0
-        train_info['actor_grad_norm'] = 0
-        train_info['critic_grad_norm'] = 0
-        train_info['ratio'] = 0
+        self.train_initialize_info(train_info)
 
         num_updates = 0
 
@@ -238,6 +232,17 @@ class R_MAPPO():
         train_info['actor_grad_norm'] += actor_grad_norm
         train_info['critic_grad_norm'] += critic_grad_norm
         train_info['ratio'] += imp_weights.mean()
+
+
+    def train_initialize_info(self, train_info):
+        ''' Initializes training info. '''
+        
+        train_info['value_loss'] = 0
+        train_info['policy_loss'] = 0
+        train_info['dist_entropy'] = 0
+        train_info['actor_grad_norm'] = 0
+        train_info['critic_grad_norm'] = 0
+        train_info['ratio'] = 0
 
 
     def prep_training(self):
