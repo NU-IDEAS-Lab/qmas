@@ -57,7 +57,6 @@ class ValueFunction(nn.Module):
         self,
         horizon,
         transition_dim,
-        cond_dim,
         dim=32,
         dim_mults=(1, 2, 4, 8),
         out_dim=1,
@@ -177,7 +176,6 @@ class ValueDiffusion(nn.Module):
         self.model = ValueFunction(
                                     horizon = self.horizon,
                                     transition_dim = self.transition_dim,
-                                    cond_dim = self.observation_dim,
                                     dim=32,
                                     dim_mults=(1, 2, 4, 8),
                                     out_dim=1

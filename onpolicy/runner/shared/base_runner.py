@@ -107,9 +107,9 @@ class Runner(object):
 
         # algorithm
         if self.algorithm_name == "mat" or self.algorithm_name == "mat_dec":
-            self.trainer = TrainAlgo(self.all_args, self.policy, self.num_agents, device = self.device)
+            self.trainer = TrainAlgo(self.all_args, self.policy, self.envs, self.num_agents, device = self.device)
         else:
-            self.trainer = TrainAlgo(self.all_args, self.policy, device = self.device)
+            self.trainer = TrainAlgo(self.all_args, self.policy, self.envs, device = self.device)
         
         # buffer
         self.buffer = SharedReplayBuffer(self.all_args,

@@ -1,7 +1,7 @@
 import torch
 
 from onpolicy.algorithms.r_mappo.r_mappo import R_MAPPO
-from onpolicy.utils.util import get_grad_norm
+from onpolicy.utils.util import get_grad_norm, get_shape_from_obs_space, get_shape_from_act_space
 from onpolicy.models.utils.diffuser import GaussianDiffusion
 from onpolicy.models.utils.guide import ValueDiffusion
 
@@ -13,17 +13,24 @@ class QmasAlgorithm(R_MAPPO):
     def __init__(self,
                  args,
                  policy,
+                 env,
                  device=torch.device("cpu")):
 
         super().__init__(args, policy, device)
 
-        self.diffuser = GaussianDiffusion(horizon = 32, observation_dim = 0, action_dim = 0, n_timesteps=20,
-        loss_type='l2', clip_denoised=False, predict_epsilon=False,
-        action_weight=10, loss_discount=1.0, loss_weights=None)
+        self.env = env
+        self.observation_dim = get_shape_from_obs_space(self.envs.observation_space)
+        self.action_dim = get_shape_from_act_space(self.envs.action_space)
         
-        self.guide = ValueDiffusion(horizon = 32, observation_dim = 0, action_dim = 0, n_timesteps=20,
-        loss_type='value_l2', clip_denoised=False, predict_epsilon=True,
-        action_weight=1.0, loss_discount=1.0, loss_weights=None) 
+        self.diffuser = GaussianDiffusion(horizon = 32, observation_dim = self.observation_dim, 
+                                          action_dim = self.action_dim , n_timesteps=20, loss_type='l2', 
+                                          clip_denoised=False, predict_epsilon=False,
+                                          action_weight=10, loss_discount=1.0, loss_weights=None)
+        
+        self.guide = ValueDiffusion(horizon = 32, observation_dim = self.observation_dim, 
+                                    action_dim = self.action_dim , n_timesteps=20, loss_type='value_l2', 
+                                    clip_denoised=False, predict_epsilon=True, action_weight=1.0, 
+                                    loss_discount=1.0, loss_weights=None) 
 
 
     def diffusion_update(self, diffusion_model, sample):
