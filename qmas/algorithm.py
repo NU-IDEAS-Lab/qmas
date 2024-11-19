@@ -2,6 +2,8 @@ import torch
 
 from onpolicy.algorithms.r_mappo.r_mappo import R_MAPPO
 from onpolicy.utils.util import get_grad_norm
+from onpolicy.models.utils.diffuser import GaussianDiffusion
+from onpolicy.models.utils.guide import ValueDiffusion
 
 
 class QmasAlgorithm(R_MAPPO):
@@ -15,8 +17,13 @@ class QmasAlgorithm(R_MAPPO):
 
         super().__init__(args, policy, device)
 
-        self.diffuser = DIFFUSER #TODO add diffuser initialization
-        self.guide = GUIDE #TODO add guide initialization
+        self.diffuser = GaussianDiffusion(horizon = 32, observation_dim = 0, action_dim = 0, n_timesteps=20,
+        loss_type='l2', clip_denoised=False, predict_epsilon=False,
+        action_weight=10, loss_discount=1.0, loss_weights=None)
+        
+        self.guide = ValueDiffusion(horizon = 32, observation_dim = 0, action_dim = 0, n_timesteps=20,
+        loss_type='value_l2', clip_denoised=False, predict_epsilon=True,
+        action_weight=1.0, loss_discount=1.0, loss_weights=None) 
 
 
     def diffusion_update(self, diffusion_model, sample):

@@ -174,7 +174,14 @@ class ValueDiffusion(nn.Module):
         self.observation_dim = observation_dim
         self.action_dim = action_dim
         self.transition_dim = observation_dim + action_dim
-        self.model = model
+        self.model = ValueFunction(
+                                    horizon = self.horizon,
+                                    transition_dim = self.transition_dim,
+                                    cond_dim = self.observation_dim,
+                                    dim=32,
+                                    dim_mults=(1, 2, 4, 8),
+                                    out_dim=1
+                                )
 
         betas = cosine_beta_schedule(n_timesteps)
         alphas = 1. - betas

@@ -188,7 +188,7 @@ class TemporalUnet(nn.Module):
         return x
 
 class GaussianDiffusion(nn.Module):
-    def __init__(self, model, horizon = 32, observation_dim, action_dim, n_timesteps=20,
+    def __init__(self, model = None, horizon = 32, observation_dim, action_dim, n_timesteps=20,
         loss_type='l2', clip_denoised=False, predict_epsilon=False,
         action_weight=10, loss_discount=1.0, loss_weights=None,
     ):
@@ -197,12 +197,15 @@ class GaussianDiffusion(nn.Module):
         self.observation_dim = observation_dim
         self.action_dim = action_dim
         self.transition_dim = observation_dim + action_dim
-        self.model = self.model = TemporalUnet(
-            horizon=horizon,
-            transition_dim=transition_dim, 
-            dim=32, 
-            dim_mults=(1, 2, 4, 8)  
-        )
+        if model is None:
+            self.model = TemporalUnet(
+                horizon=self.horizon,
+                transition_dim=self.transition_dim,
+                dim=32,
+                dim_mults=(1, 2, 4, 8)
+            )
+        else:
+            self.model = model
 
         betas = cosine_beta_schedule(n_timesteps)
         alphas = 1. - betas
