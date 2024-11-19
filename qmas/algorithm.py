@@ -56,7 +56,7 @@ class QmasAlgorithm(R_MAPPO):
             batch_size = trajectories.shape[0]
             t = torch.randint(0, diffusion_model.n_timesteps, (batch_size,), device=trajectories.device).long()
             
-            loss, info = diffusion_model.loss(trajectories, obs_batch, t)
+            loss, info = diffusion_model.loss(trajectories, share_obs_batch, t)
             loss = loss / gradient_accumulate_every
             loss.backward()
         
