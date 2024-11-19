@@ -16,7 +16,7 @@ class QmasAlgorithm(R_MAPPO):
                  env,
                  device=torch.device("cpu")):
 
-        super().__init__(args, policy, device)
+        super().__init__(args, policy, env, device)
 
         self.env = env
         self.observation_dim = get_shape_from_obs_space(self.envs.observation_space)
