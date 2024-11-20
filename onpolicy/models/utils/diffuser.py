@@ -4,7 +4,7 @@ import torch
 from torch import nn
 import pdb
 
-from diffuser_helpers import (
+from .diffuser_helpers import (
     SinusoidalPosEmb,
     Downsample1d,
     Upsample1d,
@@ -99,7 +99,7 @@ class TemporalUnet(nn.Module):
     def __init__(
         self,
         horizon = 32,          # Length of input sequence
-        transition_dim,   # Dimension of input/output features
+        transition_dim=32,   # Dimension of input/output features
         dim=32,          # Base dimension for the network
         dim_mults=(1, 2, 4, 8),  # Dimension multipliers for each level
     ):
@@ -188,7 +188,8 @@ class TemporalUnet(nn.Module):
         return x
 
 class GaussianDiffusion(nn.Module):
-    def __init__(self, model = None, horizon = 32, observation_dim, action_dim, n_timesteps=20,
+    def __init__(self, observation_dim, action_dim,
+        model = None, horizon = 32, n_timesteps=20,
         loss_type='l2', clip_denoised=False, predict_epsilon=False,
         action_weight=10, loss_discount=1.0, loss_weights=None,
     ):
@@ -244,7 +245,7 @@ class GaussianDiffusion(nn.Module):
         loss_weights = self.get_loss_weights(action_weight, loss_discount, loss_weights)
         self.loss_fn = Losses[loss_type](loss_weights, self.action_dim)
 
-    def get_loss_weights(self, action_weight = 10, discount, weights_dict):
+    def get_loss_weights(self, action_weight, discount, weights_dict):
         '''
             sets loss coefficients for trajectory
 
