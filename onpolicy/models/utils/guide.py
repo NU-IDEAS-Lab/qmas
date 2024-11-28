@@ -4,7 +4,7 @@ import einops
 from einops.layers.torch import Rearrange
 import pdb
 
-from diffuser_helpers import (
+from onpolicy.utils.diffuser_helpersdiffuser_helpers import (
     SinusoidalPosEmb,
     Downsample1d,
     Upsample1d,
@@ -164,7 +164,7 @@ def make_timesteps(batch_size, i, device):
 
 
 class ValueDiffusion(nn.Module):
-    def __init__(self, model, horizon = 32, observation_dim, action_dim, n_timesteps=20,
+    def __init__(self, model, horizon, observation_dim, action_dim, n_timesteps=20,
         loss_type='value_l2', clip_denoised=False, predict_epsilon=True,
         action_weight=1.0, loss_discount=1.0, loss_weights=None,
     ):
