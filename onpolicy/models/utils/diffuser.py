@@ -4,7 +4,7 @@ import torch
 from torch import nn
 import pdb
 
-from onpolicy.utils.diffuser_helpers import (
+from .diffuser_helpers import (
     SinusoidalPosEmb,
     Downsample1d,
     Upsample1d,

@@ -3,8 +3,9 @@ import torch.nn as nn
 import einops
 from einops.layers.torch import Rearrange
 import pdb
+from collections import namedtuple
 
-from onpolicy.utils.diffuser_helpersdiffuser_helpers import (
+from .diffuser_helpers import (
     SinusoidalPosEmb,
     Downsample1d,
     Upsample1d,

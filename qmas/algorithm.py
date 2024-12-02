@@ -19,8 +19,8 @@ class QmasAlgorithm(R_MAPPO):
         super().__init__(args, policy, env, device)
 
         self.env = env
-        self.observation_dim = get_shape_from_obs_space(self.envs.observation_space)
-        self.action_dim = get_shape_from_act_space(self.envs.action_space)
+        self.observation_dim = get_shape_from_obs_space(env.observation_space[0], flatten_dicts=False)
+        self.action_dim = get_shape_from_act_space(env.action_space[0])
         
         self.diffuser = GaussianDiffusion(horizon = 32, observation_dim = self.observation_dim, 
                                           action_dim = self.action_dim , n_timesteps=20, loss_type='l2', 
