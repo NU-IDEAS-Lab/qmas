@@ -207,9 +207,9 @@ class GaussianDiffusion(nn.Module):
     ):
         super().__init__()
         self.horizon = horizon
-        self.observation_dim = observation_dim
+        self.observation_dim = observation_dim[0]
         self.action_dim = action_dim
-        self.transition_dim = observation_dim + action_dim
+        self.transition_dim = observation_dim[0] + action_dim
         if model is None:
             self.model = TemporalUnet(
                 horizon=self.horizon,
