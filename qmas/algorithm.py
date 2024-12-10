@@ -23,12 +23,12 @@ class QmasAlgorithm(R_MAPPO):
         self.action_dim = get_shape_from_act_space(env.action_space[0])
         
         self.diffuser = GaussianDiffusion(horizon = 32, observation_dim = self.observation_dim, 
-                                          action_dim = self.action_dim , n_timesteps=20, loss_type='l2', 
+                                          action_dim = self.action_dim , n_timesteps=20, model = None, loss_type='l2', 
                                           clip_denoised=False, predict_epsilon=False,
                                           action_weight=10, loss_discount=1.0, loss_weights=None)
         
         self.guide = ValueDiffusion(horizon = 32, observation_dim = self.observation_dim, 
-                                    action_dim = self.action_dim , n_timesteps=20, loss_type='value_l2', 
+                                    action_dim = self.action_dim , n_timesteps=20, model = None, loss_type='value_l2', 
                                     clip_denoised=False, predict_epsilon=True, action_weight=1.0, 
                                     loss_discount=1.0, loss_weights=None) 
 

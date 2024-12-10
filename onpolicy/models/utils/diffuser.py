@@ -1,4 +1,5 @@
 from collections import namedtuple
+from einops.layers.torch import Rearrange
 import numpy as np
 import torch
 from torch import nn
