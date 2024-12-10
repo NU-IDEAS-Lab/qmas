@@ -41,33 +41,35 @@ class QmasAlgorithm(R_MAPPO):
         :return value_loss: (torch.Tensor) diffusion loss value.
         :return model_grad_norm: (torch.Tensor) gradient norm from model update.
         """
-        gradient_accumulate_every = 2
-        diffusion_optimizer = torch.optim.Adam(diffusion_model.parameters(), lr=2e-4)
-        
-        share_obs_batch, obs_batch, rnn_states_batch, rnn_states_critic_batch, actions_batch, \
-        value_preds_batch, return_batch, masks_batch, active_masks_batch, old_action_log_probs_batch, \
-        adv_targ, available_actions_batch = sample
-
-        # Combine observations and actions for the diffuser input
-        # Assuming obs_batch and actions_batch are properly shaped
-        trajectories = torch.cat([obs_batch, actions_batch], dim=-1)
-    
-        for i in range(gradient_accumulate_every):
-            batch_size = trajectories.shape[0]
-            t = torch.randint(0, diffusion_model.n_timesteps, (batch_size,), device=trajectories.device).long()
+        if update_model:
+            gradient_accumulate_every = 2
+            diffusion_optimizer = torch.optim.Adam(diffusion_model.parameters(), lr=2e-4)
             
-            loss, info = diffusion_model.loss(trajectories, share_obs_batch, t)
-            loss = loss / gradient_accumulate_every
-            loss.backward()
+            share_obs_batch, obs_batch, rnn_states_batch, rnn_states_critic_batch, actions_batch, \
+            value_preds_batch, return_batch, masks_batch, active_masks_batch, old_action_log_probs_batch, \
+            adv_targ, available_actions_batch = sample
+
+            # Combine observations and actions for the diffuser input
+            # Assuming obs_batch and actions_batch are properly shaped
+            trajectories = torch.cat([obs_batch, actions_batch], dim=-1)
         
-        model_grad_norm = get_grad_norm(diffusion_model.model.parameters())
+            for i in range(gradient_accumulate_every):
+                batch_size = trajectories.shape[0]
+                t = torch.randint(0, diffusion_model.n_timesteps, (batch_size,), device=trajectories.device).long()
+                
+                loss, info = diffusion_model.loss(trajectories, share_obs_batch, t)
+                loss = loss / gradient_accumulate_every
+                loss.backward()
+            
+            model_grad_norm = get_grad_norm(diffusion_model.model.parameters())
 
-        # Optimizer step
-        diffusion_optimizer.step()
-        diffusion_optimizer.zero_grad()
+            # Optimizer step
+            diffusion_optimizer.step()
+            diffusion_optimizer.zero_grad()
 
-        return loss.item(), model_grad_norm, info
-
+            return loss.item(), model_grad_norm, info
+        else:
+            return None
 
     def train_initialize_info(self, train_info):
         super().train_initialize_info(train_info)
