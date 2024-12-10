@@ -33,7 +33,7 @@ class QmasAlgorithm(R_MAPPO):
                                     loss_discount=1.0, loss_weights=None) 
 
 
-    def diffusion_update(self, diffusion_model, sample):
+    def diffusion_update(self, diffusion_model, sample, update_model):
         """
         Update diffuser network.
         :param sample: (Tuple) contains data batch with which to update networks.
