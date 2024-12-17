@@ -382,13 +382,12 @@ class GaussianDiffusion(nn.Module):
             loss, info = self.loss_fn(x_recon, noise)
         else:
             loss, info = self.loss_fn(x_recon, x_start)
-
         return loss, info
 
     def loss(self, x, *args):
         batch_size = len(x)
         t = torch.randint(0, self.n_timesteps, (batch_size,), device=x.device).long()
-        return self.p_losses(x, *args, t)
+        return self.p_losses(x, cond = {"time": [0], "state": [0]}, t = t)
 
     def forward(self, cond, *args, **kwargs):
         return self.conditional_sample(cond, *args, **kwargs)
