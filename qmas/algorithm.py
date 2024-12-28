@@ -49,12 +49,13 @@ class QmasAlgorithm(R_MAPPO):
             value_preds_batch, return_batch, masks_batch, active_masks_batch, old_action_log_probs_batch, \
             adv_targ, available_actions_batch = sample
             
-            cond = [()]
+            # cond = [()]
 
             # Combine observations and actions for the diffuser input
             # Assuming obs_batch and actions_batch are properly shaped
             obs_batch = torch.from_numpy(obs_batch)
             actions_batch = torch.from_numpy(actions_batch)
+            print("obs action", obs_batch.shape, actions_batch.shape)
             trajectories = torch.cat([obs_batch, actions_batch], dim=-1)
         
             for i in range(gradient_accumulate_every):

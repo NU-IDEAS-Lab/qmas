@@ -1,5 +1,6 @@
 from collections import namedtuple
 from einops.layers.torch import Rearrange
+import einops
 import numpy as np
 import torch
 from torch import nn
@@ -373,7 +374,7 @@ class GaussianDiffusion(nn.Module):
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
         x_noisy = apply_conditioning(x_noisy, cond, self.action_dim)
 
-        x_recon = self.model(x_noisy, cond, t)
+        x_recon = self.model(x_noisy, t)
         x_recon = apply_conditioning(x_recon, cond, self.action_dim)
 
         assert noise.shape == x_recon.shape
@@ -387,10 +388,8 @@ class GaussianDiffusion(nn.Module):
     def loss(self, x, *args):
         batch_size = len(x)
         t = torch.randint(0, self.n_timesteps, (batch_size,), device=x.device).long()
-        data = {"time": [0], "state": [0]}
         cond = {
-            "time": torch.FloatTensor(data["time"]),
-            "state": torch.FloatTensor(data["state"])
+        0: torch.zeros((batch_size, 1), device=x.device)
         }
         return self.p_losses(x, cond, t = t)
 
