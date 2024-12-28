@@ -144,11 +144,7 @@ def cosine_beta_schedule(timesteps, s=0.008, dtype=torch.float32):
     return torch.tensor(betas_clipped, dtype=dtype)
 
 def apply_conditioning(x, conditions, action_dim):
-
-    print("x shape: ", x.shape)
-    
     for t, val in conditions.items():
-        print("val shape: ", val.shape)
         x[:, t, action_dim:] = val.clone()
     return x
 
@@ -182,22 +178,22 @@ class ValueLoss(nn.Module):
     def forward(self, pred, targ):
         loss = (self._loss(pred, targ)).mean()
 
-        if len(pred) > 1:
-            corr = np.corrcoef(
-                to_np(pred).squeeze(),
-                to_np(targ).squeeze()
-            )[0,1]
-        else:
-            corr = np.NaN
+        # if len(pred) > 1:
+        #     corr = np.corrcoef(
+        #         to_np(pred).squeeze(),
+        #         to_np(targ).squeeze()
+        #     )[0,1]
+        # else:
+        #     corr = np.NaN
 
-        info = {
-            # 'mean_pred': pred.mean(), 'mean_targ': targ.mean(),
-            # 'min_pred': pred.min(), 'min_targ': targ.min(),
-            # 'max_pred': pred.max(), 'max_targ': targ.max(),
-            # 'corr': corr,
-        }
+        # info = {
+        #     'mean_pred': pred.mean(), 'mean_targ': targ.mean(),
+        #     'min_pred': pred.min(), 'min_targ': targ.min(),
+        #     'max_pred': pred.max(), 'max_targ': targ.max(),
+        #     'corr': corr,
+        # }
         print("loss type: ", loss.dtype)
-        return loss, info
+        return loss, {'a0_loss': None}
 
 class WeightedL1(WeightedLoss):
 

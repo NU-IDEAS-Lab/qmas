@@ -54,9 +54,7 @@ class QmasAlgorithm(R_MAPPO):
             # Combine observations and actions for the diffuser input
             # Assuming obs_batch and actions_batch are properly shaped
             obs_batch = torch.from_numpy(obs_batch).unsqueeze(1)
-            # x = x.unsqueeze(1)
             actions_batch = torch.from_numpy(actions_batch).unsqueeze(1)
-            print("obs action", obs_batch.shape, actions_batch.shape)
             trajectories = torch.cat([obs_batch, actions_batch], dim=-1)
         
             for i in range(gradient_accumulate_every):
@@ -66,6 +64,9 @@ class QmasAlgorithm(R_MAPPO):
                 loss, info = diffusion_model.loss(trajectories, share_obs_batch, t)
                 loss = loss / gradient_accumulate_every
                 print("algo loss dtype: ", loss.dtype)
+                print("Model parameter types:")
+                for name, param in diffusion_model.model.named_parameters():
+                    print(f"{name}: {param.dtype}")
                 loss.backward()
             
             model_grad_norm = get_grad_norm(diffusion_model.model.parameters())
