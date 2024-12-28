@@ -65,6 +65,7 @@ class QmasAlgorithm(R_MAPPO):
                 
                 loss, info = diffusion_model.loss(trajectories, share_obs_batch, t)
                 loss = loss / gradient_accumulate_every
+                print("algo loss dtype: ", loss.dtype)
                 loss.backward()
             
             model_grad_norm = get_grad_norm(diffusion_model.model.parameters())
@@ -91,8 +92,8 @@ class QmasAlgorithm(R_MAPPO):
         diffuser_loss, model_grad_norm, info = self.diffusion_update(self.diffuser, sample, update_model=True)
         guide_loss, model_grad_norm, info = self.diffusion_update(self.guide, sample, update_model=True)
 
-        train_info['diffuser_loss'] += diffuser_loss.item()
-        train_info['guide_loss'] += guide_loss.item()
+        train_info['diffuser_loss'] += diffuser_loss
+        train_info['guide_loss'] += guide_loss
 
 
 

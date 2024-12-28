@@ -169,9 +169,10 @@ class WeightedLoss(nn.Module):
             pred, targ : tensor
                 [ batch_size x horizon x transition_dim ]
         '''
-        loss = (self._loss(pred, targ)).mean()
+        loss = self._loss(pred, targ).mean()
         # weighted_loss = (loss * self.weights).mean()
         # a0_loss = (loss[:, 0, :self.action_dim] / self.weights[0, :self.action_dim]).mean()
+        print("loss type: ", loss.dtype)
         return loss, {'a0_loss': None}
 
 class ValueLoss(nn.Module):
@@ -179,7 +180,7 @@ class ValueLoss(nn.Module):
         super().__init__()
 
     def forward(self, pred, targ):
-        loss = self._loss(pred, targ).mean()
+        loss = (self._loss(pred, targ)).mean()
 
         if len(pred) > 1:
             corr = np.corrcoef(
@@ -190,12 +191,12 @@ class ValueLoss(nn.Module):
             corr = np.NaN
 
         info = {
-            'mean_pred': pred.mean(), 'mean_targ': targ.mean(),
-            'min_pred': pred.min(), 'min_targ': targ.min(),
-            'max_pred': pred.max(), 'max_targ': targ.max(),
-            'corr': corr,
+            # 'mean_pred': pred.mean(), 'mean_targ': targ.mean(),
+            # 'min_pred': pred.min(), 'min_targ': targ.min(),
+            # 'max_pred': pred.max(), 'max_targ': targ.max(),
+            # 'corr': corr,
         }
-
+        print("loss type: ", loss.dtype)
         return loss, info
 
 class WeightedL1(WeightedLoss):
