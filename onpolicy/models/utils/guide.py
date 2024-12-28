@@ -338,11 +338,15 @@ class ValueDiffusion(nn.Module):
 
     def p_losses(self, x_start, cond, target, t):
         noise = torch.randn_like(x_start)
-
+        
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
+        cond = {
+        0: torch.zeros((len(x_noisy), 1), device=x_noisy.device)
+        }
         x_noisy = apply_conditioning(x_noisy, cond, self.action_dim)
 
         pred = self.model(x_noisy, cond, t)
+        
 
         loss, info = self.loss_fn(pred, target)
         return loss, info
