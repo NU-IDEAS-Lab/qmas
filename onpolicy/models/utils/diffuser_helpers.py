@@ -143,22 +143,15 @@ def cosine_beta_schedule(timesteps, s=0.008, dtype=torch.float32):
     betas_clipped = np.clip(betas, a_min=0, a_max=0.999)
     return torch.tensor(betas_clipped, dtype=dtype)
 
-# def apply_conditioning(x, conditions, action_dim):
-
-#     print("x shape: ", x.shape)
-    
-#     for t, val in conditions.items():
-#         print("val shape: ", val.shape)
-#         x[:, t, action_dim:] = val.clone()
-#     return x
-
 def apply_conditioning(x, conditions, action_dim):
+
     print("x shape: ", x.shape)
     
     for t, val in conditions.items():
         print("val shape: ", val.shape)
-        x[:, action_dim:] = val.clone()
+        x[:, t, action_dim:] = val.clone()
     return x
+
 
 #-----------------------------------------------------------------------------#
 #---------------------------------- losses -----------------------------------#

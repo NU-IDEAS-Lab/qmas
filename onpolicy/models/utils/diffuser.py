@@ -4,6 +4,7 @@ import einops
 import numpy as np
 import torch
 from torch import nn
+import torch.nn.functional as F
 import pdb
 
 from .diffuser_helpers import (
@@ -179,7 +180,10 @@ class TemporalUnet(nn.Module):
         
         # Upsampling with skip connections
         for resnet, resnet2, upsample in self.ups:
-            x = torch.cat((x, h.pop()), dim=1)
+            skip = h.pop()
+            if skip.shape[2:] != x.shape[2:]:
+                skip = F.interpolate(skip, size=x.shape[2:], mode='nearest')
+            x = torch.cat((x, skip), dim=1)
             x = resnet(x, t)
             x = resnet2(x, t)
             x = upsample(x)
@@ -377,6 +381,7 @@ class GaussianDiffusion(nn.Module):
         x_recon = self.model(x_noisy, t)
         x_recon = apply_conditioning(x_recon, cond, self.action_dim)
 
+        print("noise shape: " noise.shape, "x_recon shape: ", x_recon.shape)
         assert noise.shape == x_recon.shape
 
         if self.predict_epsilon:
