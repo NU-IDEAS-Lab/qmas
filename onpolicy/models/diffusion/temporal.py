@@ -1,15 +1,20 @@
+# THIS FILE ORIGINALLY FROM https://github.com/jannerm/diffuser/blob/7ea422860cc0106e5ca5949d980f04b799d5462c/diffuser/models/temporal.py
+# Minor modifications have been made to the original file.
+
+
 import torch
 import torch.nn as nn
 import einops
-import torch.nn.functional as F
 from einops.layers.torch import Rearrange
 
-
-from .diffuser_helpers import (
+from .helpers import (
     SinusoidalPosEmb,
     Downsample1d,
     Upsample1d,
     Conv1dBlock,
+    Residual,
+    PreNorm,
+    LinearAttention,
 )
 
 
@@ -45,97 +50,101 @@ class ResidualTemporalBlock(nn.Module):
 
 
 class TemporalUnet(nn.Module):
+
     def __init__(
         self,
-        horizon = 32,          # Length of input sequence
-        transition_dim=32,   # Dimension of input/output features
-        dim=32,          # Base dimension for the network
-        dim_mults=(1, 2, 4, 8),  # Dimension multipliers for each level
+        horizon,
+        transition_dim,
+        cond_dim,
+        dim=32,
+        dim_mults=(1, 2, 4, 8),
+        attention=False,
     ):
         super().__init__()
-        
-        # Calculate dimensions for each layer
+
         dims = [transition_dim, *map(lambda m: dim * m, dim_mults)]
         in_out = list(zip(dims[:-1], dims[1:]))
-        
-        # Time embedding
+        print(f'[ models/temporal ] Channel dimensions: {in_out}')
+
+        time_dim = dim
         self.time_mlp = nn.Sequential(
             SinusoidalPosEmb(dim),
             nn.Linear(dim, dim * 4),
             nn.Mish(),
             nn.Linear(dim * 4, dim),
         )
-        
-        # Downsampling path
+
         self.downs = nn.ModuleList([])
+        self.ups = nn.ModuleList([])
         num_resolutions = len(in_out)
-        
+
+        print(in_out)
         for ind, (dim_in, dim_out) in enumerate(in_out):
             is_last = ind >= (num_resolutions - 1)
+
             self.downs.append(nn.ModuleList([
-                ResidualTemporalBlock(dim_in, dim_out, embed_dim=dim, horizon=horizon),
-                ResidualTemporalBlock(dim_out, dim_out, embed_dim=dim, horizon=horizon),
+                ResidualTemporalBlock(dim_in, dim_out, embed_dim=time_dim, horizon=horizon),
+                ResidualTemporalBlock(dim_out, dim_out, embed_dim=time_dim, horizon=horizon),
+                Residual(PreNorm(dim_out, LinearAttention(dim_out))) if attention else nn.Identity(),
                 Downsample1d(dim_out) if not is_last else nn.Identity()
             ]))
+
             if not is_last:
                 horizon = horizon // 2
-        
-        # Middle blocks
+
         mid_dim = dims[-1]
-        self.mid_block1 = ResidualTemporalBlock(mid_dim, mid_dim, embed_dim=dim, horizon=horizon)
-        self.mid_block2 = ResidualTemporalBlock(mid_dim, mid_dim, embed_dim=dim, horizon=horizon)
-        
-        # Upsampling path
-        self.ups = nn.ModuleList([])
+        self.mid_block1 = ResidualTemporalBlock(mid_dim, mid_dim, embed_dim=time_dim, horizon=horizon)
+        self.mid_attn = Residual(PreNorm(mid_dim, LinearAttention(mid_dim))) if attention else nn.Identity()
+        self.mid_block2 = ResidualTemporalBlock(mid_dim, mid_dim, embed_dim=time_dim, horizon=horizon)
+
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
             is_last = ind >= (num_resolutions - 1)
+
             self.ups.append(nn.ModuleList([
-                ResidualTemporalBlock(dim_out * 2, dim_in, embed_dim=dim, horizon=horizon),
-                ResidualTemporalBlock(dim_in, dim_in, embed_dim=dim, horizon=horizon),
+                ResidualTemporalBlock(dim_out * 2, dim_in, embed_dim=time_dim, horizon=horizon),
+                ResidualTemporalBlock(dim_in, dim_in, embed_dim=time_dim, horizon=horizon),
+                Residual(PreNorm(dim_in, LinearAttention(dim_in))) if attention else nn.Identity(),
                 Upsample1d(dim_in) if not is_last else nn.Identity()
             ]))
+
             if not is_last:
                 horizon = horizon * 2
-        
-        # Final convolution
+
         self.final_conv = nn.Sequential(
             Conv1dBlock(dim, dim, kernel_size=5),
             nn.Conv1d(dim, transition_dim, 1),
         )
 
-    def forward(self, x, time):
-        # Reshape input: [batch, horizon, transition] -> [batch, transition, horizon]
+    def forward(self, x, cond, time):
+        '''
+            x : [ batch x horizon x transition ]
+        '''
+
         x = einops.rearrange(x, 'b h t -> b t h')
-        
-        # Time embedding
+
         t = self.time_mlp(time)
-        
-        # Store skip connections
         h = []
-        
-        # Downsampling
-        for resnet, resnet2, downsample in self.downs:
+
+        for resnet, resnet2, attn, downsample in self.downs:
             x = resnet(x, t)
             x = resnet2(x, t)
+            x = attn(x)
             h.append(x)
             x = downsample(x)
-        
-        # Middle
+
         x = self.mid_block1(x, t)
+        x = self.mid_attn(x)
         x = self.mid_block2(x, t)
-        
-        # Upsampling with skip connections
-        for resnet, resnet2, upsample in self.ups:
-            skip = h.pop()
-            if skip.shape[2:] != x.shape[2:]:
-                skip = F.interpolate(skip, size=x.shape[2:], mode='nearest')
-            x = torch.cat((x, skip), dim=1)
+
+        for resnet, resnet2, attn, upsample in self.ups:
+            x = torch.cat((x, h.pop()), dim=1)
             x = resnet(x, t)
             x = resnet2(x, t)
+            x = attn(x)
             x = upsample(x)
-        
-        # Final convolution and reshape back
+
         x = self.final_conv(x)
+
         x = einops.rearrange(x, 'b t h -> b h t')
         return x
 
@@ -146,6 +155,7 @@ class ValueFunction(nn.Module):
         self,
         horizon,
         transition_dim,
+        cond_dim,
         dim=32,
         dim_mults=(1, 2, 4, 8),
         out_dim=1,
@@ -199,7 +209,7 @@ class ValueFunction(nn.Module):
             nn.Linear(fc_dim // 2, out_dim),
         )
 
-    def forward(self, x, time, *args):
+    def forward(self, x, cond, time, *args):
         '''
             x : [ batch x horizon x transition ]
         '''

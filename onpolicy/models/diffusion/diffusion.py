@@ -1,45 +1,58 @@
+# THIS FILE ORIGINALLY FROM https://github.com/jannerm/diffuser/blob/7ea422860cc0106e5ca5949d980f04b799d5462c/diffuser/models/diffusion.py
+# Minor modifications have been made to the original file.
+
 from collections import namedtuple
-from einops.layers.torch import Rearrange
-import einops
 import numpy as np
 import torch
 from torch import nn
-import torch.nn.functional as F
-import pdb
 
-from .diffuser_helpers import (
+from .helpers import (
     cosine_beta_schedule,
     extract,
     apply_conditioning,
     Losses,
-    Sample,
-    sort_by_values,
-    make_timesteps,
-    default_sample_fn
 )
-from .diffuser_temporal import TemporalUnet
+
+
+Sample = namedtuple('Sample', 'trajectories values chains')
+
+
+@torch.no_grad()
+def default_sample_fn(model, x, cond, t):
+    model_mean, _, model_log_variance = model.p_mean_variance(x=x, cond=cond, t=t)
+    model_std = torch.exp(0.5 * model_log_variance)
+
+    # no noise when t == 0
+    noise = torch.randn_like(x)
+    noise[t == 0] = 0
+
+    values = torch.zeros(len(x), device=x.device)
+    return model_mean + model_std * noise, values
+
+
+def sort_by_values(x, values):
+    inds = torch.argsort(values, descending=True)
+    x = x[inds]
+    values = values[inds]
+    return x, values
+
+
+def make_timesteps(batch_size, i, device):
+    t = torch.full((batch_size,), i, device=device, dtype=torch.long)
+    return t
 
 
 class GaussianDiffusion(nn.Module):
-    def __init__(self, observation_dim, action_dim,
-        model = None, horizon = 32, n_timesteps=20,
-        loss_type='l2', clip_denoised=False, predict_epsilon=False,
-        action_weight=10, loss_discount=1.0, loss_weights=None,
+    def __init__(self, model, horizon, observation_dim, action_dim, n_timesteps=1000,
+        loss_type='l1', clip_denoised=False, predict_epsilon=True,
+        action_weight=1.0, loss_discount=1.0, loss_weights=None,
     ):
         super().__init__()
         self.horizon = horizon
-        self.observation_dim = observation_dim[0]
+        self.observation_dim = observation_dim
         self.action_dim = action_dim
-        self.transition_dim = observation_dim[0] + action_dim
-        if model is None:
-            self.model = TemporalUnet(
-                horizon=self.horizon,
-                transition_dim=self.transition_dim,
-                dim=32,
-                dim_mults=(1, 2, 4, 8)
-            )
-        else:
-            self.model = model
+        self.transition_dim = observation_dim + action_dim
+        self.model = model
 
         betas = cosine_beta_schedule(n_timesteps)
         alphas = 1. - betas
@@ -158,6 +171,8 @@ class GaussianDiffusion(nn.Module):
             x, values = sample_fn(self, x, cond, t, **sample_kwargs)
             x = apply_conditioning(x, cond, self.action_dim)
 
+            if return_chain: chain.append(x)
+
         x, values = sort_by_values(x, values)
         if return_chain: chain = torch.stack(chain, dim=1)
         return Sample(x, values, chain)
@@ -193,25 +208,40 @@ class GaussianDiffusion(nn.Module):
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
         x_noisy = apply_conditioning(x_noisy, cond, self.action_dim)
 
-        x_recon = self.model(x_noisy, t)
+        x_recon = self.model(x_noisy, cond, t)
         x_recon = apply_conditioning(x_recon, cond, self.action_dim)
 
-        print("noise shape: ", noise.shape, "x_recon shape: ", x_recon.shape)
-        # assert noise.shape == x_recon.shape
+        assert noise.shape == x_recon.shape
 
         if self.predict_epsilon:
             loss, info = self.loss_fn(x_recon, noise)
         else:
             loss, info = self.loss_fn(x_recon, x_start)
+
         return loss, info
 
     def loss(self, x, *args):
         batch_size = len(x)
         t = torch.randint(0, self.n_timesteps, (batch_size,), device=x.device).long()
-        cond = {
-        0: torch.zeros((batch_size, 1), device=x.device)
-        }
-        return self.p_losses(x, cond, t = t)
+        return self.p_losses(x, *args, t)
 
     def forward(self, cond, *args, **kwargs):
         return self.conditional_sample(cond, *args, **kwargs)
+
+
+class ValueDiffusion(GaussianDiffusion):
+
+    def p_losses(self, x_start, cond, target, t):
+        noise = torch.randn_like(x_start)
+
+        x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
+        x_noisy = apply_conditioning(x_noisy, cond, self.action_dim)
+
+        pred = self.model(x_noisy, cond, t)
+
+        loss, info = self.loss_fn(pred, target)
+        return loss, info
+
+    def forward(self, x, cond, t):
+        return self.model(x, cond, t)
+

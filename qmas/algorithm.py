@@ -2,8 +2,9 @@ import torch
 
 from onpolicy.algorithms.r_mappo.r_mappo import R_MAPPO
 from onpolicy.utils.util import get_grad_norm, get_shape_from_obs_space, get_shape_from_act_space
-from onpolicy.models.utils.diffuser import GaussianDiffusion
-from onpolicy.models.utils.guide import ValueDiffusion
+from onpolicy.models.diffusion.diffusion import GaussianDiffusion
+from onpolicy.models.diffusion.diffusion import ValueDiffusion
+from onpolicy.models.diffusion.temporal import TemporalUnet, ValueFunction
 
 
 class QmasAlgorithm(R_MAPPO):
@@ -22,13 +23,30 @@ class QmasAlgorithm(R_MAPPO):
         self.observation_dim = get_shape_from_obs_space(env.observation_space[0], flatten_dicts=False)
         self.action_dim = get_shape_from_act_space(env.action_space[0])
         
-        self.diffuser = GaussianDiffusion(horizon = 32, observation_dim = self.observation_dim, 
-                                          action_dim = self.action_dim , n_timesteps=20, model = None, loss_type='l2', 
+        # Create Diffuser model.
+        diffuser_base = TemporalUnet(
+            horizon=32,
+            transition_dim=self.observation_dim[0] + self.action_dim,
+            cond_dim=0, #TODO: What is the correct value?
+            dim=32,
+            dim_mults=(1, 2, 4, 8)
+        )
+        self.diffuser = GaussianDiffusion(diffuser_base, horizon = 32, observation_dim = self.observation_dim[0], 
+                                          action_dim = self.action_dim , n_timesteps=4, loss_type='l2', 
                                           clip_denoised=False, predict_epsilon=False,
                                           action_weight=10, loss_discount=1.0, loss_weights=None)
         
-        self.guide = ValueDiffusion(horizon = 32, observation_dim = self.observation_dim, 
-                                    action_dim = self.action_dim , n_timesteps=20, model = None, loss_type='value_l2', 
+        # Create Guide model.
+        guide_base = ValueFunction(
+            horizon = 32,
+            transition_dim = self.observation_dim[0] + self.action_dim,
+            cond_dim=0, #TODO: What is the correct value?
+            dim=32,
+            dim_mults=(1, 2, 4, 8),
+            out_dim=1
+        )
+        self.guide = ValueDiffusion(guide_base, horizon = 32, observation_dim = self.observation_dim[0], 
+                                    action_dim = self.action_dim , n_timesteps=4, loss_type='value_l2', 
                                     clip_denoised=False, predict_epsilon=True, action_weight=1.0, 
                                     loss_discount=1.0, loss_weights=None)
         
