@@ -20,33 +20,34 @@ class QmasAlgorithm(R_MAPPO):
         super().__init__(args, policy, env, device)
 
         self.env = env
-        self.observation_dim = get_shape_from_obs_space(env.observation_space[0], flatten_dicts=False)
-        self.action_dim = get_shape_from_act_space(env.action_space[0])
+        share_obs_dim = get_shape_from_obs_space(env.share_observation_space[0], flatten_dicts=False)[0]
+        action_dim = get_shape_from_act_space(env.action_space[0])
+        transition_dim = share_obs_dim + action_dim
         
         # Create Diffuser model.
         diffuser_base = TemporalUnet(
             horizon=32,
-            transition_dim=self.observation_dim[0] + self.action_dim,
+            transition_dim=transition_dim,
             cond_dim=0, #TODO: What is the correct value?
             dim=32,
             dim_mults=(1, 2, 4, 8)
         )
-        self.diffuser = GaussianDiffusion(diffuser_base, horizon = 32, observation_dim = self.observation_dim[0], 
-                                          action_dim = self.action_dim , n_timesteps=4, loss_type='l2', 
+        self.diffuser = GaussianDiffusion(diffuser_base, horizon = 32, observation_dim = share_obs_dim, 
+                                          action_dim = action_dim , n_timesteps=4, loss_type='l2', 
                                           clip_denoised=False, predict_epsilon=False,
                                           action_weight=10, loss_discount=1.0, loss_weights=None)
         
         # Create Guide model.
         guide_base = ValueFunction(
             horizon = 32,
-            transition_dim = self.observation_dim[0] + self.action_dim,
+            transition_dim = transition_dim,
             cond_dim=0, #TODO: What is the correct value?
             dim=32,
             dim_mults=(1, 2, 4, 8),
             out_dim=1
         )
-        self.guide = ValueDiffusion(guide_base, horizon = 32, observation_dim = self.observation_dim[0], 
-                                    action_dim = self.action_dim , n_timesteps=4, loss_type='value_l2', 
+        self.guide = ValueDiffusion(guide_base, horizon = 32, observation_dim = share_obs_dim, 
+                                    action_dim = action_dim , n_timesteps=4, loss_type='value_l2', 
                                     clip_denoised=False, predict_epsilon=True, action_weight=1.0, 
                                     loss_discount=1.0, loss_weights=None)
         
@@ -69,30 +70,35 @@ class QmasAlgorithm(R_MAPPO):
             value_preds_batch, return_batch, masks_batch, active_masks_batch, old_action_log_probs_batch, \
             adv_targ, available_actions_batch = sample
             
-            # cond = [()]
+            # TODO: Temporary placeholder for conditions. Currently empty.
+            cond = {}
 
+            # Build trajectory.
             # Combine observations and actions for the diffuser input
             # Assuming obs_batch and actions_batch are properly shaped
-            obs_batch = torch.from_numpy(obs_batch).unsqueeze(1)
+            share_obs_batch = torch.from_numpy(share_obs_batch).unsqueeze(1)
             actions_batch = torch.from_numpy(actions_batch).unsqueeze(1)
-            trajectories = torch.cat([obs_batch, actions_batch], dim=-1)
+            trajectories = torch.cat([share_obs_batch, actions_batch], dim=-1)
+
+            # TODO: Major problem: The above batch size does not match the diffusion model's horizon size.
+            # I believe that these must match.
+
+            # Zero the gradients.
             optimizer.zero_grad()
             
-            for i in range(gradient_accumulate_every):
-                batch_size = trajectories.shape[0]
-                t = torch.randint(0, diffusion_model.n_timesteps, (batch_size,), device=trajectories.device).float()
-
-                loss, info = diffusion_model.loss(trajectories, share_obs_batch, t)
+            # Accumulate gradients.
+            for _ in range(gradient_accumulate_every):
+                loss, info = diffusion_model.loss(trajectories, cond)
                 loss = loss / gradient_accumulate_every
 
                 loss.backward()
             
+            # Compute gradient norm.
             model_grad_norm = get_grad_norm(diffusion_model.model.parameters())
 
-            # Optimizer step
+            # Take an optimization step.
             optimizer.step()
             
-
             return loss.item(), model_grad_norm, info
         else:
             return None
