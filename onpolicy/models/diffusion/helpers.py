@@ -1,3 +1,7 @@
+# THIS FILE ORIGINALLY FROM https://github.com/jannerm/diffuser/blob/7ea422860cc0106e5ca5949d980f04b799d5462c/diffuser/models/helpers.py
+# Minor modifications have been made to the original file.
+
+
 import math
 import numpy as np
 import torch
@@ -5,38 +9,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 import einops
 from einops.layers.torch import Rearrange
-from collections import namedtuple
 
 def to_np(x):
 	if torch.is_tensor(x):
 		x = x.detach().cpu().numpy()
 	return x
-
-Sample = namedtuple('Sample', 'trajectories values chains')
-
-def sort_by_values(x, values):
-    inds = torch.argsort(values, descending=True)
-    x = x[inds]
-    values = values[inds]
-    return x, values
-
-
-def make_timesteps(batch_size, i, device):
-    t = torch.full((batch_size,), i, device=device, dtype=torch.long)
-    return t
-
-
-@torch.no_grad()
-def default_sample_fn(model, x, cond, t):
-    model_mean, _, model_log_variance = model.p_mean_variance(x=x, cond=cond, t=t)
-    model_std = torch.exp(0.5 * model_log_variance)
-
-    # no noise when t == 0
-    noise = torch.randn_like(x)
-    noise[t == 0] = 0
-
-    values = torch.zeros(len(x), device=x.device)
-    return model_mean + model_std * noise, values
 
 
 #-----------------------------------------------------------------------------#
@@ -191,33 +168,34 @@ class WeightedLoss(nn.Module):
             pred, targ : tensor
                 [ batch_size x horizon x transition_dim ]
         '''
-        loss = self._loss(pred, targ).mean()
-        # weighted_loss = (loss * self.weights).mean()
-        # a0_loss = (loss[:, 0, :self.action_dim] / self.weights[0, :self.action_dim]).mean()
-        return loss, {'a0_loss': None}
+        loss = self._loss(pred, targ)
+        weighted_loss = (loss * self.weights).mean()
+        a0_loss = (loss[:, 0, :self.action_dim] / self.weights[0, :self.action_dim]).mean()
+        return weighted_loss, {'a0_loss': a0_loss}
 
 class ValueLoss(nn.Module):
     def __init__(self, *args):
         super().__init__()
 
     def forward(self, pred, targ):
-        loss = (self._loss(pred, targ)).mean()
+        loss = self._loss(pred, targ).mean()
 
-        # if len(pred) > 1:
-        #     corr = np.corrcoef(
-        #         to_np(pred).squeeze(),
-        #         to_np(targ).squeeze()
-        #     )[0,1]
-        # else:
-        #     corr = np.NaN
+        if len(pred) > 1:
+            corr = np.corrcoef(
+                to_np(pred).squeeze(),
+                to_np(targ).squeeze()
+            )[0,1]
+        else:
+            corr = np.NaN
 
-        # info = {
-        #     'mean_pred': pred.mean(), 'mean_targ': targ.mean(),
-        #     'min_pred': pred.min(), 'min_targ': targ.min(),
-        #     'max_pred': pred.max(), 'max_targ': targ.max(),
-        #     'corr': corr,
-        # }
-        return loss, {'a0_loss': None}
+        info = {
+            'mean_pred': pred.mean(), 'mean_targ': targ.mean(),
+            'min_pred': pred.min(), 'min_targ': targ.min(),
+            'max_pred': pred.max(), 'max_targ': targ.max(),
+            'corr': corr,
+        }
+
+        return loss, info
 
 class WeightedL1(WeightedLoss):
 
