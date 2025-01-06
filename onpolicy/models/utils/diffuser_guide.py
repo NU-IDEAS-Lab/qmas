@@ -1,168 +1,18 @@
 import torch
 import torch.nn as nn
 import numpy as np
-import einops
-from einops.layers.torch import Rearrange
-import pdb
-from collections import namedtuple
 
 from .diffuser_helpers import (
-    SinusoidalPosEmb,
-    Downsample1d,
-    Upsample1d,
-    Conv1dBlock,
-    Residual,
-    PreNorm,
-    LinearAttention,
     cosine_beta_schedule,
     extract,
     apply_conditioning,
-    Losses
+    Losses,
+    Sample,
+    sort_by_values,
+    make_timesteps,
+    default_sample_fn
 )
-
-Sample = namedtuple('Sample', 'trajectories values chains')
-
-class ResidualTemporalBlock(nn.Module):
-
-    def __init__(self, inp_channels, out_channels, embed_dim, horizon, kernel_size=5):
-        super().__init__()
-
-        self.blocks = nn.ModuleList([
-            Conv1dBlock(inp_channels, out_channels, kernel_size),
-            Conv1dBlock(out_channels, out_channels, kernel_size),
-        ])
-
-        self.time_mlp = nn.Sequential(
-            nn.Mish(),
-            nn.Linear(embed_dim, out_channels),
-            Rearrange('batch t -> batch t 1'),
-        )
-
-        self.residual_conv = nn.Conv1d(inp_channels, out_channels, 1) \
-            if inp_channels != out_channels else nn.Identity()
-
-    def forward(self, x, t):
-        '''
-            x : [ batch_size x inp_channels x horizon ]
-            t : [ batch_size x embed_dim ]
-            returns:
-            out : [ batch_size x out_channels x horizon ]
-        '''
-        out = self.blocks[0](x) + self.time_mlp(t)
-        out = self.blocks[1](out)
-        return out + self.residual_conv(x)
-
-
-class ValueFunction(nn.Module):
-
-    def __init__(
-        self,
-        horizon,
-        transition_dim,
-        dim=32,
-        dim_mults=(1, 2, 4, 8),
-        out_dim=1,
-    ):
-        super().__init__()
-
-        dims = [transition_dim, *map(lambda m: dim * m, dim_mults)]
-        in_out = list(zip(dims[:-1], dims[1:]))
-
-        time_dim = dim
-        self.time_mlp = nn.Sequential(
-            SinusoidalPosEmb(dim),
-            nn.Linear(dim, dim * 4),
-            nn.Mish(),
-            nn.Linear(dim * 4, dim),
-        )
-
-        self.blocks = nn.ModuleList([])
-        num_resolutions = len(in_out)
-
-        print(in_out)
-        for ind, (dim_in, dim_out) in enumerate(in_out):
-            is_last = ind >= (num_resolutions - 1)
-
-            self.blocks.append(nn.ModuleList([
-                ResidualTemporalBlock(dim_in, dim_out, kernel_size=5, embed_dim=time_dim, horizon=horizon),
-                ResidualTemporalBlock(dim_out, dim_out, kernel_size=5, embed_dim=time_dim, horizon=horizon),
-                Downsample1d(dim_out)
-            ]))
-
-            if not is_last:
-                horizon = horizon // 2
-
-        mid_dim = dims[-1]
-        mid_dim_2 = mid_dim // 2
-        mid_dim_3 = mid_dim // 4
-        ##
-        self.mid_block1 = ResidualTemporalBlock(mid_dim, mid_dim_2, kernel_size=5, embed_dim=time_dim, horizon=horizon)
-        self.mid_down1 = Downsample1d(mid_dim_2)
-        horizon = horizon // 2
-        ##
-        self.mid_block2 = ResidualTemporalBlock(mid_dim_2, mid_dim_3, kernel_size=5, embed_dim=time_dim, horizon=horizon)
-        self.mid_down2 = Downsample1d(mid_dim_3)
-        horizon = horizon // 2
-        ##
-        fc_dim = mid_dim_3 * max(horizon, 1)
-
-        self.final_block = nn.Sequential(
-            nn.Linear(fc_dim + time_dim, fc_dim // 2),
-            nn.Mish(),
-            nn.Linear(fc_dim // 2, out_dim),
-        )
-
-    def forward(self, x, cond, time, *args):
-        '''
-            x : [ batch x horizon x transition ]
-        '''
-
-        x = einops.rearrange(x, 'b h t -> b t h')
-
-        ## mask out first conditioning timestep, since this is not sampled by the model
-        # x[:, :, 0] = 0
-
-        t = self.time_mlp(time)
-
-        for resnet, resnet2, downsample in self.blocks:
-            x = resnet(x, t)
-            x = resnet2(x, t)
-            x = downsample(x)
-
-        ##
-        x = self.mid_block1(x, t)
-        x = self.mid_down1(x)
-        ##
-        x = self.mid_block2(x, t)
-        x = self.mid_down2(x)
-        ##
-        x = x.view(len(x), -1)
-        out = self.final_block(torch.cat([x, t], dim=-1))
-        return out
-
-@torch.no_grad()
-def default_sample_fn(model, x, cond, t):
-    model_mean, _, model_log_variance = model.p_mean_variance(x=x, cond=cond, t=t)
-    model_std = torch.exp(0.5 * model_log_variance)
-
-    # no noise when t == 0
-    noise = torch.randn_like(x)
-    noise[t == 0] = 0
-
-    values = torch.zeros(len(x), device=x.device)
-    return model_mean + model_std * noise, values
-
-
-def sort_by_values(x, values):
-    inds = torch.argsort(values, descending=True)
-    x = x[inds]
-    values = values[inds]
-    return x, values
-
-
-def make_timesteps(batch_size, i, device):
-    t = torch.full((batch_size,), i, device=device, dtype=torch.long)
-    return t
+from .diffuser_temporal import ValueFunction
 
 
 class ValueDiffusion(nn.Module):
@@ -296,16 +146,12 @@ class ValueDiffusion(nn.Module):
 
         chain = [x] if return_chain else None
 
-        progress = utils.Progress(self.n_timesteps) if verbose else utils.Silent()
         for i in reversed(range(0, self.n_timesteps)):
             t = make_timesteps(batch_size, i, device)
             x, values = sample_fn(self, x, cond, t, **sample_kwargs)
             x = apply_conditioning(x, cond, self.action_dim)
 
-            progress.update({'t': i, 'vmin': values.min().item(), 'vmax': values.max().item()})
             if return_chain: chain.append(x)
-
-        progress.stamp()
 
         x, values = sort_by_values(x, values)
         if return_chain: chain = torch.stack(chain, dim=1)
