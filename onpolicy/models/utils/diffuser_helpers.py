@@ -168,7 +168,6 @@ class WeightedLoss(nn.Module):
         loss = self._loss(pred, targ).mean()
         # weighted_loss = (loss * self.weights).mean()
         # a0_loss = (loss[:, 0, :self.action_dim] / self.weights[0, :self.action_dim]).mean()
-        print("loss type: ", loss.dtype)
         return loss, {'a0_loss': None}
 
 class ValueLoss(nn.Module):
@@ -192,7 +191,6 @@ class ValueLoss(nn.Module):
         #     'max_pred': pred.max(), 'max_targ': targ.max(),
         #     'corr': corr,
         # }
-        print("loss type: ", loss.dtype)
         return loss, {'a0_loss': None}
 
 class WeightedL1(WeightedLoss):
