@@ -30,10 +30,13 @@ class QmasAlgorithm(R_MAPPO):
         self.guide = ValueDiffusion(horizon = 32, observation_dim = self.observation_dim, 
                                     action_dim = self.action_dim , n_timesteps=20, model = None, loss_type='value_l2', 
                                     clip_denoised=False, predict_epsilon=True, action_weight=1.0, 
-                                    loss_discount=1.0, loss_weights=None) 
+                                    loss_discount=1.0, loss_weights=None)
+        
+        self.diffuser_optimizer = torch.optim.Adam(self.diffuser.parameters(), lr=2e-4)
+        self.guide_optimizer = torch.optim.Adam(self.guide.parameters(), lr=2e-4)
 
 
-    def diffusion_update(self, diffusion_model, sample, update_model):
+    def diffusion_update(self, diffusion_model, optimizer, sample, update_model):
         """
         Update diffuser network.
         :param sample: (Tuple) contains data batch with which to update networks.
@@ -43,7 +46,6 @@ class QmasAlgorithm(R_MAPPO):
         """
         if update_model:
             gradient_accumulate_every = 2
-            diffusion_optimizer = torch.optim.Adam(diffusion_model.parameters(), lr=2e-4)
             
             share_obs_batch, obs_batch, rnn_states_batch, rnn_states_critic_batch, actions_batch, \
             value_preds_batch, return_batch, masks_batch, active_masks_batch, old_action_log_probs_batch, \
@@ -56,7 +58,7 @@ class QmasAlgorithm(R_MAPPO):
             obs_batch = torch.from_numpy(obs_batch).unsqueeze(1)
             actions_batch = torch.from_numpy(actions_batch).unsqueeze(1)
             trajectories = torch.cat([obs_batch, actions_batch], dim=-1)
-            diffusion_optimizer.zero_grad()
+            optimizer.zero_grad()
             
             for i in range(gradient_accumulate_every):
                 batch_size = trajectories.shape[0]
@@ -70,7 +72,7 @@ class QmasAlgorithm(R_MAPPO):
             model_grad_norm = get_grad_norm(diffusion_model.model.parameters())
 
             # Optimizer step
-            diffusion_optimizer.step()
+            optimizer.step()
             
 
             return loss.item(), model_grad_norm, info
@@ -88,8 +90,8 @@ class QmasAlgorithm(R_MAPPO):
         
         super().train_sample(sample, train_info, update_actor, update_critic)
 
-        diffuser_loss, model_grad_norm, info = self.diffusion_update(self.diffuser, sample, update_model=True)
-        guide_loss, model_grad_norm, info = self.diffusion_update(self.guide, sample, update_model=True)
+        diffuser_loss, model_grad_norm, info = self.diffusion_update(self.diffuser, self.diffuser_optimizer, sample, update_model=True)
+        guide_loss, model_grad_norm, info = self.diffusion_update(self.guide, self.guide_optimizer, sample, update_model=True)
 
         train_info['diffuser_loss'] += diffuser_loss
         train_info['guide_loss'] += guide_loss
