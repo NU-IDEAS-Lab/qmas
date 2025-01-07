@@ -25,28 +25,31 @@ class QmasAlgorithm(R_MAPPO):
         transition_dim = share_obs_dim + action_dim
         
         # Create Diffuser model.
+        horizon = 32 # TODO: Need to feed in 32-length trajectories during training.
         diffuser_base = TemporalUnet(
-            horizon=32,
+            horizon=horizon,
             transition_dim=transition_dim,
             cond_dim=0, #TODO: What is the correct value?
             dim=32,
-            dim_mults=(8, 4, 2, 1)
+            # dim_mults=(2, 1)
+            # dim_mults=(8, 4, 2, 1)
+            dim_mults=(1, 2, 4, 8)
         )
-        self.diffuser = GaussianDiffusion(diffuser_base, horizon = 32, observation_dim = share_obs_dim, 
+        self.diffuser = GaussianDiffusion(diffuser_base, horizon = horizon, observation_dim = share_obs_dim, 
                                           action_dim = action_dim , n_timesteps=4, loss_type='l2', 
                                           clip_denoised=False, predict_epsilon=False,
                                           action_weight=10, loss_discount=1.0, loss_weights=None)
         
         # Create Guide model.
         guide_base = ValueFunction(
-            horizon = 32,
+            horizon = horizon,
             transition_dim = transition_dim,
             cond_dim=0, #TODO: What is the correct value?
             dim=32,
             dim_mults=(8, 4, 2, 1),
             out_dim=1
         )
-        self.guide = ValueDiffusion(guide_base, horizon = 32, observation_dim = share_obs_dim, 
+        self.guide = ValueDiffusion(guide_base, horizon = horizon, observation_dim = share_obs_dim, 
                                     action_dim = action_dim , n_timesteps=4, loss_type='value_l2', 
                                     clip_denoised=False, predict_epsilon=True, action_weight=1.0, 
                                     loss_discount=1.0, loss_weights=None)
@@ -82,6 +85,9 @@ class QmasAlgorithm(R_MAPPO):
 
             # TODO: Major problem: The above batch size does not match the diffusion model's horizon size.
             # I believe that these must match.
+            # TODO: Temporarily just repeat along dimension 1 to match the horizon size.
+            trajectories = trajectories.repeat(1, 32, 1)
+            print(f"Trajectories shape: {trajectories.shape}")
 
             # Zero the gradients.
             optimizer.zero_grad()
@@ -115,6 +121,9 @@ class QmasAlgorithm(R_MAPPO):
         super().train_sample(sample, train_info, update_actor, update_critic)
 
         diffuser_loss, model_grad_norm, info = self.diffusion_update(self.diffuser, self.diffuser_optimizer, sample, update_model=True)
+
+        # TODO: NEED TO PASS IN THE TARGET (RETURNS?) FOR THE VALUE FUNCTION.
+        raise NotImplementedError("Need to pass in the target for the value function.")
         guide_loss, model_grad_norm, info = self.diffusion_update(self.guide, self.guide_optimizer, sample, update_model=True)
 
         train_info['diffuser_loss'] += diffuser_loss
