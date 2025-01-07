@@ -56,7 +56,7 @@ class QmasAlgorithm(R_MAPPO):
         self.guide_optimizer = torch.optim.Adam(self.guide.parameters(), lr=2e-4)
 
 
-    def diffusion_update(self, diffusion_model, optimizer, sample, update_model):
+    def diffusion_update(self, diffusion_model, optimizer, loss_args, update_model):
         """
         Update diffuser network.
         :param sample: (Tuple) contains data batch with which to update networks.
@@ -67,32 +67,12 @@ class QmasAlgorithm(R_MAPPO):
         if update_model:
             gradient_accumulate_every = 2
             
-            share_obs_batch, obs_batch, rnn_states_batch, rnn_states_critic_batch, actions_batch, \
-            value_preds_batch, return_batch, masks_batch, active_masks_batch, old_action_log_probs_batch, \
-            adv_targ, available_actions_batch = sample
-            
-            # TODO: Temporary placeholder for conditions. Currently empty.
-            cond = {}
-
-            # Build trajectory.
-            # Combine observations and actions for the diffuser input
-            # Assuming obs_batch and actions_batch are properly shaped
-            share_obs_batch = torch.from_numpy(share_obs_batch).unsqueeze(1)
-            actions_batch = torch.from_numpy(actions_batch).unsqueeze(1)
-            trajectories = torch.cat([share_obs_batch, actions_batch], dim=-1)
-
-            # TODO: Major problem: The above batch size does not match the diffusion model's horizon size.
-            # I believe that these must match.
-            # TODO: Temporarily just repeat along dimension 1 to match the horizon size.
-            trajectories = trajectories.repeat(1, 32, 1)
-            print(f"Trajectories shape: {trajectories.shape}")
-
             # Zero the gradients.
             optimizer.zero_grad()
             
             # Accumulate gradients.
             for _ in range(gradient_accumulate_every):
-                loss, info = diffusion_model.loss(trajectories, cond)
+                loss, info = diffusion_model.loss(*loss_args)
                 loss = loss / gradient_accumulate_every
 
                 loss.backward()
@@ -118,11 +98,45 @@ class QmasAlgorithm(R_MAPPO):
         
         super().train_sample(sample, train_info, update_actor, update_critic)
 
-        diffuser_loss, model_grad_norm, info = self.diffusion_update(self.diffuser, self.diffuser_optimizer, sample, update_model=True)
+        # Unpack sample.
+        share_obs_batch, obs_batch, rnn_states_batch, rnn_states_critic_batch, actions_batch, \
+        value_preds_batch, return_batch, masks_batch, active_masks_batch, old_action_log_probs_batch, \
+        adv_targ, available_actions_batch = sample
+        
+        # TODO: Temporary placeholder for conditions. Currently empty.
+        cond = {}
 
-        # TODO: NEED TO PASS IN THE TARGET (RETURNS?) FOR THE VALUE FUNCTION.
-        raise NotImplementedError("Need to pass in the target for the value function.")
-        guide_loss, model_grad_norm, info = self.diffusion_update(self.guide, self.guide_optimizer, sample, update_model=True)
+        # Build trajectory.
+        # Combine observations and actions for the diffuser input
+        # Assuming obs_batch and actions_batch are properly shaped
+        share_obs_batch = torch.from_numpy(share_obs_batch).unsqueeze(1)
+        actions_batch = torch.from_numpy(actions_batch).unsqueeze(1)
+        trajectories = torch.cat([share_obs_batch, actions_batch], dim=-1)
+
+        # TODO: Major problem: The above batch size does not match the diffusion model's horizon size.
+        # I believe that these must match.
+        # TODO: Temporarily just repeat along dimension 1 to match the horizon size.
+        trajectories = trajectories.repeat(1, 32, 1)
+        print(f"Trajectories shape: {trajectories.shape}")
+
+        # Get returns (target for the guide model).
+        returns = torch.from_numpy(return_batch)
+
+        # Update diffuser model.
+        diffuser_loss, diffuser_grad_norm, diffuser_info = self.diffusion_update(
+            self.diffuser,
+            self.diffuser_optimizer,
+            (trajectories, cond),
+            update_model=True
+        )
+
+        # Update guide model.
+        guide_loss, guide_grad_norm, guide_info = self.diffusion_update(
+            self.guide,
+            self.guide_optimizer,
+            (trajectories, cond, returns),
+            update_model=True
+        )
 
         train_info['diffuser_loss'] += diffuser_loss
         train_info['guide_loss'] += guide_loss
