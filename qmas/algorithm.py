@@ -31,9 +31,7 @@ class QmasAlgorithm(R_MAPPO):
             transition_dim=transition_dim,
             cond_dim=0, #TODO: What is the correct value?
             dim=32,
-            # dim_mults=(2, 1)
-            # dim_mults=(8, 4, 2, 1)
-            dim_mults=(1, 2, 4, 8)
+            dim_mults=(8, 4, 2, 1)
         )
         self.diffuser = GaussianDiffusion(diffuser_base, horizon = horizon, observation_dim = share_obs_dim, 
                                           action_dim = action_dim , n_timesteps=4, loss_type='l2', 

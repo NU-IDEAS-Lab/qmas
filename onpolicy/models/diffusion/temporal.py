@@ -111,8 +111,8 @@ class TemporalUnet(nn.Module):
                 horizon = horizon * 2
 
         self.final_conv = nn.Sequential(
-            Conv1dBlock(dim, dim, kernel_size=5),
-            nn.Conv1d(dim, transition_dim, 1),
+            Conv1dBlock(dim * dim_mults[0], dim * dim_mults[0], kernel_size=5),
+            nn.Conv1d(dim * dim_mults[0], transition_dim, 1),
         )
 
     def forward(self, x, cond, time):
