@@ -57,7 +57,7 @@ class TemporalUnet(nn.Module):
         transition_dim,
         cond_dim,
         dim=32,
-        dim_mults=(1, 2, 4, 8),
+        dim_mults=(8, 4, 2, 1),
         attention=False,
     ):
         super().__init__()
@@ -157,7 +157,7 @@ class ValueFunction(nn.Module):
         transition_dim,
         cond_dim,
         dim=32,
-        dim_mults=(1, 2, 4, 8),
+        dim_mults=(8, 4, 2, 1),
         out_dim=1,
     ):
         super().__init__()
