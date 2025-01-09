@@ -122,7 +122,7 @@ class SharedReplayBuffer(TensorDictReplayBuffer):
 
         # if last_step == -1:
         #     last_step = self.episode_length
-        last_step = -1
+        last_step = len(self) - 1
 
         # Check whether we should use the AMADM GAE modification from https://arxiv.org/abs/2308.06036
         # Unfortunately, I don't have time to implement for all of the other options (like use_proper_time_limits),
@@ -132,15 +132,15 @@ class SharedReplayBuffer(TensorDictReplayBuffer):
             gae = 0
             for step in reversed(range(last_step)):
                 if self._use_popart or self._use_valuenorm:
-                    delta = self["rewards"][step] + np.power(self.gamma, self["deltaSteps"][step]) * value_normalizer.denormalize(
+                    delta = self["rewards"][step] + np.power(self.gamma, self["delta_steps"][step]) * value_normalizer.denormalize(
                         self["value_preds"][step + 1]) * self.masks[step + 1] \
                             - value_normalizer.denormalize(self["value_preds"][step])
-                    gae = delta + np.power(self.gamma * self.gae_lambda, self["deltaSteps"][step]) * self.masks[step + 1] * gae
+                    gae = delta + np.power(self.gamma * self.gae_lambda, self["delta_steps"][step]) * self.masks[step + 1] * gae
                     self["returns"][step] = gae + value_normalizer.denormalize(self["value_preds"][step])
                 else:
-                    delta = self["rewards"][step] + np.power(self.gamma, self["deltaSteps"][step]) * self["value_preds"][step + 1] * self.masks[step + 1] - \
+                    delta = self["rewards"][step] + np.power(self.gamma, self["delta_steps"][step]) * self["value_preds"][step + 1] * self.masks[step + 1] - \
                             self["value_preds"][step]
-                    gae = delta + np.power(self.gamma * self.gae_lambda, self["deltaSteps"][step]) * self.masks[step + 1] * gae
+                    gae = delta + np.power(self.gamma * self.gae_lambda, self["delta_steps"][step]) * self.masks[step + 1] * gae
                     self["returns"][step] = gae + self["value_preds"][step]
         
         elif self._use_proper_time_limits:
@@ -227,8 +227,7 @@ class SharedReplayBuffer(TensorDictReplayBuffer):
     # Everything below here is for compatibility with the old replay buffer class.
 
     def feed_forward_generator(self, advantages, num_mini_batch=None, mini_batch_size=None, last_step=-1):
-        episode_length, n_rollout_threads, num_agents = self.rewards.shape[0:3]
-        batch_size = episode_length // num_mini_batch
+        batch_size = len(self) // num_mini_batch
 
         sample, info = self.sample(batch_size=batch_size, return_info=True)
         sample["advantages"] = advantages[info["index"]]
