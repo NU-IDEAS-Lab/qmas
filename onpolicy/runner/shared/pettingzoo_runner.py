@@ -11,6 +11,8 @@ import wandb
 from onpolicy.utils.util import update_linear_schedule
 from onpolicy.runner.shared.base_runner import Runner
 
+from onpolicy.utils.shared_buffer_torchrl import SharedReplayBuffer
+
 
 def _t2n(x):
     return x.detach().cpu().numpy()
@@ -23,6 +25,15 @@ class PettingzooRunner(Runner):
         config['all_args'].model_dir = None
 
         super(PettingzooRunner, self).__init__(config)
+
+        # Override the default buffer with our new TorchRL one.
+        share_observation_space = self.envs.share_observation_space[0] if self.use_centralized_V else self.envs.observation_space[0]
+        self.buffer = SharedReplayBuffer(self.all_args,
+                                        self.num_agents,
+                                        self.envs.observation_space[0],
+                                        share_observation_space,
+                                        self.envs.action_space[0])
+
         self.env_infos = defaultdict(list)
        
         # Perform restoration.
@@ -32,7 +43,7 @@ class PettingzooRunner(Runner):
             self.restore()
        
     def run(self):
-        self.warmup()   
+        obs, share_obs, available_actions, rnn_states, rnn_states_critic, masks = self.warmup()   
 
         start = time.time()
         episodes = int(self.num_env_steps) // self.episode_length // self.n_rollout_threads
@@ -45,7 +56,9 @@ class PettingzooRunner(Runner):
             delta_steps = np.ones((self.n_rollout_threads, self.num_agents, 1), dtype=np.int32)
             for step in range(self.episode_length):
                 # Sample actions, collect values and probabilities.
-                values, actions, action_log_probs, rnn_states, rnn_states_critic, actions_env = self.collect(step)
+                values, actions, action_log_probs, rnn_states, rnn_states_critic, actions_env = self.collect(
+                    share_obs, obs, rnn_states, rnn_states_critic, masks, available_actions
+                )
                 
                 # Take a step in the environment and get the results.
                 obs, share_obs, rewards, dones, infos, available_actions = self.envs.step(actions_env)
@@ -81,7 +94,7 @@ class PettingzooRunner(Runner):
                                 self.num_env_steps,
                                 int(total_num_steps / (end - start))))
                 
-                train_infos["average_episode_rewards"] = np.mean(self.buffer.rewards) * self.episode_length
+                train_infos["average_episode_rewards"] = self.buffer.rewards.mean().item() * self.episode_length
                 train_infos["fps"] = total_num_steps / (end - start)
                 print("average episode reward is {}".format(train_infos["average_episode_rewards"]))
                 self.log_train(train_infos, total_num_steps)
@@ -96,24 +109,24 @@ class PettingzooRunner(Runner):
         # Reset environment.
         obs, share_obs, available_actions = self.envs.reset()
 
-        # Initialize buffer.
-        self.buffer.share_obs[0] = share_obs.copy()
-        self.buffer.obs[0] = obs.copy()
-        self.buffer.available_actions[0] = available_actions.copy()
+        rnn_states = np.zeros((self.n_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=np.float32)
+        rnn_states_critic = np.zeros_like(rnn_states)
+        masks = np.ones((self.n_rollout_threads, self.num_agents, 1), dtype=np.float32)
+
+        return obs, share_obs, available_actions, rnn_states, rnn_states_critic, masks
 
     @torch.no_grad()
-    def collect(self, step):
-        self.trainer.prep_rollout()
+    def collect(self, share_obs, obs, rnn_states, rnn_states_critic, masks, available_actions):
 
         self.trainer.prep_rollout()
 
         value, action, action_log_prob, rnn_states, rnn_states_critic = self.trainer.policy.get_actions(
-            np.concatenate(self.buffer.share_obs[step]),
-            np.concatenate(self.buffer.obs[step]),
-            np.concatenate(self.buffer.rnn_states[step]),
-            np.concatenate(self.buffer.rnn_states_critic[step]),
-            np.concatenate(self.buffer.masks[step]),
-            available_actions=np.concatenate(self.buffer.available_actions[step])
+            np.concatenate(share_obs),
+            np.concatenate(obs),
+            np.concatenate(rnn_states),
+            np.concatenate(rnn_states_critic),
+            np.concatenate(masks),
+            available_actions=np.concatenate(available_actions)
         )
 
         values = np.array(np.split(_t2n(value), self.n_rollout_threads))
@@ -146,13 +159,13 @@ class PettingzooRunner(Runner):
         for n in range(len(infos[0]["node_visits"])):
             self.env_infos[f"node_visits/node_{n}"] = [i["node_visits"][n] for i in infos]
 
-        masks = np.ones((self.n_rollout_threads, self.num_agents, 1), dtype=np.float32)
+        masks = torch.ones((self.n_rollout_threads, self.num_agents, 1))
         for i in range(self.n_rollout_threads):
             for agent_id in range(self.num_agents):
                 if dones[i, agent_id]:
-                    rnn_states[i][agent_id] = np.zeros((self.recurrent_N, self.hidden_size), dtype=np.float32)
-                    rnn_states_critic[i][agent_id] = np.zeros((self.recurrent_N, self.hidden_size), dtype=np.float32)
-                    masks[i, agent_id] = np.zeros(1, dtype=np.float32)
+                    rnn_states[i][agent_id] = torch.zeros((self.recurrent_N, self.hidden_size))
+                    rnn_states_critic[i][agent_id] = torch.zeros((self.recurrent_N, self.hidden_size))
+                    masks[i, agent_id] = torch.zeros(1)
 
         self.buffer.insert(
             share_obs=share_obs,
@@ -167,6 +180,23 @@ class PettingzooRunner(Runner):
             delta_steps=delta_steps,
             available_actions=available_actions
         )
+
+
+    def compute(self):
+        """Calculate returns for the collected data."""
+        self.trainer.prep_rollout()
+        if self.algorithm_name == "mat" or self.algorithm_name == "mat_dec":
+            next_values = self.trainer.policy.get_values(self.buffer["share_obs"][-1],
+                                                        self.buffer["obs"][-1],
+                                                        self.buffer["rnn_states_critic"][-1],
+                                                        self.buffer["masks"][-1])
+        else:
+            next_values = self.trainer.policy.get_values(self.buffer["share_obs"][-1],
+                                                        self.buffer["rnn_states_critic"][-1],
+                                                        self.buffer["masks"][-1])
+        next_values = next_values.detach().cpu().view(self.n_rollout_threads, self.num_agents, 1)
+        self.buffer.compute_returns(next_values, self.trainer.value_normalizer)
+
 
     def log_env(self, env_infos, total_num_steps):
         for k, v in env_infos.items():
