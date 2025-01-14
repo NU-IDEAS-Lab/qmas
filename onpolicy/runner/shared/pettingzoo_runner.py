@@ -43,14 +43,15 @@ class PettingzooRunner(Runner):
             self.restore()
        
     def run(self):
-        obs, share_obs, available_actions, rnn_states, rnn_states_critic, masks = self.warmup()   
-
         start = time.time()
         episodes = int(self.num_env_steps) // self.episode_length // self.n_rollout_threads
 
         for episode in range(episodes):
             if self.use_linear_lr_decay:
                 self.trainer.policy.lr_decay(episode, episodes)
+            
+            # Reset the environment and perform warmup.
+            obs, share_obs, available_actions, rnn_states, rnn_states_critic, masks = self.warmup()
 
             # Set the delta steps to 1.
             delta_steps = np.ones((self.n_rollout_threads, self.num_agents, 1), dtype=np.int32)
