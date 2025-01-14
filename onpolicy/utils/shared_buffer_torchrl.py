@@ -4,6 +4,7 @@ import numpy as np
 from tensordict import TensorDict
 from tensordict.tensorclass import NonTensorData, NonTensorStack
 from torchrl.data.replay_buffers import LazyTensorStorage, TensorDictReplayBuffer
+from torchrl.data.replay_buffers.samplers import SamplerWithoutReplacement
 
 
 class SharedReplayBuffer(TensorDictReplayBuffer):
@@ -40,7 +41,12 @@ class SharedReplayBuffer(TensorDictReplayBuffer):
         storage = LazyTensorStorage(max_size=args.episode_length)
 
         # Set up the buffer.
-        super().__init__(storage=storage)
+        super().__init__(
+            storage=storage,
+            sampler=SamplerWithoutReplacement(
+                shuffle=False
+            )
+        )
 
         print(f"Buffer initialized with episode length {args.episode_length}")
 
