@@ -2,6 +2,7 @@ import torch
 import numpy as np
 
 from tensordict import TensorDict
+from tensordict.tensorclass import NonTensorData, NonTensorStack
 from torchrl.data.replay_buffers import LazyTensorStorage, TensorDictReplayBuffer
 
 
@@ -31,6 +32,9 @@ class SharedReplayBuffer(TensorDictReplayBuffer):
         self.num_agents = num_agents
         self.obs_space = obs_space
         self.share_obs_space = cent_obs_space
+
+        self.obs_object = False
+        self.share_obs_object = False
 
         # Set up the storage backend.
         storage = LazyTensorStorage(max_size=args.episode_length)
@@ -68,20 +72,23 @@ class SharedReplayBuffer(TensorDictReplayBuffer):
         if delta_steps is None:
             delta_steps = np.ones_like(value_preds)
         
-        # Convert any graphs to tensors.
-        if self.obs_space.__class__.__name__ == 'Dict':
-            for k, v in self.obs_space.spaces.items():
-                if v.__class__.__name__ == 'Graph':
-                    obs[k] = v.to('cpu', "x", "edge_attr", "edge_index")
-        elif self.obs_space.__class__.__name__ == 'Graph':
-            obs = obs.to('cpu', "x", "edge_attr", "edge_index")
-        
-        if self.share_obs_space.__class__.__name__ == 'Dict':
-            for k, v in self.share_obs_space.spaces.items():
-                if v.__class__.__name__ == 'Graph':
-                    share_obs[k] = v.to('cpu', "x", "edge_attr", "edge_index")
-        elif self.share_obs_space.__class__.__name__ == 'Graph':
-            share_obs = share_obs.to('cpu', "x", "edge_attr", "edge_index")
+        # Convert any np.object arrays to tensors of NonTensorData.
+        if isinstance(obs, np.ndarray) and obs.dtype == object:
+            self.obs_object = True
+            obs = NonTensorStack(NonTensorData(
+                obs,
+                batch_size=torch.Size([]),
+                device='cpu',
+                names=None,
+            ))
+        if isinstance(share_obs, np.ndarray) and share_obs.dtype == object:
+            self.share_obs_object = True
+            share_obs = NonTensorStack(NonTensorData(
+                share_obs,
+                batch_size=torch.Size([]),
+                device='cpu',
+                names=None,
+            ))
 
         # Create a tensordict of the data.
         data = TensorDict({
@@ -238,8 +245,16 @@ class SharedReplayBuffer(TensorDictReplayBuffer):
     def compatibility_transform_sample(self, sample):
         ''' Returns sample in format expected by existing onpolicy code. '''
 
-        share_obs_batch = sample["share_obs"].reshape(-1, *sample["share_obs"].shape[3:])
-        obs_batch = sample["obs"].reshape(-1, *sample["obs"].shape[3:])
+        if self.share_obs_object:
+            sample_share_obs = np.array(sample["share_obs"])
+            share_obs_batch = sample_share_obs.reshape(-1, *sample_share_obs.shape[4:])
+        else:
+            share_obs_batch = sample["share_obs"].reshape(-1, *sample["share_obs"].shape[3:])
+        if self.obs_object:
+            sample_obs = np.array(sample["obs"])
+            obs_batch = sample_obs.reshape(-1, *sample_obs.shape[4:])
+        else:
+            obs_batch = sample["obs"].reshape(-1, *sample["obs"].shape[3:])
         rnn_states_batch = sample["rnn_states_actor"].reshape(-1, *sample["rnn_states_actor"].shape[3:])
         rnn_states_critic_batch = sample["rnn_states_critic"]
         actions_batch = sample["actions"].reshape(-1, *sample["actions"].shape[3:])

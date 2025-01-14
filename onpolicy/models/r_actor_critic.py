@@ -196,7 +196,7 @@ class R_Actor(nn.Module):
                 for i in range(obs_nongraph.shape[0]):
                     obs_non_graph_float[i] = obs_nongraph[i, 0]
                 obs_nongraph = obs_non_graph_float
-            obs_nongraph = check(obs_nongraph).to(**self.tpdv)
+            obs_nongraph = check(obs_nongraph.astype(np.float32)).to(**self.tpdv)
 
             # Batch the graphs and pass through GNN.
             graphs = Batch.from_data_list(obs_graph).to(self.device, "x", "edge_attr", "edge_index")
