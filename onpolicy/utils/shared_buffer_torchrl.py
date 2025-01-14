@@ -115,9 +115,9 @@ class SharedReplayBuffer(TensorDictReplayBuffer):
     def after_update(self, last_step=-1):
         """Copy last timestep data to first index. Called after update to model."""
 
-        last_sample = self[-1]
+        # last_sample = self[-1]
         self.empty()
-        self.add(last_sample)
+        # self.add(last_sample)
 
 
     def compute_returns(self, next_value, value_normalizer=None, last_step=-1):
