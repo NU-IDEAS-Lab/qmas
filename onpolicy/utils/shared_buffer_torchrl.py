@@ -99,57 +99,39 @@ class SharedReplayBuffer(TensorDictReplayBuffer):
                 names=None,
             ))
 
+        # Create a tensordict of all the data.
+        data = TensorDict({
+            'share_obs': share_obs,
+            'obs': obs,
+            'rnn_states_actor': rnn_states_actor, #+1
+            'rnn_states_critic': rnn_states_critic, #+1
+            'actions': actions,
+            'action_log_probs': action_log_probs,
+            'value_preds': value_preds,
+            'rewards': rewards,
+            'returns': np.zeros_like(rewards),
+            'masks': masks, #+1
+            'bad_masks': bad_masks, #+1
+            'active_masks': active_masks,
+            'delta_steps': delta_steps,
+            'available_actions': available_actions
+        })
+
         # In legacy mode, some data is added for timestep t, others for timestep t+1.
         if legacy_mode and len(self) > 0:
             # For step t, add to the existing data.
-            self["share_obs"][-1] = share_obs
-            self["obs"][-1] = obs
-            self["actions"][-1] = actions
-            self["action_log_probs"][-1] = action_log_probs
-            self["value_preds"][-1] = value_preds
-            self["rewards"][-1] = rewards
-            self["active_masks"][-1] = active_masks
-            self["delta_steps"][-1] = delta_steps
-            self["available_actions"][-1] = available_actions
+            self["share_obs"][-1] = data["share_obs"]
+            self["obs"][-1] = data["obs"]
+            self["actions"][-1] = data["actions"]
+            self["action_log_probs"][-1] = data["action_log_probs"]
+            self["value_preds"][-1] = data["value_preds"]
+            self["rewards"][-1] = data["rewards"]
+            self["active_masks"][-1] = data["active_masks"]
+            self["delta_steps"][-1] = data["delta_steps"]
+            self["available_actions"][-1] = data["available_actions"]
 
-            # For step t+1, add new data.
-            data = TensorDict({
-                'share_obs': np.zeros_like(share_obs),
-                'obs': np.zeros_like(obs),
-                'rnn_states_actor': rnn_states_actor, #+1
-                'rnn_states_critic': rnn_states_critic, #+1
-                'actions': np.zeros_like(actions),
-                'action_log_probs': np.zeros_like(action_log_probs),
-                'value_preds': np.zeros_like(value_preds),
-                'rewards': np.zeros_like(rewards),
-                'returns': np.zeros_like(rewards),
-                'masks': masks, #+1
-                'bad_masks': bad_masks, #+1
-                'active_masks': np.ones_like(masks),
-                'delta_steps': np.ones_like(delta_steps),
-                'available_actions': np.ones_like(available_actions)
-            })
-        
-        else:
-            # Create a tensordict of all the data.
-            data = TensorDict({
-                'share_obs': share_obs,
-                'obs': obs,
-                'rnn_states_actor': rnn_states_actor, #+1
-                'rnn_states_critic': rnn_states_critic, #+1
-                'actions': actions,
-                'action_log_probs': action_log_probs,
-                'value_preds': value_preds,
-                'rewards': rewards,
-                'returns': np.zeros_like(rewards),
-                'masks': masks, #+1
-                'bad_masks': bad_masks, #+1
-                'active_masks': active_masks,
-                'delta_steps': delta_steps,
-                'available_actions': available_actions
-            })
-
-        # Insert the data into the buffer.
+        # Insert the data for t+1 into the buffer.
+        # The t+1 step (`data`) will temporarily contain data for the previous (t) step.
         self.add(data)
 
 

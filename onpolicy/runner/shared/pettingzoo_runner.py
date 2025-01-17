@@ -57,12 +57,12 @@ class PettingzooRunner(Runner):
             delta_steps = np.ones((self.n_rollout_threads, self.num_agents, 1), dtype=np.int32)
             for step in range(self.episode_length):
                 # Sample actions, collect values and probabilities.
-                values, actions, action_log_probs, next_rnn_states, next_rnn_states_critic, actions_env = self.collect(
+                values, actions, action_log_probs, rnn_states, rnn_states_critic, actions_env = self.collect(
                     share_obs, obs, rnn_states, rnn_states_critic, masks, available_actions
                 )
                 
                 # Take a step in the environment and get the results.
-                next_obs, next_share_obs, rewards, dones, infos, next_available_actions = self.envs.step(actions_env)
+                obs, share_obs, rewards, dones, infos, available_actions = self.envs.step(actions_env)
 
                 # Get the number of steps taken by each agent since the agent was last ready.
                 delta_steps = np.array([info["deltaSteps"] for info in infos])
@@ -70,13 +70,6 @@ class PettingzooRunner(Runner):
                 # insert data into buffer
                 data = obs, share_obs, rewards, dones, infos, values, actions, action_log_probs, rnn_states, rnn_states_critic, delta_steps, available_actions
                 self.insert(data)
-
-                # Prepare for next step.
-                obs = next_obs
-                share_obs = next_share_obs
-                rnn_states = next_rnn_states
-                rnn_states_critic = next_rnn_states_critic
-                available_actions = next_available_actions
 
             # Get certain stats.
             avg_episode_rewards = self.buffer.rewards.mean().item() * self.episode_length
