@@ -52,7 +52,8 @@ class SharedReplayBuffer(TensorDictReplayBuffer):
 
 
     def insert(self, share_obs, obs, rnn_states_actor, rnn_states_critic, actions, action_log_probs,
-               value_preds, rewards, masks, bad_masks=None, active_masks=None, delta_steps=None, available_actions=None):
+               value_preds, rewards, masks, bad_masks=None, active_masks=None, delta_steps=None, available_actions=None,
+               legacy_mode=True):
         """
         Insert data into the buffer.
         :param share_obs: (argparse.Namespace) arguments containing relevant model, policy, and env information.
@@ -67,6 +68,8 @@ class SharedReplayBuffer(TensorDictReplayBuffer):
         :param bad_masks: (np.ndarray) action space for agents.
         :param active_masks: (np.ndarray) denotes whether an agent is active or dead in the env.
         :param available_actions: (np.ndarray) actions available to each agent. If None, all actions are available.
+        :param delta_steps: (np.ndarray) number of steps since last update.
+        :param legacy_mode: (bool) whether to use legacy mode for inserting data. Will use timesteps t and t+1.
         """
 
         if bad_masks is None:
@@ -96,23 +99,55 @@ class SharedReplayBuffer(TensorDictReplayBuffer):
                 names=None,
             ))
 
-        # Create a tensordict of the data.
-        data = TensorDict({
-            'share_obs': share_obs,
-            'obs': obs,
-            'rnn_states_actor': rnn_states_actor,
-            'rnn_states_critic': rnn_states_critic,
-            'actions': actions,
-            'action_log_probs': action_log_probs,
-            'value_preds': value_preds,
-            'rewards': rewards,
-            'returns': np.zeros_like(rewards),
-            'masks': masks,
-            'bad_masks': bad_masks,
-            'active_masks': active_masks,
-            'delta_steps': delta_steps,
-            'available_actions': available_actions
-        })
+        # In legacy mode, some data is added for timestep t, others for timestep t+1.
+        if legacy_mode and len(self) > 0:
+            # For step t, add to the existing data.
+            self["share_obs"][-1] = share_obs
+            self["obs"][-1] = obs
+            self["actions"][-1] = actions
+            self["action_log_probs"][-1] = action_log_probs
+            self["value_preds"][-1] = value_preds
+            self["rewards"][-1] = rewards
+            self["active_masks"][-1] = active_masks
+            self["delta_steps"][-1] = delta_steps
+            self["available_actions"][-1] = available_actions
+
+            # For step t+1, add new data.
+            data = TensorDict({
+                'share_obs': np.zeros_like(share_obs),
+                'obs': np.zeros_like(obs),
+                'rnn_states_actor': rnn_states_actor, #+1
+                'rnn_states_critic': rnn_states_critic, #+1
+                'actions': np.zeros_like(actions),
+                'action_log_probs': np.zeros_like(action_log_probs),
+                'value_preds': np.zeros_like(value_preds),
+                'rewards': np.zeros_like(rewards),
+                'returns': np.zeros_like(rewards),
+                'masks': masks, #+1
+                'bad_masks': bad_masks, #+1
+                'active_masks': np.ones_like(masks),
+                'delta_steps': np.ones_like(delta_steps),
+                'available_actions': np.ones_like(available_actions)
+            })
+        
+        else:
+            # Create a tensordict of all the data.
+            data = TensorDict({
+                'share_obs': share_obs,
+                'obs': obs,
+                'rnn_states_actor': rnn_states_actor, #+1
+                'rnn_states_critic': rnn_states_critic, #+1
+                'actions': actions,
+                'action_log_probs': action_log_probs,
+                'value_preds': value_preds,
+                'rewards': rewards,
+                'returns': np.zeros_like(rewards),
+                'masks': masks, #+1
+                'bad_masks': bad_masks, #+1
+                'active_masks': active_masks,
+                'delta_steps': delta_steps,
+                'available_actions': available_actions
+            })
 
         # Insert the data into the buffer.
         self.add(data)
@@ -269,10 +304,10 @@ class SharedReplayBuffer(TensorDictReplayBuffer):
         rnn_states_batch = sample["rnn_states_actor"].reshape(-1, *sample["rnn_states_actor"].shape[3:])
         rnn_states_critic_batch = sample["rnn_states_critic"]
         actions_batch = sample["actions"].reshape(-1, *sample["actions"].shape[3:])
-        value_preds_batch = sample["value_preds"].reshape(-1)
-        return_batch = sample["returns"].reshape(-1)
-        masks_batch = sample["masks"].reshape(-1)
-        active_masks_batch = sample["active_masks"].reshape(-1)
+        value_preds_batch = sample["value_preds"].reshape(-1, 1)
+        return_batch = sample["returns"].reshape(-1, 1)
+        masks_batch = sample["masks"].reshape(-1, 1)
+        active_masks_batch = sample["active_masks"].reshape(-1, 1)
         old_action_log_probs_batch = sample["action_log_probs"].reshape(-1, sample["action_log_probs"].shape[-1])
         adv_targ = sample["advantages"].reshape(-1)
         available_actions_batch = sample["available_actions"].reshape(-1, sample["available_actions"].shape[-1])
