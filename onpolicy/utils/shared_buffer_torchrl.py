@@ -135,105 +135,110 @@ class SharedReplayBuffer(TensorDictReplayBuffer):
 
         # if last_step == -1:
         #     last_step = self.episode_length
-        last_step = len(self) - 1
+        last_step = len(self)
+
+        value_preds = self["value_preds"]
+        returns = self["returns"]
 
         # Check whether we should use the AMADM GAE modification from https://arxiv.org/abs/2308.06036
         # Unfortunately, I don't have time to implement for all of the other options (like use_proper_time_limits),
         # so I just ignore them!
         if self._use_gae_amadm:
-            self["value_preds"][last_step] = next_value
+            value_preds = np.append(value_preds, next_value.unsqueeze(0), axis=0)
             gae = 0
             for step in reversed(range(last_step)):
                 if self._use_popart or self._use_valuenorm:
                     delta = self["rewards"][step] + np.power(self.gamma, self["delta_steps"][step]) * value_normalizer.denormalize(
-                        self["value_preds"][step + 1]) * self.masks[step + 1] \
-                            - value_normalizer.denormalize(self["value_preds"][step])
-                    gae = delta + np.power(self.gamma * self.gae_lambda, self["delta_steps"][step]) * self.masks[step + 1] * gae
-                    self["returns"][step] = gae + value_normalizer.denormalize(self["value_preds"][step])
+                        value_preds[step + 1]) * self.masks[step] \
+                            - value_normalizer.denormalize(value_preds[step])
+                    gae = delta + np.power(self.gamma * self.gae_lambda, self["delta_steps"][step]) * self.masks[step] * gae
+                    self["returns"][step] = gae + value_normalizer.denormalize(value_preds[step])
                 else:
-                    delta = self["rewards"][step] + np.power(self.gamma, self["delta_steps"][step]) * self["value_preds"][step + 1] * self.masks[step + 1] - \
-                            self["value_preds"][step]
-                    gae = delta + np.power(self.gamma * self.gae_lambda, self["delta_steps"][step]) * self.masks[step + 1] * gae
-                    self["returns"][step] = gae + self["value_preds"][step]
+                    delta = self["rewards"][step] + np.power(self.gamma, self["delta_steps"][step]) * value_preds[step + 1] * self.masks[step] - \
+                            value_preds[step]
+                    gae = delta + np.power(self.gamma * self.gae_lambda, self["delta_steps"][step]) * self.masks[step] * gae
+                    self["returns"][step] = gae + value_preds[step]
         
         elif self._use_proper_time_limits:
             if self._use_gae:
-                self["value_preds"][last_step] = next_value
+                value_preds = np.append(value_preds, next_value.unsqueeze(0), axis=0)
                 gae = 0
                 for step in reversed(range(self["rewards"].shape[0])):
                     if self._use_popart or self._use_valuenorm:
                         # step + 1
                         delta = self["rewards"][step] + self.gamma * value_normalizer.denormalize(
-                            self["value_preds"][step + 1]) * self.masks[step + 1] \
-                                - value_normalizer.denormalize(self["value_preds"][step])
-                        gae = delta + self.gamma * self.gae_lambda * gae * self.masks[step + 1]
+                            value_preds[step + 1]) * self.masks[step] \
+                                - value_normalizer.denormalize(value_preds[step])
+                        gae = delta + self.gamma * self.gae_lambda * gae * self.masks[step]
                         gae = gae * self.bad_masks[step + 1]
-                        self["returns"][step] = gae + value_normalizer.denormalize(self["value_preds"][step])
+                        self["returns"][step] = gae + value_normalizer.denormalize(value_preds[step])
                     else:
-                        delta = self["rewards"][step] + self.gamma * self["value_preds"][step + 1] * self.masks[step + 1] - \
-                                self["value_preds"][step]
-                        gae = delta + self.gamma * self.gae_lambda * self.masks[step + 1] * gae
+                        delta = self["rewards"][step] + self.gamma * value_preds[step + 1] * self.masks[step] - \
+                                value_preds[step]
+                        gae = delta + self.gamma * self.gae_lambda * self.masks[step] * gae
                         gae = gae * self.bad_masks[step + 1]
-                        self["returns"][step] = gae + self["value_preds"][step]
+                        self["returns"][step] = gae + value_preds[step]
             else:
-                self["returns"][last_step] = next_value
+                returns = np.append(returns, next_value.unsqueeze(0), axis=0)
                 for step in reversed(range(self["rewards"].shape[0])):
                     if self._use_popart or self._use_valuenorm:
-                        self["returns"][step] = (self["returns"][step + 1] * self.gamma * self.masks[step + 1] + self["rewards"][
+                        returns[step] = (returns[step + 1] * self.gamma * self.masks[step] + self["rewards"][
                             step]) * self.bad_masks[step + 1] \
                                              + (1 - self.bad_masks[step + 1]) * value_normalizer.denormalize(
-                            self["value_preds"][step])
+                            value_preds[step])
                     else:
-                        self["returns"][step] = (self["returns"][step + 1] * self.gamma * self.masks[step + 1] + self["rewards"][
+                        returns[step] = (returns[step + 1] * self.gamma * self.masks[step] + self["rewards"][
                             step]) * self.bad_masks[step + 1] \
-                                             + (1 - self.bad_masks[step + 1]) * self["value_preds"][step]
+                                             + (1 - self.bad_masks[step + 1]) * value_preds[step]
+                self["returns"] = returns[:-1]
         else:
             if self._use_gae:
-                self["value_preds"][last_step] = next_value
+                value_preds = np.append(value_preds, next_value.unsqueeze(0), axis=0)
                 gae = 0
                 for step in reversed(range(self["rewards"].shape[0])):
                     if self._use_popart or self._use_valuenorm:
                         if self.algo == "mat" or self.algo == "mat_dec":
-                            value_t = value_normalizer.denormalize(self["value_preds"][step])
-                            value_t_next = value_normalizer.denormalize(self["value_preds"][step + 1])
+                            value_t = value_normalizer.denormalize(value_preds[step])
+                            value_t_next = value_normalizer.denormalize(value_preds[step + 1])
                             rewards_t = self["rewards"][step]
 
                             # mean_v_t = np.mean(value_t, axis=-2, keepdims=True)
                             # mean_v_t_next = np.mean(value_t_next, axis=-2, keepdims=True)
-                            # delta = rewards_t + self.gamma * self.masks[step + 1] * mean_v_t_next - mean_v_t
+                            # delta = rewards_t + self.gamma * self.masks[step] * mean_v_t_next - mean_v_t
 
-                            delta = rewards_t + self.gamma * self.masks[step + 1] * value_t_next - value_t
-                            gae = delta + self.gamma * self.gae_lambda * self.masks[step + 1] * gae
+                            delta = rewards_t + self.gamma * self.masks[step] * value_t_next - value_t
+                            gae = delta + self.gamma * self.gae_lambda * self.masks[step] * gae
                             self.advantages[step] = gae
                             self["returns"][step] = gae + value_t
                         else:
                             delta = self["rewards"][step] + self.gamma * value_normalizer.denormalize(
-                                self["value_preds"][step + 1]) * self.masks[step + 1] \
-                                    - value_normalizer.denormalize(self["value_preds"][step])
-                            gae = delta + self.gamma * self.gae_lambda * self.masks[step + 1] * gae
-                            self["returns"][step] = gae + value_normalizer.denormalize(self["value_preds"][step])
+                                value_preds[step + 1]) * self.masks[step] \
+                                    - value_normalizer.denormalize(value_preds[step])
+                            gae = delta + self.gamma * self.gae_lambda * self.masks[step] * gae
+                            self["returns"][step] = gae + value_normalizer.denormalize(value_preds[step])
                     else:
                         if self.algo == "mat" or self.algo == "mat_dec":
                             rewards_t = self["rewards"][step]
-                            mean_v_t = np.mean(self["value_preds"][step], axis=-2, keepdims=True)
-                            mean_v_t_next = np.mean(self["value_preds"][step + 1], axis=-2, keepdims=True)
-                            delta = rewards_t + self.gamma * self.masks[step + 1] * mean_v_t_next - mean_v_t
+                            mean_v_t = np.mean(value_preds[step], axis=-2, keepdims=True)
+                            mean_v_t_next = np.mean(value_preds[step + 1], axis=-2, keepdims=True)
+                            delta = rewards_t + self.gamma * self.masks[step] * mean_v_t_next - mean_v_t
 
-                            # delta = rewards_t + self.gamma * self["value_preds"][step + 1] * \
-                            #         self.masks[step + 1] - self["value_preds"][step]
-                            gae = delta + self.gamma * self.gae_lambda * self.masks[step + 1] * gae
+                            # delta = rewards_t + self.gamma * value_preds[step + 1] * \
+                            #         self.masks[step] - value_preds[step]
+                            gae = delta + self.gamma * self.gae_lambda * self.masks[step] * gae
                             self.advantages[step] = gae
-                            self["returns"][step] = gae + self["value_preds"][step]
+                            self["returns"][step] = gae + value_preds[step]
 
                         else:
-                            delta = self["rewards"][step] + self.gamma * self["value_preds"][step + 1] * \
-                                    self.masks[step + 1] - self["value_preds"][step]
-                            gae = delta + self.gamma * self.gae_lambda * self.masks[step + 1] * gae
-                            self["returns"][step] = gae + self["value_preds"][step]
+                            delta = self["rewards"][step] + self.gamma * value_preds[step + 1] * \
+                                    self.masks[step] - value_preds[step]
+                            gae = delta + self.gamma * self.gae_lambda * self.masks[step] * gae
+                            self["returns"][step] = gae + value_preds[step]
             else:
-                self["returns"][last_step] = next_value
+                returns = np.append(returns, next_value.unsqueeze(0), axis=0)
                 for step in reversed(range(self["rewards"].shape[0])):
-                    self["returns"][step] = self["returns"][step + 1] * self.gamma * self.masks[step + 1] + self["rewards"][step]
+                    returns[step] = returns[step + 1] * self.gamma * self.masks[step] + self["rewards"][step]
+                self["returns"] = returns[:-1]
 
 
     ### COMPATIBILITY ###
