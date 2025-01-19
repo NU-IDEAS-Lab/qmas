@@ -125,7 +125,6 @@ class SharedReplayBuffer(TensorDictReplayBuffer):
             
             if len(self) <= 0:
                 self.add(data)
-                print(f"Buffer size: {len(self)} (initialized)")
             else:
                 self["share_obs"][-1] = data["share_obs"]
                 self["obs"][-1] = data["obs"]
@@ -140,8 +139,6 @@ class SharedReplayBuffer(TensorDictReplayBuffer):
         # Insert the data for t+1 into the buffer.
         # The t+1 step (`data`) will temporarily contain data for the previous (t) step.
         self.add(data)
-
-        print(f"Buffer size: {len(self)}")
 
 
     def after_update(self, last_step=-1):
