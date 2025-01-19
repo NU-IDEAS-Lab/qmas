@@ -38,13 +38,15 @@ class SharedReplayBuffer(TensorDictReplayBuffer):
         self.share_obs_object = False
 
         # Set up the storage backend.
-        storage = LazyTensorStorage(max_size=args.episode_length)
+        storage = LazyTensorStorage(max_size=args.episode_length + 1)
 
         # Set up the buffer.
         super().__init__(
+            batch_size=args.episode_length // args.num_mini_batch,
             storage=storage,
             sampler=SamplerWithoutReplacement(
-                shuffle=False
+                shuffle=False,
+                drop_last=True
             )
         )
 
@@ -118,21 +120,28 @@ class SharedReplayBuffer(TensorDictReplayBuffer):
         })
 
         # In legacy mode, some data is added for timestep t, others for timestep t+1.
-        if legacy_mode and len(self) > 0:
+        if legacy_mode:
             # For step t, add to the existing data.
-            self["share_obs"][-1] = data["share_obs"]
-            self["obs"][-1] = data["obs"]
-            self["actions"][-1] = data["actions"]
-            self["action_log_probs"][-1] = data["action_log_probs"]
-            self["value_preds"][-1] = data["value_preds"]
-            self["rewards"][-1] = data["rewards"]
-            self["active_masks"][-1] = data["active_masks"]
-            self["delta_steps"][-1] = data["delta_steps"]
-            self["available_actions"][-1] = data["available_actions"]
+            
+            if len(self) <= 0:
+                self.add(data)
+                print(f"Buffer size: {len(self)} (initialized)")
+            else:
+                self["share_obs"][-1] = data["share_obs"]
+                self["obs"][-1] = data["obs"]
+                self["actions"][-1] = data["actions"]
+                self["action_log_probs"][-1] = data["action_log_probs"]
+                self["value_preds"][-1] = data["value_preds"]
+                self["rewards"][-1] = data["rewards"]
+                self["active_masks"][-1] = data["active_masks"]
+                self["delta_steps"][-1] = data["delta_steps"]
+                self["available_actions"][-1] = data["available_actions"]
 
         # Insert the data for t+1 into the buffer.
         # The t+1 step (`data`) will temporarily contain data for the previous (t) step.
         self.add(data)
+
+        print(f"Buffer size: {len(self)}")
 
 
     def after_update(self, last_step=-1):
@@ -257,9 +266,7 @@ class SharedReplayBuffer(TensorDictReplayBuffer):
     # Everything below here is for compatibility with the old replay buffer class.
 
     def feed_forward_generator(self, advantages, num_mini_batch=None, mini_batch_size=None, last_step=-1):
-        batch_size = len(self) // num_mini_batch
-
-        sample, info = self.sample(batch_size=batch_size, return_info=True)
+        sample, info = self.sample(return_info=True)
         sample["advantages"] = advantages[info["index"]]
 
         yield self.compatibility_transform_sample(sample)
