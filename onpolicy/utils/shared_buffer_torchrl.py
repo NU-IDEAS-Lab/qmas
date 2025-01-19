@@ -7,6 +7,44 @@ from torchrl.data.replay_buffers import LazyTensorStorage, TensorDictReplayBuffe
 from torchrl.data.replay_buffers.samplers import SamplerWithoutReplacement
 
 
+class FixedSamplerWithoutReplacement(SamplerWithoutReplacement):
+    """This class fixes the SamplerWithoutReplacement class to allow both drop_last and shuffle at the same time.
+    
+    A data-consuming sampler that ensures that the same sample is not present in consecutive batches.
+
+    Args:
+        drop_last (bool, optional): if ``True``, the last incomplete sample (if any) will be dropped.
+            If ``False``, this last sample will be kept and (unlike with torch dataloaders)
+            completed with other samples from a fresh indices permutation.
+            Defaults to ``False``.
+        shuffle (bool, optional): if ``False``, the items are not randomly
+            permuted. This enables to iterate over the replay buffer in the
+            order the data was collected. Defaults to ``True``.
+
+    *Caution*: If the size of the storage changes in between two calls, the samples will be re-shuffled
+    (as we can't generally keep track of which samples have been sampled before and which haven't).
+
+    Similarly, it is expected that the storage content remains the same in between two calls,
+    but this is not enforced.
+
+    When the sampler reaches the end of the list of available indices, a new sample order
+    will be generated and the resulting indices will be completed with this new draw, which
+    can lead to duplicated indices, unless the :obj:`drop_last` argument is set to ``True``.
+
+    """
+
+    def __init__(self, drop_last: bool = False, shuffle: bool = True):
+        # Set drop_last to false, since we have made a simpler version of that mechanism.
+        # super().__init__(drop_last=False, shuffle=shuffle)
+        super().__init__(drop_last=drop_last, shuffle=shuffle)
+
+    def _storage_len(self, storage):
+        length = len(storage)
+        if self.drop_last and length > 0:
+            return length - 1
+        return length
+
+
 class SharedReplayBuffer(TensorDictReplayBuffer):
     """
     Buffer to store training data.
@@ -44,8 +82,8 @@ class SharedReplayBuffer(TensorDictReplayBuffer):
         super().__init__(
             batch_size=args.episode_length // args.num_mini_batch,
             storage=storage,
-            sampler=SamplerWithoutReplacement(
-                shuffle=False,
+            sampler=FixedSamplerWithoutReplacement(
+                shuffle=True,
                 drop_last=True
             )
         )
