@@ -1,4 +1,5 @@
 from collections import defaultdict, deque
+from collections.abc import Iterable
 from itertools import chain
 import os
 import time
@@ -8,7 +9,7 @@ import numpy as np
 import torch
 import wandb
 
-from onpolicy.utils.util import update_linear_schedule
+from onpolicy.utils.util import update_linear_schedule, get_shape_from_act_space
 from onpolicy.runner.shared.base_runner import Runner
 
 from onpolicy.utils.shared_buffer_torchrl import SharedReplayBuffer
@@ -51,15 +52,13 @@ class PettingzooRunner(Runner):
                 self.trainer.policy.lr_decay(episode, episodes)
             
             # Reset the environment and perform warmup.
-            obs, share_obs, available_actions, rnn_states, rnn_states_critic, masks = self.warmup()
+            self.warmup()
 
             # Set the delta steps to 1.
             delta_steps = np.ones((self.n_rollout_threads, self.num_agents, 1), dtype=np.int32)
             for step in range(self.episode_length):
                 # Sample actions, collect values and probabilities.
-                values, actions, action_log_probs, rnn_states, rnn_states_critic, actions_env = self.collect(
-                    share_obs, obs, rnn_states, rnn_states_critic, masks, available_actions
-                )
+                values, actions, action_log_probs, rnn_states, rnn_states_critic, actions_env = self.collect(step)
                 
                 # Take a step in the environment and get the results.
                 obs, share_obs, rewards, dones, infos, available_actions = self.envs.step(actions_env)
@@ -113,24 +112,42 @@ class PettingzooRunner(Runner):
         # Reset environment.
         obs, share_obs, available_actions = self.envs.reset()
 
-        rnn_states = np.zeros((self.n_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=np.float32)
-        rnn_states_critic = np.zeros_like(rnn_states)
-        masks = np.ones((self.n_rollout_threads, self.num_agents, 1), dtype=np.float32)
+        # Get the shape of the action space.
+        act_shape = get_shape_from_act_space(self.buffer.act_space)
+        if isinstance(act_shape, Iterable):
+            actions_shape = (self.n_rollout_threads, self.num_agents, *act_shape)
+        else:
+            actions_shape = (self.n_rollout_threads, self.num_agents, act_shape)
 
-        return obs, share_obs, available_actions, rnn_states, rnn_states_critic, masks
+        # Initialize buffer.
+        self.buffer.insert(
+            share_obs=share_obs,
+            obs=obs,
+            rnn_states_actor=np.zeros((self.n_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=np.float32),
+            rnn_states_critic=np.zeros((self.n_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=np.float32),
+            actions=np.zeros(actions_shape, dtype=np.float32),
+            action_log_probs=np.zeros(actions_shape, dtype=np.float32),
+            value_preds=np.zeros((self.n_rollout_threads, self.num_agents, 1), dtype=np.float32),
+            rewards=np.zeros((self.n_rollout_threads, self.num_agents, 1), dtype=np.float32),
+            masks=np.ones((self.n_rollout_threads, self.num_agents, 1), dtype=np.float32),
+            delta_steps=np.ones((self.n_rollout_threads, self.num_agents, 1), dtype=np.int32),
+            available_actions=available_actions
+        )
+
 
     @torch.no_grad()
-    def collect(self, share_obs, obs, rnn_states, rnn_states_critic, masks, available_actions):
-
+    def collect(self, step):
         self.trainer.prep_rollout()
 
+        share_obs, obs, rnn_states, rnn_states_critic, masks, available_actions = self.buffer.compatibility_get_policy_input(step)
+
         value, action, action_log_prob, rnn_states, rnn_states_critic = self.trainer.policy.get_actions(
-            np.concatenate(share_obs),
-            np.concatenate(obs),
-            np.concatenate(rnn_states),
-            np.concatenate(rnn_states_critic),
-            np.concatenate(masks),
-            available_actions=np.concatenate(available_actions)
+            share_obs,
+            obs,
+            rnn_states,
+            rnn_states_critic,
+            masks,
+            available_actions=available_actions
         )
 
         values = np.array(np.split(_t2n(value), self.n_rollout_threads))

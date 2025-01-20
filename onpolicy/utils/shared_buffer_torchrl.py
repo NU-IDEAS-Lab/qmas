@@ -71,6 +71,7 @@ class SharedReplayBuffer(TensorDictReplayBuffer):
         self.num_agents = num_agents
         self.obs_space = obs_space
         self.share_obs_space = cent_obs_space
+        self.act_space = act_space
 
         self.obs_object = False
         self.share_obs_object = False
@@ -82,8 +83,9 @@ class SharedReplayBuffer(TensorDictReplayBuffer):
         super().__init__(
             batch_size=args.episode_length // args.num_mini_batch,
             storage=storage,
-            sampler=FixedSamplerWithoutReplacement(
-                shuffle=True,
+            # sampler=FixedSamplerWithoutReplacement(
+            sampler=SamplerWithoutReplacement(
+                shuffle=False,
                 drop_last=True
             )
         )
@@ -141,8 +143,8 @@ class SharedReplayBuffer(TensorDictReplayBuffer):
 
         # Create a tensordict of all the data.
         data = TensorDict({
-            'share_obs': share_obs,
-            'obs': obs,
+            'share_obs': share_obs, #+1
+            'obs': obs, #+1
             'rnn_states_actor': rnn_states_actor, #+1
             'rnn_states_critic': rnn_states_critic, #+1
             'actions': actions,
@@ -152,9 +154,9 @@ class SharedReplayBuffer(TensorDictReplayBuffer):
             'returns': np.zeros_like(rewards),
             'masks': masks, #+1
             'bad_masks': bad_masks, #+1
-            'active_masks': active_masks,
+            'active_masks': active_masks, #+1
             'delta_steps': delta_steps,
-            'available_actions': available_actions
+            'available_actions': available_actions #+1
         })
 
         # In legacy mode, some data is added for timestep t, others for timestep t+1.
@@ -162,21 +164,25 @@ class SharedReplayBuffer(TensorDictReplayBuffer):
             # For step t, add to the existing data.
             
             if len(self) <= 0:
+                # Special case for the first insertion.
                 self.add(data)
             else:
-                self["share_obs"][-1] = data["share_obs"]
-                self["obs"][-1] = data["obs"]
+                # self["share_obs"][-1] = data["share_obs"]
+                # self["obs"][-1] = data["obs"]
                 self["actions"][-1] = data["actions"]
                 self["action_log_probs"][-1] = data["action_log_probs"]
                 self["value_preds"][-1] = data["value_preds"]
                 self["rewards"][-1] = data["rewards"]
-                self["active_masks"][-1] = data["active_masks"]
+                # self["active_masks"][-1] = data["active_masks"]
                 self["delta_steps"][-1] = data["delta_steps"]
-                self["available_actions"][-1] = data["available_actions"]
+                # self["available_actions"][-1] = data["available_actions"]
 
-        # Insert the data for t+1 into the buffer.
-        # The t+1 step (`data`) will temporarily contain data for the previous (t) step.
-        self.add(data)
+                # Insert the data for t+1 into the buffer.
+                # The t+1 step (`data`) will temporarily contain data for the previous (t) step.
+                self.add(data)
+        else:
+            # In non-legacy mode, add all data for timestep t.
+            self.add(data)
 
 
     def after_update(self, last_step=-1):
@@ -328,12 +334,34 @@ class SharedReplayBuffer(TensorDictReplayBuffer):
         masks_batch = sample["masks"].reshape(-1, 1)
         active_masks_batch = sample["active_masks"].reshape(-1, 1)
         old_action_log_probs_batch = sample["action_log_probs"].reshape(-1, sample["action_log_probs"].shape[-1])
-        adv_targ = sample["advantages"].reshape(-1)
+        adv_targ = sample["advantages"].reshape(-1, 1)
         available_actions_batch = sample["available_actions"].reshape(-1, sample["available_actions"].shape[-1])
 
         return share_obs_batch, obs_batch, rnn_states_batch, rnn_states_critic_batch, actions_batch, \
         value_preds_batch, return_batch, masks_batch, active_masks_batch, old_action_log_probs_batch, \
         adv_targ, available_actions_batch
+
+
+    def compatibility_get_policy_input(self, step):
+        ''' Gets the necessary policy input for a particular step, in the format expected by existing onpolicy code. '''
+        sample = self[step]
+
+        if self.share_obs_object:
+            sample_share_obs = np.array(sample["share_obs"])
+            share_obs = sample_share_obs.reshape(-1, *sample_share_obs.shape[4:])
+        else:
+            share_obs = np.concatenate(sample["share_obs"].numpy())
+        if self.obs_object:
+            sample_obs = np.array(sample["obs"])
+            obs = sample_obs.reshape(-1, *sample_obs.shape[4:], 1)
+        else:
+            obs = np.concatenate(sample["obs"].numpy())
+        rnn_states_actor = np.concatenate(sample["rnn_states_actor"].numpy())
+        rnn_states_critic = np.concatenate(sample["rnn_states_critic"].numpy())
+        masks = np.concatenate(sample["masks"].numpy())
+        available_actions = np.concatenate(sample["available_actions"].numpy())
+
+        return share_obs, obs, rnn_states_actor, rnn_states_critic, masks, available_actions
 
 
     @property
@@ -344,6 +372,10 @@ class SharedReplayBuffer(TensorDictReplayBuffer):
     def obs(self):
         return self["obs"]
     
+    @property
+    def rnn_states(self):
+        return self["rnn_states_actor"]
+
     @property
     def rnn_states_actor(self):
         return self["rnn_states_actor"]
