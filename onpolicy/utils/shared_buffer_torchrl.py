@@ -167,15 +167,11 @@ class SharedReplayBuffer(TensorDictReplayBuffer):
                 # Special case for the first insertion.
                 self.add(data)
             else:
-                # self["share_obs"][-1] = data["share_obs"]
-                # self["obs"][-1] = data["obs"]
                 self["actions"][-1] = data["actions"]
                 self["action_log_probs"][-1] = data["action_log_probs"]
                 self["value_preds"][-1] = data["value_preds"]
                 self["rewards"][-1] = data["rewards"]
-                # self["active_masks"][-1] = data["active_masks"]
                 self["delta_steps"][-1] = data["delta_steps"]
-                # self["available_actions"][-1] = data["available_actions"]
 
                 # Insert the data for t+1 into the buffer.
                 # The t+1 step (`data`) will temporarily contain data for the previous (t) step.
@@ -186,11 +182,9 @@ class SharedReplayBuffer(TensorDictReplayBuffer):
 
 
     def after_update(self, last_step=-1):
-        """Copy last timestep data to first index. Called after update to model."""
+        """ Reset/clear the buffer. Called after update to model. """
 
-        # last_sample = self[-1]
         self.empty()
-        # self.add(last_sample)
 
 
     def compute_returns(self, next_value, value_normalizer=None, last_step=-1):
@@ -200,9 +194,8 @@ class SharedReplayBuffer(TensorDictReplayBuffer):
         :param value_normalizer: (PopArt) If not None, PopArt value normalizer instance.
         """
 
-        # if last_step == -1:
-        #     last_step = self.episode_length
-        last_step = len(self) - 1
+        if last_step == -1:
+            last_step = len(self) - 1
 
         # Check whether we should use the AMADM GAE modification from https://arxiv.org/abs/2308.06036
         # Unfortunately, I don't have time to implement for all of the other options (like use_proper_time_limits),
