@@ -1,4 +1,5 @@
 from collections import defaultdict, deque
+from collections.abc import Iterable
 from itertools import chain
 import os
 import time
@@ -8,8 +9,10 @@ import numpy as np
 import torch
 import wandb
 
-from onpolicy.utils.util import update_linear_schedule
+from onpolicy.utils.util import update_linear_schedule, get_shape_from_act_space
 from onpolicy.runner.shared.base_runner import Runner
+
+from onpolicy.utils.shared_buffer_torchrl import SharedReplayBuffer
 
 
 def _t2n(x):
@@ -23,6 +26,15 @@ class PettingzooRunner(Runner):
         config['all_args'].model_dir = None
 
         super(PettingzooRunner, self).__init__(config)
+
+        # Override the default buffer with our new TorchRL one.
+        share_observation_space = self.envs.share_observation_space[0] if self.use_centralized_V else self.envs.observation_space[0]
+        self.buffer = SharedReplayBuffer(self.all_args,
+                                        self.num_agents,
+                                        self.envs.observation_space[0],
+                                        share_observation_space,
+                                        self.envs.action_space[0])
+
         self.env_infos = defaultdict(list)
        
         # Perform restoration.
@@ -32,14 +44,15 @@ class PettingzooRunner(Runner):
             self.restore()
        
     def run(self):
-        self.warmup()   
-
         start = time.time()
         episodes = int(self.num_env_steps) // self.episode_length // self.n_rollout_threads
 
         for episode in range(episodes):
             if self.use_linear_lr_decay:
                 self.trainer.policy.lr_decay(episode, episodes)
+            
+            # Reset the environment and perform warmup.
+            self.warmup()
 
             # Set the delta steps to 1.
             delta_steps = np.ones((self.n_rollout_threads, self.num_agents, 1), dtype=np.int32)
@@ -56,6 +69,9 @@ class PettingzooRunner(Runner):
                 # insert data into buffer
                 data = obs, share_obs, rewards, dones, infos, values, actions, action_log_probs, rnn_states, rnn_states_critic, delta_steps, available_actions
                 self.insert(data)
+
+            # Get certain stats.
+            avg_episode_rewards = self.buffer.rewards.mean().item() * self.episode_length
 
             # compute return and update network
             self.compute()
@@ -81,7 +97,7 @@ class PettingzooRunner(Runner):
                                 self.num_env_steps,
                                 int(total_num_steps / (end - start))))
                 
-                train_infos["average_episode_rewards"] = np.mean(self.buffer.rewards) * self.episode_length
+                train_infos["average_episode_rewards"] = avg_episode_rewards
                 train_infos["fps"] = total_num_steps / (end - start)
                 print("average episode reward is {}".format(train_infos["average_episode_rewards"]))
                 self.log_train(train_infos, total_num_steps)
@@ -96,24 +112,42 @@ class PettingzooRunner(Runner):
         # Reset environment.
         obs, share_obs, available_actions = self.envs.reset()
 
+        # Get the shape of the action space.
+        act_shape = get_shape_from_act_space(self.buffer.act_space)
+        if isinstance(act_shape, Iterable):
+            actions_shape = (self.n_rollout_threads, self.num_agents, *act_shape)
+        else:
+            actions_shape = (self.n_rollout_threads, self.num_agents, act_shape)
+
         # Initialize buffer.
-        self.buffer.share_obs[0] = share_obs.copy()
-        self.buffer.obs[0] = obs.copy()
-        self.buffer.available_actions[0] = available_actions.copy()
+        self.buffer.insert(
+            share_obs=share_obs,
+            obs=obs,
+            rnn_states_actor=np.zeros((self.n_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=np.float32),
+            rnn_states_critic=np.zeros((self.n_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=np.float32),
+            actions=np.zeros(actions_shape, dtype=np.float32),
+            action_log_probs=np.zeros(actions_shape, dtype=np.float32),
+            value_preds=np.zeros((self.n_rollout_threads, self.num_agents, 1), dtype=np.float32),
+            rewards=np.zeros((self.n_rollout_threads, self.num_agents, 1), dtype=np.float32),
+            masks=np.ones((self.n_rollout_threads, self.num_agents, 1), dtype=np.float32),
+            delta_steps=np.ones((self.n_rollout_threads, self.num_agents, 1), dtype=np.int32),
+            available_actions=available_actions
+        )
+
 
     @torch.no_grad()
     def collect(self, step):
         self.trainer.prep_rollout()
 
-        self.trainer.prep_rollout()
+        share_obs, obs, rnn_states, rnn_states_critic, masks, available_actions = self.buffer.compatibility_get_policy_input(step)
 
         value, action, action_log_prob, rnn_states, rnn_states_critic = self.trainer.policy.get_actions(
-            np.concatenate(self.buffer.share_obs[step]),
-            np.concatenate(self.buffer.obs[step]),
-            np.concatenate(self.buffer.rnn_states[step]),
-            np.concatenate(self.buffer.rnn_states_critic[step]),
-            np.concatenate(self.buffer.masks[step]),
-            available_actions=np.concatenate(self.buffer.available_actions[step])
+            share_obs,
+            obs,
+            rnn_states,
+            rnn_states_critic,
+            masks,
+            available_actions=available_actions
         )
 
         values = np.array(np.split(_t2n(value), self.n_rollout_threads))
@@ -146,13 +180,13 @@ class PettingzooRunner(Runner):
         for n in range(len(infos[0]["node_visits"])):
             self.env_infos[f"node_visits/node_{n}"] = [i["node_visits"][n] for i in infos]
 
-        masks = np.ones((self.n_rollout_threads, self.num_agents, 1), dtype=np.float32)
+        masks = torch.ones((self.n_rollout_threads, self.num_agents, 1))
         for i in range(self.n_rollout_threads):
             for agent_id in range(self.num_agents):
                 if dones[i, agent_id]:
-                    rnn_states[i][agent_id] = np.zeros((self.recurrent_N, self.hidden_size), dtype=np.float32)
-                    rnn_states_critic[i][agent_id] = np.zeros((self.recurrent_N, self.hidden_size), dtype=np.float32)
-                    masks[i, agent_id] = np.zeros(1, dtype=np.float32)
+                    rnn_states[i][agent_id] = torch.zeros((self.recurrent_N, self.hidden_size))
+                    rnn_states_critic[i][agent_id] = torch.zeros((self.recurrent_N, self.hidden_size))
+                    masks[i, agent_id] = torch.zeros(1)
 
         self.buffer.insert(
             share_obs=share_obs,
@@ -167,6 +201,23 @@ class PettingzooRunner(Runner):
             delta_steps=delta_steps,
             available_actions=available_actions
         )
+
+
+    def compute(self):
+        """Calculate returns for the collected data."""
+        self.trainer.prep_rollout()
+        if self.algorithm_name == "mat" or self.algorithm_name == "mat_dec":
+            next_values = self.trainer.policy.get_values(self.buffer["share_obs"][-1],
+                                                        self.buffer["obs"][-1],
+                                                        self.buffer["rnn_states_critic"][-1],
+                                                        self.buffer["masks"][-1])
+        else:
+            next_values = self.trainer.policy.get_values(self.buffer["share_obs"][-1],
+                                                        self.buffer["rnn_states_critic"][-1],
+                                                        self.buffer["masks"][-1])
+        next_values = next_values.detach().cpu().view(self.n_rollout_threads, self.num_agents, 1)
+        self.buffer.compute_returns(next_values, self.trainer.value_normalizer)
+
 
     def log_env(self, env_infos, total_num_steps):
         for k, v in env_infos.items():

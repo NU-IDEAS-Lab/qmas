@@ -1,4 +1,5 @@
 from onpolicy.algorithms.r_mappo.r_mappo import R_MAPPO
+from copy import deepcopy
 
 import numpy as np
 
@@ -17,12 +18,15 @@ class QmasAlgorithm(R_MAPPO):
 
         :return train_info: (dict) contains information regarding training update (e.g. loss, grad norms, etc).
         """
+
+        last_step = -1 #TODO: remove last_step
+
         if self._use_popart or self._use_valuenorm:
-            advantages = buffer.returns[:last_step] - self.value_normalizer.denormalize(buffer.value_preds[:last_step])
+            advantages = buffer.returns - self.value_normalizer.denormalize(buffer.value_preds)
         else:
-            advantages = buffer.returns[:last_step] - buffer.value_preds[:last_step]
-        advantages_copy = advantages.copy()
-        advantages_copy[buffer.active_masks[:last_step] == 0.0] = np.nan
+            advantages = buffer.returns - buffer.value_preds
+        advantages_copy = deepcopy(advantages)
+        advantages_copy[buffer.active_masks == 0.0] = np.nan
         mean_advantages = np.nanmean(advantages_copy)
         std_advantages = np.nanstd(advantages_copy)
         advantages = (advantages - mean_advantages) / (std_advantages + 1e-5)
