@@ -5,6 +5,7 @@ from torch_geometric.data import Batch
 from onpolicy.utils.util import get_grad_norm, huber_loss, mse_loss
 from onpolicy.utils.valuenorm import ValueNorm
 from onpolicy.models.utils.util import check
+from copy import deepcopy
 
 class R_MAPPO():
     """
@@ -190,7 +191,7 @@ class R_MAPPO():
             advantages = buffer.returns[:last_step] - self.value_normalizer.denormalize(buffer.value_preds[:last_step])
         else:
             advantages = buffer.returns[:last_step] - buffer.value_preds[:last_step]
-        advantages_copy = advantages.copy()
+        advantages_copy = deepcopy(advantages)
         advantages_copy[buffer.active_masks[:last_step] == 0.0] = np.nan
         mean_advantages = np.nanmean(advantages_copy)
         std_advantages = np.nanstd(advantages_copy)
