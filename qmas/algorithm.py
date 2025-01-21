@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 
 from onpolicy.algorithms.r_mappo.r_mappo import R_MAPPO
 from onpolicy.utils.util import get_grad_norm, get_shape_from_obs_space, get_shape_from_act_space
@@ -25,29 +26,29 @@ class QmasAlgorithm(R_MAPPO):
         transition_dim = share_obs_dim + action_dim
         
         # Create Diffuser model.
-        horizon = 32 # TODO: Need to feed in 32-length trajectories during training.
+        self.prediction_horizon = 8 # TODO: Need to feed in 32-length trajectories during training.
         diffuser_base = TemporalUnet(
-            horizon=horizon,
+            horizon=self.prediction_horizon,
             transition_dim=transition_dim,
             cond_dim=0, #TODO: What is the correct value?
             dim=32,
             dim_mults=(8, 4, 2, 1)
         )
-        self.diffuser = GaussianDiffusion(diffuser_base, horizon = horizon, observation_dim = share_obs_dim, 
+        self.diffuser = GaussianDiffusion(diffuser_base, horizon = self.prediction_horizon, observation_dim = share_obs_dim, 
                                           action_dim = action_dim , n_timesteps=4, loss_type='l2', 
                                           clip_denoised=False, predict_epsilon=False,
                                           action_weight=10, loss_discount=1.0, loss_weights=None)
         
         # Create Guide model.
         guide_base = ValueFunction(
-            horizon = horizon,
+            horizon = self.prediction_horizon,
             transition_dim = transition_dim,
             cond_dim=0, #TODO: What is the correct value?
             dim=32,
             dim_mults=(8, 4, 2, 1),
             out_dim=1
         )
-        self.guide = ValueDiffusion(guide_base, horizon = horizon, observation_dim = share_obs_dim, 
+        self.guide = ValueDiffusion(guide_base, horizon = self.prediction_horizon, observation_dim = share_obs_dim, 
                                     action_dim = action_dim , n_timesteps=4, loss_type='value_l2', 
                                     clip_denoised=False, predict_epsilon=True, action_weight=1.0, 
                                     loss_discount=1.0, loss_weights=None)
@@ -87,13 +88,45 @@ class QmasAlgorithm(R_MAPPO):
         else:
             return None
 
+
+    def train(self, buffer, update_actor=True, update_critic=True, last_step=-1):
+        """
+        Perform a training update using minibatch GD.
+        :param buffer: (SharedReplayBuffer) buffer containing training data.
+        :param update_actor: (bool) whether to update actor network.
+        :param update_critic: (bool) whether to update critic network.
+        :param last_step: (int) last step of the episode. Defaults to -1, which will use all steps in the buffer.
+
+        :return train_info: (dict) contains information regarding training update (e.g. loss, grad norms, etc).
+        """
+
+        train_info = super().train(buffer, update_actor, update_critic, last_step)
+
+        num_updates = 0
+
+        # Dummy advantages. We don't need them, we're just reusing code.
+        advantages = np.zeros_like(buffer.rewards)
+
+        for _ in range(self.ppo_epoch):
+            data_generator = buffer.recurrent_generator(advantages, self.num_mini_batch, self.prediction_horizon, last_step=last_step)
+
+            for sample in data_generator:
+                self.train_sample_diffuser(sample, train_info, update_actor, update_critic)
+                num_updates += 1
+
+        for k in train_info.keys():
+            train_info[k] /= num_updates
+ 
+        return train_info
+
+
     def train_initialize_info(self, train_info):
         super().train_initialize_info(train_info)
         train_info['diffuser_loss'] = 0
         train_info['guide_loss'] = 0
 
 
-    def train_sample(self, sample, train_info, update_actor=True, update_critic=True):
+    def train_sample_diffuser(self, sample, train_info, update_actor=True, update_critic=True):
         ''' Performs update for a single sample. '''
         
         super().train_sample(sample, train_info, update_actor, update_critic)
@@ -109,18 +142,19 @@ class QmasAlgorithm(R_MAPPO):
         # Build trajectory.
         # Combine observations and actions for the diffuser input
         # Assuming obs_batch and actions_batch are properly shaped
-        share_obs_batch = torch.from_numpy(share_obs_batch).unsqueeze(1)
-        actions_batch = torch.from_numpy(actions_batch).unsqueeze(1)
+        episode_length = share_obs_batch.shape[0] // self.prediction_horizon
+        share_obs_batch = torch.tensor(np.split(share_obs_batch, episode_length, axis=0))
+        actions_batch = torch.tensor(np.split(actions_batch, episode_length, axis=0))
         trajectories = torch.cat([share_obs_batch, actions_batch], dim=-1)
 
         # TODO: Major problem: The above batch size does not match the diffusion model's horizon size.
         # I believe that these must match.
         # TODO: Temporarily just repeat along dimension 1 to match the horizon size.
-        trajectories = trajectories.repeat(1, 32, 1)
+        # trajectories = trajectories.repeat(1, 32, 1)
         print(f"Trajectories shape: {trajectories.shape}")
 
         # Get returns (target for the guide model).
-        returns = torch.from_numpy(return_batch)
+        returns = torch.tensor(np.split(return_batch, episode_length, axis=0)).squeeze()
 
         # Update diffuser model.
         diffuser_loss, diffuser_grad_norm, diffuser_info = self.diffusion_update(
