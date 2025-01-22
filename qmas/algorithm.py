@@ -114,8 +114,9 @@ class QmasAlgorithm(R_MAPPO):
                 self.train_sample_diffuser(sample, train_info, update_actor, update_critic)
                 num_updates += 1
 
-        for k in train_info.keys():
-            train_info[k] /= num_updates
+        # Average the losses.
+        train_info['diffuser_loss'] /= num_updates
+        train_info['guide_loss'] /= num_updates
  
         return train_info
 
