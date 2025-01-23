@@ -127,7 +127,7 @@ class QmasAlgorithm(R_MAPPO):
         ''' Performs update for a single sample. '''
         
         # Unpack sample.
-        share_obs_batch = sample["share_obs"][:, :, :, 0] # Get the shared observation from only one agent, since they should all be the same...
+        share_obs_batch = sample["share_obs"][:, :, 0, 0] # Get the shared observation from only one agent, since they should all be the same...
         share_obs_batch = share_obs_batch.reshape(*share_obs_batch.shape[:2], -1)
         actions_batch = sample["actions"].reshape(*sample["actions"].shape[:2], -1)
         returns_batch = sample["returns"].reshape(*sample["returns"].shape[:2], -1)
