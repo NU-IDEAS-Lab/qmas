@@ -21,12 +21,12 @@ class QmasAlgorithm(R_MAPPO):
         super().__init__(args, policy, env, device)
 
         self.env = env
-        share_obs_dim = get_shape_from_obs_space(env.share_observation_space[0], flatten_dicts=False)[0]
-        action_dim = get_shape_from_act_space(env.action_space[0])
+        share_obs_dim = get_shape_from_obs_space(env.share_observation_space[0], flatten_dicts=False)[0] # state space for all agents
+        action_dim = get_shape_from_act_space(env.action_space[0]) * len(env.action_space) # action space for all agents
         transition_dim = share_obs_dim + action_dim
         
         # Create Diffuser model.
-        self.prediction_horizon = 8 # TODO: Need to feed in 32-length trajectories during training.
+        self.prediction_horizon = 8
         diffuser_base = TemporalUnet(
             horizon=self.prediction_horizon,
             transition_dim=transition_dim,
@@ -103,12 +103,8 @@ class QmasAlgorithm(R_MAPPO):
         train_info = super().train(buffer, update_actor, update_critic, last_step)
 
         num_updates = 0
-
-        # Dummy advantages. We don't need them, we're just reusing code.
-        advantages = np.zeros_like(buffer.rewards)
-
         for _ in range(self.ppo_epoch):
-            data_generator = buffer.recurrent_generator(advantages, self.num_mini_batch, self.prediction_horizon, last_step=last_step)
+            data_generator = buffer.sample_trajectories(self.num_mini_batch, self.prediction_horizon)
 
             for sample in data_generator:
                 self.train_sample_diffuser(sample, train_info, update_actor, update_critic)
@@ -130,32 +126,17 @@ class QmasAlgorithm(R_MAPPO):
     def train_sample_diffuser(self, sample, train_info, update_actor=True, update_critic=True):
         ''' Performs update for a single sample. '''
         
-        super().train_sample(sample, train_info, update_actor, update_critic)
-
         # Unpack sample.
-        share_obs_batch, obs_batch, rnn_states_batch, rnn_states_critic_batch, actions_batch, \
-        value_preds_batch, return_batch, masks_batch, active_masks_batch, old_action_log_probs_batch, \
-        adv_targ, available_actions_batch = sample
+        share_obs_batch = sample["share_obs"][:, :, :, 0] # Get the shared observation from only one agent, since they should all be the same...
+        share_obs_batch = share_obs_batch.reshape(*share_obs_batch.shape[:2], -1)
+        actions_batch = sample["actions"].reshape(*sample["actions"].shape[:2], -1)
+        returns_batch = sample["returns"].reshape(*sample["returns"].shape[:2], -1)
         
         # TODO: Temporary placeholder for conditions. Currently empty.
         cond = {}
 
-        # Build trajectory.
-        # Combine observations and actions for the diffuser input
-        # Assuming obs_batch and actions_batch are properly shaped
-        episode_length = share_obs_batch.shape[0] // self.prediction_horizon
-        share_obs_batch = torch.tensor(np.split(share_obs_batch, episode_length, axis=0))
-        actions_batch = torch.tensor(np.split(actions_batch, episode_length, axis=0))
+        # Build trajectories.
         trajectories = torch.cat([share_obs_batch, actions_batch], dim=-1)
-
-        # TODO: Major problem: The above batch size does not match the diffusion model's horizon size.
-        # I believe that these must match.
-        # TODO: Temporarily just repeat along dimension 1 to match the horizon size.
-        # trajectories = trajectories.repeat(1, 32, 1)
-        print(f"Trajectories shape: {trajectories.shape}")
-
-        # Get returns (target for the guide model).
-        returns = torch.tensor(np.split(return_batch, episode_length, axis=0)).squeeze()
 
         # Update diffuser model.
         diffuser_loss, diffuser_grad_norm, diffuser_info = self.diffusion_update(
@@ -164,6 +145,12 @@ class QmasAlgorithm(R_MAPPO):
             (trajectories, cond),
             update_model=True
         )
+
+        # Sum the returns.
+        # TODO: This needs to be the return over each trajectory, not the sum of all trajectories.
+        # Should end up with shape [batch_size, 1].
+        # TODO: This is currently invalid.
+        returns = returns_batch.sum(axis=(-1, -2))
 
         # Update guide model.
         guide_loss, guide_grad_norm, guide_info = self.diffusion_update(

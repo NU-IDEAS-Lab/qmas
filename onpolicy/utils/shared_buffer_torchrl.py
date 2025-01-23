@@ -4,7 +4,7 @@ import numpy as np
 from tensordict import TensorDict
 from tensordict.tensorclass import NonTensorData, NonTensorStack
 from torchrl.data.replay_buffers import LazyTensorStorage, TensorDictReplayBuffer
-from torchrl.data.replay_buffers.samplers import SamplerWithoutReplacement
+from torchrl.data.replay_buffers.samplers import SamplerWithoutReplacement, RandomSampler
 
 
 class FixedSamplerWithoutReplacement(SamplerWithoutReplacement):
@@ -44,6 +44,25 @@ class FixedSamplerWithoutReplacement(SamplerWithoutReplacement):
             return length - 1
         return length
 
+# class TrajectorySampler(RandomSampler):
+#     ''' Samples trajectories of contiguous data from the replay buffer. '''
+
+#     def __init__(self, *args, trajectory_length=1, **kwargs):
+#         super().__init__(*args, **kwargs)
+#         self.trajectory_length = trajectory_length
+    
+#     def sample(self, storage, batch_size):
+#         ''' Samples a batch of trajectories. '''
+
+#         ''' Samples a trajectory of data from the replay buffer. '''
+#         if len(storage) == 0:
+#             return None
+
+#         # Sample a random index.
+#         idx_start = torch.randint(0, len(storage) - self.trajectory_length + 1, (batch_size,))
+#         idx_end = idx_start + self.trajectory_length
+#         return idx, {}
+
 
 class SharedReplayBuffer(TensorDictReplayBuffer):
     """
@@ -76,18 +95,21 @@ class SharedReplayBuffer(TensorDictReplayBuffer):
         self.obs_object = False
         self.share_obs_object = False
 
-        # Set up the storage backend.
-        storage = LazyTensorStorage(max_size=args.episode_length + 1)
-
         # Set up the buffer.
         super().__init__(
             batch_size=args.episode_length // args.num_mini_batch,
-            storage=storage,
+            storage=LazyTensorStorage(
+                max_size=args.episode_length + 1,
+                ndim=1
+            ),
             # sampler=FixedSamplerWithoutReplacement(
             sampler=SamplerWithoutReplacement(
                 shuffle=False,
                 drop_last=True
             )
+            # sampler=TrajectorySampler(
+            #     trajectory_length=5
+            # )
         )
 
         print(f"Buffer initialized with episode length {args.episode_length}")
@@ -296,6 +318,30 @@ class SharedReplayBuffer(TensorDictReplayBuffer):
                     self["returns"][step] = self["returns"][step + 1] * self.gamma * self.masks[step + 1] + self["rewards"][step]
 
 
+    def sample_trajectories(self, num_mini_batch, trajectory_size, legacy_mode=False):
+        ''' Yields a batch of trajectories. '''
+
+        storage_len = len(self.storage) - 1 # skip the last (incomplete) sample
+
+        batch_size = (self.episode_length - trajectory_size) // num_mini_batch
+        # idx_start = torch.randint(0, storage_len - trajectory_size, (batch_size,))
+        idx_start = torch.randperm(storage_len - trajectory_size)
+        idx_end = idx_start + trajectory_size
+
+        # The storage is in the format of a single trajectory, so we need to split it into multiple trajectories.
+        # Build the sample of shape (num_mini_batch, trajectory_size, ...)
+        for i in range(0, len(idx_start), batch_size):
+            res = []
+            for j in range(i, min(i + batch_size, len(idx_start))):
+                res.append(self.storage[idx_start[j]:idx_end[j]])
+            res2 = torch.stack(res)
+
+            if legacy_mode:
+                yield self.compatibility_transform_sample(res2, index_shape=(batch_size, trajectory_size))
+            else:
+                yield res2
+
+
     ### COMPATIBILITY ###
     # Everything below here is for compatibility with the old replay buffer class.
 
@@ -306,29 +352,29 @@ class SharedReplayBuffer(TensorDictReplayBuffer):
         yield self.compatibility_transform_sample(sample)
 
 
-    def compatibility_transform_sample(self, sample):
+    def compatibility_transform_sample(self, sample, index_shape=(-1,)):
         ''' Returns sample in format expected by existing onpolicy code. '''
 
         if self.share_obs_object:
             sample_share_obs = np.array(sample["share_obs"])
-            share_obs_batch = sample_share_obs.reshape(-1, *sample_share_obs.shape[4:])
+            share_obs_batch = sample_share_obs.reshape(*index_shape, *sample_share_obs.shape[4:])
         else:
-            share_obs_batch = sample["share_obs"].reshape(-1, *sample["share_obs"].shape[3:])
+            share_obs_batch = sample["share_obs"].reshape(*index_shape, *sample["share_obs"].shape[3:])
         if self.obs_object:
             sample_obs = np.array(sample["obs"])
-            obs_batch = sample_obs.reshape(-1, *sample_obs.shape[4:])
+            obs_batch = sample_obs.reshape(*index_shape, *sample_obs.shape[4:])
         else:
-            obs_batch = sample["obs"].reshape(-1, *sample["obs"].shape[3:])
-        rnn_states_batch = sample["rnn_states_actor"].reshape(-1, *sample["rnn_states_actor"].shape[3:])
+            obs_batch = sample["obs"].reshape(*index_shape, *sample["obs"].shape[3:])
+        rnn_states_batch = sample["rnn_states_actor"].reshape(*index_shape, *sample["rnn_states_actor"].shape[3:])
         rnn_states_critic_batch = sample["rnn_states_critic"]
-        actions_batch = sample["actions"].reshape(-1, *sample["actions"].shape[3:])
-        value_preds_batch = sample["value_preds"].reshape(-1, 1)
-        return_batch = sample["returns"].reshape(-1, 1)
-        masks_batch = sample["masks"].reshape(-1, 1)
-        active_masks_batch = sample["active_masks"].reshape(-1, 1)
-        old_action_log_probs_batch = sample["action_log_probs"].reshape(-1, sample["action_log_probs"].shape[-1])
-        adv_targ = sample["advantages"].reshape(-1, 1)
-        available_actions_batch = sample["available_actions"].reshape(-1, sample["available_actions"].shape[-1])
+        actions_batch = sample["actions"].reshape(*index_shape, *sample["actions"].shape[3:])
+        value_preds_batch = sample["value_preds"].reshape(*index_shape, 1)
+        return_batch = sample["returns"].reshape(*index_shape, 1)
+        masks_batch = sample["masks"].reshape(*index_shape, 1)
+        active_masks_batch = sample["active_masks"].reshape(*index_shape, 1)
+        old_action_log_probs_batch = sample["action_log_probs"].reshape(*index_shape, sample["action_log_probs"].shape[-1])
+        adv_targ = sample["advantages"].reshape(*index_shape, 1)
+        available_actions_batch = sample["available_actions"].reshape(*index_shape, sample["available_actions"].shape[-1])
 
         return share_obs_batch, obs_batch, rnn_states_batch, rnn_states_critic_batch, actions_batch, \
         value_preds_batch, return_batch, masks_batch, active_masks_batch, old_action_log_probs_batch, \
