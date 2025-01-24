@@ -168,7 +168,7 @@ class PettingzooEnv(object):
         # Flatten the PZ observation.
         if self.flatten_observations:
             obs = flatten(self.env.observation_spaces, obs)
-            res = np.reshape(obs, (self.num_agents, -1))
+            res = np.reshape(obs, (self.num_agents, -1)).astype(np.float32)
         else:
             res = []
             for a in self.env.possible_agents:
@@ -195,7 +195,7 @@ class PettingzooEnv(object):
         # Flatten the PZ observation.
         if self.flatten_observations_global:
             # Flatten the PZ observation.
-            res = flatten(self.env.state_space, obs)
+            res = flatten(self.env.state_space, obs).astype(np.float32)
         else:
             res = obs
         return res
@@ -207,7 +207,7 @@ class PettingzooEnv(object):
             res = []
             for a in self.env.possible_agents:
                 res.append(flatten(self.env.state_space, obs[a]))
-            res = np.array(res)
+            res = np.array(res, dtype=np.float32)
             res = np.reshape(res, (self.num_agents, -1))
         else:
             res = []
