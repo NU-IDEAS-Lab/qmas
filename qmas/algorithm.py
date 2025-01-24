@@ -126,11 +126,34 @@ class QmasAlgorithm(R_MAPPO):
     def train_sample_diffuser(self, sample, train_info, update_actor=True, update_critic=True):
         ''' Performs update for a single sample. '''
         
-        # Unpack sample.
-        share_obs_batch = sample["share_obs"][:, :, 0, 0] # Get the shared observation from only one agent, since they should all be the same...
+        # Process shared observations.
+        share_obs_batch = sample["share_obs"][:, :, :, 0] # Get the shared observation from only one agent, since they should all be the same...
+
+        # Permute, flatten, and then permute back to get rid of the thread dimension.
+        share_obs_batch = share_obs_batch.permute(1, 0, *range(2, share_obs_batch.ndim))
+        share_obs_batch = share_obs_batch.flatten(start_dim=1, end_dim=2)
+        share_obs_batch = share_obs_batch.permute(1, 0, *range(2, share_obs_batch.ndim))
         share_obs_batch = share_obs_batch.reshape(*share_obs_batch.shape[:2], -1)
-        actions_batch = sample["actions"].reshape(*sample["actions"].shape[:2], -1)
-        returns_batch = sample["returns"].reshape(*sample["returns"].shape[:2], -1)
+
+        # Process actions.
+        actions_batch = sample["actions"]
+        actions_batch = actions_batch.permute(1, 0, *range(2, actions_batch.ndim))
+        actions_batch = actions_batch.flatten(start_dim=1, end_dim=2)
+        actions_batch = actions_batch.permute(1, 0, *range(2, actions_batch.ndim))
+        actions_batch = actions_batch.reshape(*actions_batch.shape[:2], -1)
+
+        # Process rewards.
+        rewards_batch = sample["rewards"]
+        rewards_batch = rewards_batch.permute(1, 0, *range(2, rewards_batch.ndim))
+        rewards_batch = rewards_batch.flatten(start_dim=1, end_dim=2)
+        rewards_batch = rewards_batch.permute(1, 0, *range(2, rewards_batch.ndim))
+        rewards_batch = rewards_batch.reshape(*rewards_batch.shape[:2], -1)
+        rewards_batch = rewards_batch.sum(axis=-1) # Sum rewards for all agents.
+
+        # Calculate trajectory returns.
+        discounts = torch.ones((rewards_batch.shape[0], rewards_batch.shape[1]), dtype=torch.float32) * 0.997 # TODO: This constant is from Janner et al. (2022).
+        discounts = torch.pow(discounts, torch.arange(1, rewards_batch.shape[1] + 1, dtype=torch.float32))
+        returns_batch = torch.sum(rewards_batch * discounts, dim=1)
         
         # TODO: Temporary placeholder for conditions. Currently empty.
         cond = {}
@@ -146,17 +169,11 @@ class QmasAlgorithm(R_MAPPO):
             update_model=True
         )
 
-        # Sum the returns.
-        # TODO: This needs to be the return over each trajectory, not the sum of all trajectories.
-        # Should end up with shape [batch_size, 1].
-        # TODO: This is currently invalid.
-        returns = returns_batch.sum(axis=(-1, -2))
-
         # Update guide model.
         guide_loss, guide_grad_norm, guide_info = self.diffusion_update(
             self.guide,
             self.guide_optimizer,
-            (trajectories, cond, returns),
+            (trajectories, cond, returns_batch),
             update_model=True
         )
 
