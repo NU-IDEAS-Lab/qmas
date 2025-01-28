@@ -172,7 +172,7 @@ class parallel_env(ParallelEnv):
     def observe(self, agent, radius=None, allow_done_agents=False):
         ''' Returns the observation for the given agent.'''
 
-        return self._populateStateSpace(self.observe_method, agent, radius, allow_done_agents)
+        return self._populateStateSpace(self.observe_method, agent)
 
 
     def available_actions(self, agent):
