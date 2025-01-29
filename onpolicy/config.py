@@ -237,7 +237,8 @@ def get_config():
                         help="Maximum number of neighbors that each node may have.")
     # recurrent parameters
     parser.add_argument("--use_naive_recurrent_policy", action=argparse.BooleanOptionalAction,
-                        help='Whether to use a naive recurrent policy')
+                        help='Whether to use a naive recurrent policy',
+                        default=False)
     parser.add_argument("--use_recurrent_policy", action=argparse.BooleanOptionalAction,
                         help='use a recurrent policy')
     parser.add_argument("--recurrent_N", type=int, default=1, help="The number of recurrent layers.")
