@@ -237,10 +237,7 @@ class parallel_env(ParallelEnv):
 
         # Provide reward.
         for agent in self.agents:
-            if self.agent_states[agent] == self.reference_state:
-                reward_dict[agent] = 1.0
-            else:
-                reward_dict[agent] = -1.0
+            reward_dict[agent] = -abs(self.agent_states[agent] - self.reference_state)
 
         # Perform observations.
         for agent in self.possible_agents:
