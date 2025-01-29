@@ -64,13 +64,15 @@ class parallel_env(ParallelEnv):
         self.possible_agents = list(range(num_agents))
 
         # Create the action space.
-        action_space = spaces.Box(low=-np.inf, high=np.inf, shape=(1,), dtype=np.int32)
+        action_space = spaces.Box(low=-np.inf, high=np.inf, shape=(1,), dtype=np.float32)
         self.action_spaces = spaces.Dict({agent: action_space for agent in self.possible_agents}) # type: ignore
         
         # Create the observation space.
         obs_space = spaces.Dict({
-            "reference": spaces.Box(low=-np.inf, high=np.inf, shape=(1,), dtype=np.int32),
-            "agent_states": spaces.Box(low=-np.inf, high=np.inf, shape=(1,), dtype=np.int32),
+            "reference": spaces.Box(low=-np.inf, high=np.inf, shape=(1,), dtype=np.float32),
+            "agent_states": spaces.Dict({
+                a: spaces.Box(low=-np.inf, high=np.inf, shape=(1,), dtype=np.float32) for a in self.possible_agents
+            })
         })
         self.observation_spaces = spaces.Dict({agent: obs_space for agent in self.possible_agents}) # type: ignore
 
@@ -98,7 +100,7 @@ class parallel_env(ParallelEnv):
         self.step_count = 0
         self.dones = dict.fromkeys(self.agents, False)
         self.reference_state = 0
-        self.alpha = random.randint(1, 100)
+        self.alpha = float(random.randint(1, 100))
 
         # Set available actions.
         self.available_actions_dict = {agent: self._getAvailableActions(agent) for agent in self.agents}
@@ -157,7 +159,7 @@ class parallel_env(ParallelEnv):
         ''' Returns the global state of the environment.
             This is useful for centralized training, decentralized execution. '''
         
-        return self._populateStateSpace(self.possible_agents[0], radius=np.inf, allow_done_agents=True)
+        return self._populateStateSpace(self.possible_agents[0])
 
     def state(self):
         ''' Similar to the state_old() method, but this returns a customized copy of the state space for each agent.
@@ -165,14 +167,14 @@ class parallel_env(ParallelEnv):
         
         state = {}
         for agent in self.possible_agents:
-            state[agent] = self._populateStateSpace(agent, radius=np.inf, allow_done_agents=True)
+            state[agent] = self._populateStateSpace(agent)
         return state
 
 
     def observe(self, agent, radius=None, allow_done_agents=False):
         ''' Returns the observation for the given agent.'''
 
-        return self._populateStateSpace(self.observe_method, agent)
+        return self._populateStateSpace(agent)
 
 
     def available_actions(self, agent):
@@ -213,8 +215,8 @@ class parallel_env(ParallelEnv):
         reward_dict = {agent: 0.0 for agent in self.possible_agents}
         truncated_dict = {agent: False for agent in self.possible_agents}
         info_dict = {
-            agent.id: {
-                "ready": self.dones[agent], #if done, set ready to true. Otherwise we will have buffer size problems in MAPPO due to lack of insertion.
+            agent: {
+                "ready": True
             } for agent in self.possible_agents
         }
 
@@ -224,8 +226,8 @@ class parallel_env(ParallelEnv):
                 action = action_dict[agent]
 
                 # Check if the action is valid.
-                if not self.action_space(agent).contains(action):
-                    raise ValueError(f"Invalid action {action} of type {type(action)} provided.")
+                # if not self.action_space(agent).contains([action]):
+                #     raise ValueError(f"Invalid action {action} of type {type(action)} provided.")
 
                 # Increment the agent state.
                 self.agent_states[agent] += action
@@ -247,11 +249,12 @@ class parallel_env(ParallelEnv):
         
         # Record miscellaneous information.
         info_dict["agent_count"] = len(self.agents)
+        info_dict["avg_distance"] = np.mean([abs(self.agent_states[agent] - self.reference_state) for agent in self.agents])
 
         # Check truncation conditions.
         if lastStep or (self.max_cycles >= 0 and self.step_count >= self.max_cycles):
             for agent in self.agents:
-                info_dict[agent.id]["ready"] = True
+                info_dict[agent]["ready"] = True
                 truncated_dict[agent] = True
             self.agents = []
         
