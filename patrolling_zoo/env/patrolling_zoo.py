@@ -963,7 +963,7 @@ class parallel_env(ParallelEnv):
         reward_dict = {agent: 0.0 for agent in self.possible_agents}
         truncated_dict = {agent: False for agent in self.possible_agents}
         info_dict = {
-            agent.id: {
+            agent: {
                 "ready": self.dones[agent], #if done, set ready to true. Otherwise we will have buffer size problems in MAPPO due to lack of insertion.
             } for agent in self.possible_agents
         }
@@ -1021,7 +1021,7 @@ class parallel_env(ParallelEnv):
                             agent.lastNodeVisited = nextNode
                             if nextNode == dstNode:
                                 agent.currentAction = -1.0
-                                info_dict[agent.id]["ready"] = True
+                                info_dict[agent]["ready"] = True
                         # Agent reached the destination, assign a new speed from normal distribution
                         # agent.speed = max(np.random.normal(loc=agent.startingSpeed, scale=5.0), 1.0)
             
@@ -1039,7 +1039,8 @@ class parallel_env(ParallelEnv):
             obs_dict[agent] = agent_observation
         
         # Record miscellaneous information.
-        info_dict["node_visits"] = self.nodeVisits
+        for i, n in enumerate(self.nodeVisits):
+            info_dict[f"node_visits/node_{i}"] = n
         info_dict["avg_idleness"] = self.pg.getAverageIdlenessTime(self.step_count)
         info_dict["stddev_idleness"] = self.pg.getStdDevIdlenessTime(self.step_count)
         info_dict["worst_idleness"] = self.pg.getWorstIdlenessTime(self.step_count)
@@ -1064,7 +1065,7 @@ class parallel_env(ParallelEnv):
                 elif self.reward_method_terminal != "none":
                     raise ValueError(f"Invalid terminal reward method {self.reward_method_terminal}")
 
-                info_dict[agent.id]["ready"] = True
+                info_dict[agent]["ready"] = True
             
                 truncated_dict[agent] = True
             self.agents = []

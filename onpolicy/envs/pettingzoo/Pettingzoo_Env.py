@@ -133,7 +133,7 @@ class PettingzooEnv(object):
 
             # Check if any agents are ready.
             # All agents are considered ready if step skipping is disabled.
-            ready = not self.args.skip_steps or any([info[a.id]["ready"] for a in self.env.agents])
+            ready = not self.args.skip_steps or any([info[a]["ready"] for a in self.env.agents])
 
         self.ppoSteps += 1
 
@@ -146,7 +146,7 @@ class PettingzooEnv(object):
         rewards = [rewards[i] for i in range(self.num_agents)]
 
         info["deltaSteps"] = [[self.deltaSteps[a]] for a in self.env.possible_agents]
-        info["ready"] = [info[a.id]["ready"] for a in self.env.possible_agents]
+        info["ready"] = [info[a]["ready"] for a in self.env.possible_agents]
 
         return ret_obs, ret_share_obs, rewards, done, info, ret_available_actions
 
