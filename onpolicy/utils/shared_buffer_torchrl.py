@@ -216,8 +216,8 @@ class SharedReplayBuffer(TensorDictReplayBuffer):
         :param value_normalizer: (PopArt) If not None, PopArt value normalizer instance.
         """
 
-        if last_step == -1:
-            last_step = len(self) - 1
+        # if last_step == -1:
+        last_step = len(self) - 1
 
         # Check whether we should use the AMADM GAE modification from https://arxiv.org/abs/2308.06036
         # Unfortunately, I don't have time to implement for all of the other options (like use_proper_time_limits),
