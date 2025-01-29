@@ -232,12 +232,12 @@ class parallel_env(ParallelEnv):
                 # Increment the agent state.
                 self.agent_states[agent] += action
 
-        # Increment the reference state.
-        self.reference_state += self.alpha
-
         # Provide reward.
         for agent in self.agents:
             reward_dict[agent] = -abs(self.agent_states[agent] - self.reference_state)
+
+        # Increment the reference state.
+        self.reference_state += self.alpha
 
         # Perform observations.
         for agent in self.possible_agents:
