@@ -170,15 +170,11 @@ class PettingzooRunner(Runner):
         # update env_infos if done
         dones_env = np.all(dones, axis=-1)
 
-        # Add the average idleness time to env infos.
-        self.env_infos["avg_idleness"] = [i["avg_idleness"] for i in infos]
-        self.env_infos["stddev_idleness"] = [i["stddev_idleness"] for i in infos]
-        self.env_infos["worst_idleness"] = [i["worst_idleness"] for i in infos]
-        self.env_infos["agent_count"] = [i["agent_count"] for i in infos]
-
-        # Add the number of nodes visited to env infos.
-        for n in range(len(infos[0]["node_visits"])):
-            self.env_infos[f"node_visits/node_{n}"] = [i["node_visits"][n] for i in infos]
+        # Add information to the logger.
+        keys = infos[0].keys()
+        for key in keys:
+            if type(keys) == str:
+                self.env_infos[key] = [i[key] for i in infos]
 
         masks = torch.ones((self.n_rollout_threads, self.num_agents, 1))
         for i in range(self.n_rollout_threads):
