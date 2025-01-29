@@ -32,12 +32,14 @@ class QmasAlgorithm(R_MAPPO):
             transition_dim=transition_dim,
             cond_dim=0, #TODO: What is the correct value?
             dim=32,
-            dim_mults=(8, 4, 2, 1)
-        )
-        self.diffuser = GaussianDiffusion(diffuser_base, horizon = self.prediction_horizon, observation_dim = share_obs_dim, 
-                                          action_dim = action_dim , n_timesteps=4, loss_type='l2', 
-                                          clip_denoised=False, predict_epsilon=False,
-                                          action_weight=10, loss_discount=1.0, loss_weights=None)
+            dim_mults=(8, 4, 2, 1),
+        ).to(device)
+        self.diffuser = GaussianDiffusion(
+            diffuser_base, horizon = self.prediction_horizon, observation_dim = share_obs_dim, 
+            action_dim = action_dim , n_timesteps=4, loss_type='l2', 
+            clip_denoised=False, predict_epsilon=False,
+            action_weight=10, loss_discount=1.0, loss_weights=None
+        ).to(device)
         
         # Create Guide model.
         guide_base = ValueFunction(
@@ -47,11 +49,13 @@ class QmasAlgorithm(R_MAPPO):
             dim=32,
             dim_mults=(8, 4, 2, 1),
             out_dim=1
-        )
-        self.guide = ValueDiffusion(guide_base, horizon = self.prediction_horizon, observation_dim = share_obs_dim, 
-                                    action_dim = action_dim , n_timesteps=4, loss_type='value_l2', 
-                                    clip_denoised=False, predict_epsilon=True, action_weight=1.0, 
-                                    loss_discount=1.0, loss_weights=None)
+        ).to(device)
+        self.guide = ValueDiffusion(
+            guide_base, horizon = self.prediction_horizon, observation_dim = share_obs_dim, 
+            action_dim = action_dim , n_timesteps=4, loss_type='value_l2', 
+            clip_denoised=False, predict_epsilon=True, action_weight=1.0, 
+            loss_discount=1.0, loss_weights=None
+        ).to(device)
         
         self.diffuser_optimizer = torch.optim.Adam(self.diffuser.parameters(), lr=2e-4)
         self.guide_optimizer = torch.optim.Adam(self.guide.parameters(), lr=2e-4)
@@ -107,7 +111,7 @@ class QmasAlgorithm(R_MAPPO):
             data_generator = buffer.sample_trajectories(self.num_mini_batch, self.prediction_horizon)
 
             for sample in data_generator:
-                self.train_sample_diffuser(sample, train_info, update_actor, update_critic)
+                self.train_sample_diffuser(sample.to(self.device), train_info, update_actor, update_critic)
                 num_updates += 1
 
         # Average the losses.
@@ -151,9 +155,9 @@ class QmasAlgorithm(R_MAPPO):
         rewards_batch = rewards_batch.sum(axis=-1) # Sum rewards for all agents.
 
         # Calculate trajectory returns.
-        discounts = torch.ones((rewards_batch.shape[0], rewards_batch.shape[1]), dtype=torch.float32) * 0.997 # TODO: This constant is from Janner et al. (2022).
-        discounts = torch.pow(discounts, torch.arange(1, rewards_batch.shape[1] + 1, dtype=torch.float32))
-        returns_batch = torch.sum(rewards_batch * discounts, dim=1)
+        discounts = torch.ones((rewards_batch.shape[0], rewards_batch.shape[1]), dtype=torch.float32, device=self.device) * 0.997 # TODO: This constant is from Janner et al. (2022).
+        discounts = torch.pow(discounts, torch.arange(1, rewards_batch.shape[1] + 1, dtype=torch.float32, device=self.device))
+        returns_batch = torch.sum(rewards_batch * discounts, dim=1).reshape((-1, 1))
         
         # TODO: Temporary placeholder for conditions. Currently empty.
         cond = {}
