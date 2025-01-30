@@ -203,14 +203,14 @@ class PettingzooRunner(Runner):
         """Calculate returns for the collected data."""
         self.trainer.prep_rollout()
         if self.algorithm_name == "mat" or self.algorithm_name == "mat_dec":
-            next_values = self.trainer.policy.get_values(self.buffer["share_obs"][-1],
-                                                        self.buffer["obs"][-1],
-                                                        self.buffer["rnn_states_critic"][-1],
-                                                        self.buffer["masks"][-1])
+            next_values = self.trainer.policy.get_values(torch.concatenate(list(self.buffer["share_obs"][-1])),
+                                                        torch.concatenate(list(self.buffer["obs"][-1])),
+                                                        torch.concatenate(list(self.buffer["rnn_states_critic"][-1])),
+                                                        torch.concatenate(list(self.buffer["masks"][-1])))
         else:
-            next_values = self.trainer.policy.get_values(self.buffer["share_obs"][-1],
-                                                        self.buffer["rnn_states_critic"][-1],
-                                                        self.buffer["masks"][-1])
+            next_values = self.trainer.policy.get_values(torch.concatenate(list(self.buffer["share_obs"][-1])),
+                                                        torch.concatenate(list(self.buffer["rnn_states_critic"][-1])),
+                                                        torch.concatenate(list(self.buffer["masks"][-1])))
         next_values = next_values.detach().cpu().view(self.n_rollout_threads, self.num_agents, 1)
         self.buffer.compute_returns(next_values, self.trainer.value_normalizer)
 
@@ -252,9 +252,9 @@ class PettingzooRunner(Runner):
 
             # [n_envs, n_agents, ...] -> [n_envs*n_agents, ...]
             eval_actions, eval_rnn_states = self.trainer.policy.act(
-                np.concatenate(eval_obs),
-                np.concatenate(eval_rnn_states),
-                np.concatenate(eval_masks),
+                torch.concatenate(list(eval_obs)),
+                torch.concatenate(list(eval_rnn_states)),
+                torch.concatenate(list(eval_masks)),
                 deterministic=self.all_args.eval_deterministic
             )
             
@@ -329,11 +329,11 @@ class PettingzooRunner(Runner):
             while not np.all(dones):
                 self.trainer.prep_rollout()
                 actions, rnn_states = self.trainer.policy.act(
-                    np.concatenate(obs),
-                    np.concatenate(rnn_states),
-                    np.concatenate(masks),
+                    torch.concatenate(list(obs)),
+                    torch.concatenate(list(rnn_states)),
+                    torch.concatenate(list(masks)),
                     deterministic=True,
-                    available_actions=np.concatenate(available_actions)
+                    available_actions=torch.concatenate(list(available_actions))
                 )
 
                 # [n_envs*n_agents, ...] -> [n_envs, n_agents, ...]
