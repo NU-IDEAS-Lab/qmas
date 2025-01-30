@@ -202,15 +202,18 @@ class PettingzooRunner(Runner):
     def compute(self):
         """Calculate returns for the collected data."""
         self.trainer.prep_rollout()
+
+        share_obs, obs, rnn_states, rnn_states_critic, masks, available_actions = self.buffer.compatibility_get_policy_input(-1)
+
         if self.algorithm_name == "mat" or self.algorithm_name == "mat_dec":
-            next_values = self.trainer.policy.get_values(torch.concatenate(list(self.buffer["share_obs"][-1])),
-                                                        torch.concatenate(list(self.buffer["obs"][-1])),
-                                                        torch.concatenate(list(self.buffer["rnn_states_critic"][-1])),
-                                                        torch.concatenate(list(self.buffer["masks"][-1])))
+            next_values = self.trainer.policy.get_values(share_obs,
+                                                        obs,
+                                                        rnn_states_critic,
+                                                        masks)
         else:
-            next_values = self.trainer.policy.get_values(torch.concatenate(list(self.buffer["share_obs"][-1])),
-                                                        torch.concatenate(list(self.buffer["rnn_states_critic"][-1])),
-                                                        torch.concatenate(list(self.buffer["masks"][-1])))
+            next_values = self.trainer.policy.get_values(share_obs,
+                                                        rnn_states_critic,
+                                                        masks)
         next_values = next_values.detach().cpu().view(self.n_rollout_threads, self.num_agents, 1)
         self.buffer.compute_returns(next_values, self.trainer.value_normalizer)
 

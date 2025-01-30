@@ -352,22 +352,49 @@ class SharedReplayBuffer(TensorDictReplayBuffer):
         yield self.compatibility_transform_sample(sample)
 
 
-    def compatibility_transform_sample(self, sample, index_shape=(-1,)):
+    def recurrent_generator(self, advantages, num_mini_batch, data_chunk_length, last_step=-1):
+        """
+        Yield training data for chunked RNN training.
+        :param advantages: (np.ndarray) advantage estimates.
+        :param num_mini_batch: (int) number of minibatches to split the batch into.
+        :param data_chunk_length: (int) length of sequence chunks with which to train RNN.
+        """
+        
+        storage_len = len(self.storage) - 1 # skip the last (incomplete) sample
+
+        batch_size = (self.episode_length - data_chunk_length) // num_mini_batch
+        idx_start = torch.randperm(storage_len - data_chunk_length)
+        idx_end = idx_start + data_chunk_length
+
+        # The storage is in the format of a single trajectory, so we need to split it into multiple trajectories.
+        # Build the sample of shape (num_mini_batch, trajectory_size, ...)
+        for i in range(0, len(idx_start), batch_size):
+            res = []
+            for j in range(i, min(i + batch_size, len(idx_start))):
+                sample = self.storage[idx_start[j]:idx_end[j]]
+                sample["advantages"] = advantages[idx_start[j]:idx_end[j]]
+                res.append(sample)
+            res2 = torch.stack(res)
+
+            yield self.compatibility_transform_sample(res2, index_shape=(-1,), data_start_dim=4)
+
+
+    def compatibility_transform_sample(self, sample, index_shape=(-1,), data_start_dim=3):
         ''' Returns sample in format expected by existing onpolicy code. '''
 
         if self.share_obs_object:
             sample_share_obs = np.array(sample["share_obs"])
-            share_obs_batch = sample_share_obs.reshape(*index_shape, *sample_share_obs.shape[4:])
+            share_obs_batch = sample_share_obs.reshape(*index_shape, *sample_share_obs.shape[data_start_dim+1:])
         else:
-            share_obs_batch = sample["share_obs"].reshape(*index_shape, *sample["share_obs"].shape[3:])
+            share_obs_batch = sample["share_obs"].reshape(*index_shape, *sample["share_obs"].shape[data_start_dim:])
         if self.obs_object:
             sample_obs = np.array(sample["obs"])
-            obs_batch = sample_obs.reshape(*index_shape, *sample_obs.shape[4:])
+            obs_batch = sample_obs.reshape(*index_shape, *sample_obs.shape[data_start_dim+1:])
         else:
-            obs_batch = sample["obs"].reshape(*index_shape, *sample["obs"].shape[3:])
-        rnn_states_batch = sample["rnn_states_actor"].reshape(*index_shape, *sample["rnn_states_actor"].shape[3:])
-        rnn_states_critic_batch = sample["rnn_states_critic"]
-        actions_batch = sample["actions"].reshape(*index_shape, *sample["actions"].shape[3:])
+            obs_batch = sample["obs"].reshape(*index_shape, *sample["obs"].shape[data_start_dim:])
+        rnn_states_batch = sample["rnn_states_actor"].reshape(*index_shape, *sample["rnn_states_actor"].shape[data_start_dim:])
+        rnn_states_critic_batch = sample["rnn_states_critic"].reshape(*index_shape, *sample["rnn_states_critic"].shape[data_start_dim:])
+        actions_batch = sample["actions"].reshape(*index_shape, *sample["actions"].shape[data_start_dim:])
         value_preds_batch = sample["value_preds"].reshape(*index_shape, 1)
         return_batch = sample["returns"].reshape(*index_shape, 1)
         masks_batch = sample["masks"].reshape(*index_shape, 1)
