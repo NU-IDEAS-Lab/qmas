@@ -18,8 +18,10 @@ args = [
 
 	"--algorithm_class", "qmas.algorithm.QmasAlgorithm",
 	"--policy_class", "qmas.variant_two_modules.policy.QmasPolicy",
-	"--algorithm_name", "mappo",
+	"--algorithm_name", "rmappo",
 	"--use_recurrent_policy",
+    "--recurrent_N", "1",
+    "--data_chunk_length", "2",
 	"--use_centralized_V",
 	"--use_gae",
 	"--use_gae_amadm",
