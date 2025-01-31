@@ -70,6 +70,7 @@ class parallel_env(ParallelEnv):
         # Create the observation space.
         obs_space = spaces.Dict({
             "reference": spaces.Box(low=-np.inf, high=np.inf, shape=(1,), dtype=np.float32),
+            "reference_velocity": spaces.Box(low=-np.inf, high=np.inf, shape=(1,), dtype=np.float32),
             "agent_states": spaces.Dict({
                 a: spaces.Box(low=-np.inf, high=np.inf, shape=(1,), dtype=np.float32) for a in self.possible_agents
             })
@@ -100,7 +101,9 @@ class parallel_env(ParallelEnv):
         self.step_count = 0
         self.dones = dict.fromkeys(self.agents, False)
         self.reference_state = 0
-        self.alpha = float(random.randint(1, 100))
+        self.alpha = random.random()
+        self.state_history = {agent: [] for agent in self.agents}
+        self.reference_state_history = []
 
         # Set available actions.
         self.available_actions_dict = {agent: self._getAvailableActions(agent) for agent in self.agents}
@@ -116,17 +119,25 @@ class parallel_env(ParallelEnv):
         return observation, info
 
 
-    def render(self):
+    def render(self, figsize=(9, 6)):
         ''' Renders the environment.
             
             Args:
-                figsize (tuple, optional): The size of the figure in inches. Defaults to (18, 12).
+                figsize (tuple, optional): The size of the figure in inches.
                 
             Returns:
                 None
         '''
-        
-        print(f"Step: {self.step_count}, reference: {self.reference_state}, agent states: {self.agent_states}")
+
+        # Plot as a line graph using matplotlib.
+        plt.figure(figsize=figsize)
+        plt.plot(self.reference_state_history, label="Reference")
+        for agent in self.agents:
+            plt.plot(self.state_history[agent], label=f"Agent {agent}")
+        plt.xlabel("Time (s)")
+        plt.ylabel("State")
+        plt.legend()
+        plt.show()
 
 
     def observation_space(self, agent):
@@ -190,6 +201,7 @@ class parallel_env(ParallelEnv):
 
         # Reference state.
         obs["reference"] = self.reference_state
+        obs["reference_velocity"] = self.alpha
 
         # Agent states.
         obs["agent_states"] = self.agent_states
@@ -232,12 +244,17 @@ class parallel_env(ParallelEnv):
                 # Increment the agent state.
                 self.agent_states[agent] += action
 
-        # Provide reward.
-        for agent in self.agents:
-            reward_dict[agent] = -abs(self.agent_states[agent] - self.reference_state)
+                self.state_history[agent].append(self.agent_states[agent])
 
         # Increment the reference state.
         self.reference_state += self.alpha
+        self.reference_state_history.append(self.reference_state)
+
+        # Provide reward.
+        for agent in self.agents:
+            reward_dict[agent] = -abs(action_dict[agent] - self.alpha)
+            # reward_dict[agent] = -abs(self.agent_states[agent] - self.reference_state)
+            # reward_dict[agent] = -np.log(abs(self.agent_states[agent] - self.reference_state))
 
         # Perform observations.
         for agent in self.possible_agents:
@@ -247,6 +264,9 @@ class parallel_env(ParallelEnv):
         # Record miscellaneous information.
         info_dict["agent_count"] = len(self.agents)
         info_dict["avg_distance"] = np.mean([abs(self.agent_states[agent] - self.reference_state) for agent in self.agents])
+        # for agent in self.agents:
+        #     info_dict[f"x/{agent}"] = self.agent_states[agent]
+        # info_dict["x/reference"] = self.reference_state
 
         # Check truncation conditions.
         if lastStep or (self.max_cycles >= 0 and self.step_count >= self.max_cycles):
