@@ -6,6 +6,8 @@ from tensordict.tensorclass import NonTensorData, NonTensorStack
 from torchrl.data.replay_buffers import LazyTensorStorage, TensorDictReplayBuffer
 from torchrl.data.replay_buffers.samplers import SamplerWithoutReplacement, RandomSampler
 
+from onpolicy.utils.shared_buffer import SharedReplayBuffer as SharedReplayBufferOld
+
 
 class FixedSamplerWithoutReplacement(SamplerWithoutReplacement):
     """This class fixes the SamplerWithoutReplacement class to allow both drop_last and shuffle at the same time.
@@ -64,7 +66,7 @@ class FixedSamplerWithoutReplacement(SamplerWithoutReplacement):
 #         return idx, {}
 
 
-class SharedReplayBuffer(TensorDictReplayBuffer):
+class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
     """
     Buffer to store training data.
     :param args: (argparse.Namespace) arguments containing relevant model, policy, and env information.
@@ -96,7 +98,7 @@ class SharedReplayBuffer(TensorDictReplayBuffer):
         self.share_obs_object = False
 
         # Set up the buffer.
-        super().__init__(
+        super(TensorDictReplayBuffer, self).__init__(
             batch_size=args.episode_length // args.num_mini_batch,
             storage=LazyTensorStorage(
                 max_size=args.episode_length + 1,
@@ -354,29 +356,131 @@ class SharedReplayBuffer(TensorDictReplayBuffer):
 
     def recurrent_generator(self, advantages, num_mini_batch, data_chunk_length, last_step=-1):
         """
+        We override this function to make it use torch.Tensor.permute instead of numpy.ndarray.transpose.
+
         Yield training data for chunked RNN training.
         :param advantages: (np.ndarray) advantage estimates.
         :param num_mini_batch: (int) number of minibatches to split the batch into.
         :param data_chunk_length: (int) length of sequence chunks with which to train RNN.
         """
-        
-        storage_len = len(self.storage) - 1 # skip the last (incomplete) sample
 
-        batch_size = (self.episode_length - data_chunk_length) // num_mini_batch
-        idx_start = torch.randperm(storage_len - data_chunk_length)
-        idx_end = idx_start + data_chunk_length
+        def _flatten(T, N, x):
+            return x.reshape(T * N, *x.shape[2:])
 
-        # The storage is in the format of a single trajectory, so we need to split it into multiple trajectories.
-        # Build the sample of shape (num_mini_batch, trajectory_size, ...)
-        for i in range(0, len(idx_start), batch_size):
-            res = []
-            for j in range(i, min(i + batch_size, len(idx_start))):
-                sample = self.storage[idx_start[j]:idx_end[j]]
-                sample["advantages"] = advantages[idx_start[j]:idx_end[j]]
-                res.append(sample)
-            res2 = torch.stack(res)
 
-            yield self.compatibility_transform_sample(res2, index_shape=(-1,), data_start_dim=4)
+        def _cast(x):
+            return x.permute(1, 2, 0, *range(3, x.ndim)).reshape(-1, *x.shape[3:])
+
+
+        _, n_rollout_threads, num_agents = self.rewards.shape[0:3]
+        episode_length = len(self) - 1
+        if last_step != -1:
+            episode_length = last_step
+
+        batch_size = n_rollout_threads * episode_length * num_agents
+        data_chunks = batch_size // data_chunk_length  # [C=r*T*M/L]
+        mini_batch_size = data_chunks // num_mini_batch
+
+        rand = torch.randperm(data_chunks).numpy()
+        sampler = [rand[i * mini_batch_size:(i + 1) * mini_batch_size] for i in range(num_mini_batch)]
+
+        if len(self.share_obs.shape) > 4:
+            share_obs = self.share_obs[:last_step].permute(1, 2, 0, 3, 4, 5).reshape(-1, *self.share_obs.shape[3:])
+        else:
+            share_obs = _cast(self.share_obs[:last_step])
+        if len(self.obs.shape) > 4:
+            obs = self.obs[:last_step].permute(1, 2, 0, 3, 4, 5).reshape(-1, *self.obs.shape[3:])
+        else:
+            obs = _cast(self.obs[:last_step])
+
+        actions = _cast(self.actions)
+        action_log_probs = _cast(self.action_log_probs)
+        advantages = _cast(advantages)
+        value_preds = _cast(self.value_preds[:last_step])
+        returns = _cast(self.returns[:last_step])
+        masks = _cast(self.masks[:last_step])
+        active_masks = _cast(self.active_masks[:last_step])
+        # rnn_states = _cast(self.rnn_states[:-1])
+        # rnn_states_critic = _cast(self.rnn_states_critic[:-1])
+        rnn_states = self.rnn_states[:last_step].permute(1, 2, 0, 3, 4).reshape(-1, *self.rnn_states.shape[3:])
+        rnn_states_critic = self.rnn_states_critic[:last_step].permute(1, 2, 0, 3, 4).reshape(-1,
+                                                                                         *self.rnn_states_critic.shape[
+                                                                                          3:])
+
+        if self.available_actions is not None:
+            available_actions = _cast(self.available_actions[:last_step])
+
+        for indices in sampler:
+            share_obs_batch = []
+            obs_batch = []
+            rnn_states_batch = []
+            rnn_states_critic_batch = []
+            actions_batch = []
+            available_actions_batch = []
+            value_preds_batch = []
+            return_batch = []
+            masks_batch = []
+            active_masks_batch = []
+            old_action_log_probs_batch = []
+            adv_targ = []
+
+            for index in indices:
+
+                ind = index * data_chunk_length
+                # size [T+1 N M Dim]-->[T N M Dim]-->[N,M,T,Dim]-->[N*M*T,Dim]-->[L,Dim]
+                share_obs_batch.append(share_obs[ind:ind + data_chunk_length])
+                obs_batch.append(obs[ind:ind + data_chunk_length])
+                actions_batch.append(actions[ind:ind + data_chunk_length])
+                if self.available_actions is not None:
+                    available_actions_batch.append(available_actions[ind:ind + data_chunk_length])
+                value_preds_batch.append(value_preds[ind:ind + data_chunk_length])
+                return_batch.append(returns[ind:ind + data_chunk_length])
+                masks_batch.append(masks[ind:ind + data_chunk_length])
+                active_masks_batch.append(active_masks[ind:ind + data_chunk_length])
+                old_action_log_probs_batch.append(action_log_probs[ind:ind + data_chunk_length])
+                adv_targ.append(advantages[ind:ind + data_chunk_length])
+                # size [T+1 N M Dim]-->[T N M Dim]-->[N M T Dim]-->[N*M*T,Dim]-->[1,Dim]
+                rnn_states_batch.append(rnn_states[ind])
+                rnn_states_critic_batch.append(rnn_states_critic[ind])
+
+            L, N = data_chunk_length, mini_batch_size
+
+            # These are all from_numpys of size (L, N, Dim)           
+            share_obs_batch = np.stack(share_obs_batch, axis=1)
+            obs_batch = np.stack(obs_batch, axis=1)
+
+            actions_batch = np.stack(actions_batch, axis=1)
+            if self.available_actions is not None:
+                available_actions_batch = np.stack(available_actions_batch, axis=1)
+            value_preds_batch = np.stack(value_preds_batch, axis=1)
+            return_batch = np.stack(return_batch, axis=1)
+            masks_batch = np.stack(masks_batch, axis=1)
+            active_masks_batch = np.stack(active_masks_batch, axis=1)
+            old_action_log_probs_batch = np.stack(old_action_log_probs_batch, axis=1)
+            adv_targ = np.stack(adv_targ, axis=1)
+
+            # States is just a (N, -1) from_numpy
+            rnn_states_batch = np.stack(rnn_states_batch).reshape(N, *self.rnn_states.shape[3:])
+            rnn_states_critic_batch = np.stack(rnn_states_critic_batch).reshape(N, *self.rnn_states_critic.shape[3:])
+
+            # Flatten the (L, N, ...) from_numpys to (L * N, ...)
+            share_obs_batch = _flatten(L, N, share_obs_batch)
+            obs_batch = _flatten(L, N, obs_batch)
+            actions_batch = _flatten(L, N, actions_batch)
+            if self.available_actions is not None:
+                available_actions_batch = _flatten(L, N, available_actions_batch)
+            else:
+                available_actions_batch = None
+            value_preds_batch = _flatten(L, N, value_preds_batch)
+            return_batch = _flatten(L, N, return_batch)
+            masks_batch = _flatten(L, N, masks_batch)
+            active_masks_batch = _flatten(L, N, active_masks_batch)
+            old_action_log_probs_batch = _flatten(L, N, old_action_log_probs_batch)
+            adv_targ = _flatten(L, N, adv_targ)
+
+            yield share_obs_batch, obs_batch, rnn_states_batch, rnn_states_critic_batch, actions_batch,\
+                  value_preds_batch, return_batch, masks_batch, active_masks_batch, old_action_log_probs_batch,\
+                  adv_targ, available_actions_batch
 
 
     def compatibility_transform_sample(self, sample, index_shape=(-1,), data_start_dim=3):
