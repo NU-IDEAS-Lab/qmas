@@ -252,8 +252,8 @@ class parallel_env(ParallelEnv):
 
         # Provide reward.
         for agent in self.agents:
-            reward_dict[agent] = -abs(action_dict[agent] - self.alpha)
-            # reward_dict[agent] = -abs(self.agent_states[agent] - self.reference_state)
+            # reward_dict[agent] = -abs(action_dict[agent] - self.alpha)
+            reward_dict[agent] = -abs(self.agent_states[agent] - self.reference_state)
             # reward_dict[agent] = -np.log(abs(self.agent_states[agent] - self.reference_state))
 
         # Perform observations.
