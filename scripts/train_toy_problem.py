@@ -30,6 +30,7 @@ args = [
 	"--no-share_reward",
 	"--use_ReLU",
 	"--hidden_size", "128",
+	"--layer_N", "3",
 	"--seed", "0",
 
 	"--n_rollout_threads", "10",
