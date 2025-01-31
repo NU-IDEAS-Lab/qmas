@@ -41,7 +41,7 @@ class PettingzooRunner(Runner):
         config['all_args'].model_dir = model_dir
         self.model_dir = config['all_args'].model_dir
         if self.model_dir is not None:
-            self.restore()
+            self.restore(self.model_dir)
        
     def run(self):
         start = time.time()
@@ -331,12 +331,17 @@ class PettingzooRunner(Runner):
             dones = False
             while not np.all(dones):
                 self.trainer.prep_rollout()
+
+                aa = np.concatenate(available_actions)
+                if np.any(aa == None):
+                    aa = None
+
                 actions, rnn_states = self.trainer.policy.act(
-                    torch.concatenate(list(obs)),
-                    torch.concatenate(list(rnn_states)),
-                    torch.concatenate(list(masks)),
+                    np.concatenate(obs),
+                    np.concatenate(rnn_states),
+                    np.concatenate(masks),
                     deterministic=True,
-                    available_actions=torch.concatenate(list(available_actions))
+                    available_actions=aa
                 )
 
                 # [n_envs*n_agents, ...] -> [n_envs, n_agents, ...]

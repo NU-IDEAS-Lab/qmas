@@ -218,8 +218,10 @@ def get_config():
     parser.add_argument("--use_gnn_policy", action=argparse.BooleanOptionalAction,
                         default=False, help='Whether to use a GNN-based policy')
     parser.add_argument("--use_gnn_mlp_policy", action=argparse.BooleanOptionalAction,
+                        default=False,
                         help='Whether to use an MLP to interpret the GNN output')    
     parser.add_argument("--use_gnn_critic", action=argparse.BooleanOptionalAction,
+                        default=False,
                         help='Whether to use a GNN-based critic')
     parser.add_argument("--gnn_layer_N", type=int, default=2,
                         help="Number of GNN layers for actor/critic networks")
@@ -230,7 +232,8 @@ def get_config():
     parser.add_argument("--gnn_node_embedding_num", type=int, default=3,
                         help="Number of node types.")  
     parser.add_argument("--gnn_skip_connections", action=argparse.BooleanOptionalAction,
-                        help='Whether to use a GNN-based critic')
+                        help='Whether to use a GNN-based critic',
+                        default=False)
     parser.add_argument("--gnn_max_nodes", type=int, default=50,
                         help="Maximum number of nodes that the GNN can support.")
     parser.add_argument("--gnn_max_neighbors", type=int, default=15,
