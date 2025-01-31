@@ -18,7 +18,7 @@ args = [
 
 	"--algorithm_class", "qmas.algorithm.QmasAlgorithm",
 	"--policy_class", "qmas.variant_two_modules.policy.QmasPolicy",
-	"--algorithm_name", "rmappo",
+	"--algorithm_name", "mappo",
 	"--use_recurrent_policy",
     "--recurrent_N", "1",
     "--data_chunk_length", "2",
@@ -30,7 +30,7 @@ args = [
 	"--no-share_reward",
 	"--use_ReLU",
 	"--hidden_size", "128",
-	"--layer_N", "3",
+	"--layer_N", "2",
 	"--seed", "0",
 
 	"--n_rollout_threads", "10",
