@@ -173,7 +173,7 @@ class PettingzooRunner(Runner):
         # Add information to the logger.
         keys = infos[0].keys()
         for key in keys:
-            if type(keys) == str:
+            if type(key) == str:
                 self.env_infos[key] = [i[key] for i in infos]
 
         masks = torch.ones((self.n_rollout_threads, self.num_agents, 1))
