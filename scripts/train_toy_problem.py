@@ -16,7 +16,7 @@ args = [
 	"--episode_length", "50",
 	"--max_cycles", "50",
 
-	"--algorithm_class", "qmas.algorithm.QmasAlgorithm",
+	"--algorithm_class", "qmas.variant_two_modules.algorithm.QmasAlgorithm",
 	"--policy_class", "qmas.variant_two_modules.policy.QmasPolicy",
 	"--algorithm_name", "mappo",
 	"--use_recurrent_policy",

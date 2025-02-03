@@ -29,7 +29,7 @@ args = [
 	"--episode_length", "200",
 	"--max_cycles", "200",
 
-	"--algorithm_class", "qmas.algorithm.QmasAlgorithm",
+	"--algorithm_class", "qmas.variant_two_modules.algorithm.QmasAlgorithm",
 	"--policy_class", "qmas.variant_two_modules.policy.QmasPolicy",
 	"--algorithm_name", "mappo",
 	"--use_gnn_policy",
