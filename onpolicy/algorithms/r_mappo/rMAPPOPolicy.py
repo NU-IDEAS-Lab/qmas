@@ -1,4 +1,5 @@
 import torch
+import os
 from onpolicy.models.r_actor_critic import R_Actor, R_Critic
 from onpolicy.utils.util import update_linear_schedule
 
@@ -15,6 +16,7 @@ class R_MAPPOPolicy:
     """
 
     def __init__(self, args, obs_space, cent_obs_space, act_space, device=torch.device("cpu")):
+        self.args = args
         self.device = device
         self.lr = args.lr
         self.critic_lr = args.critic_lr
@@ -137,3 +139,24 @@ class R_MAPPOPolicy:
         """
         actions, _, rnn_states_actor = self.actor(obs, rnn_states_actor, masks, available_actions, deterministic)
         return actions, rnn_states_actor
+
+    def save(self, directory, episode):
+        """
+        Save actor and critic networks.
+        :param directory: (str) directory to save networks.
+        :param episode: (int) current training episode.
+        """
+        torch.save(self.actor.state_dict(), os.path.join(directory, "actor.pt"))
+        torch.save(self.critic.state_dict(), os.path.join(directory, "critic.pt"))
+
+    def restore(self, directory):
+        """
+        Restore actor and critic networks from a saved model.
+        :param directory: (str) directory to restore networks from.
+        """
+        actor_state_dict = torch.load(os.path.join(directory, 'actor.pt'))
+        self.actor.load_state_dict(actor_state_dict)
+
+        if not self.args.use_render:
+            critic_state_dict = torch.load(os.path.join(directory, 'critic.pt'))
+            self.critic.load_state_dict(critic_state_dict)

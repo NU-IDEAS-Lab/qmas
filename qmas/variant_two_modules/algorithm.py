@@ -20,45 +20,7 @@ class QmasAlgorithm(R_MAPPO):
 
         super().__init__(args, policy, env, device)
 
-        self.env = env
-        share_obs_dim = get_shape_from_obs_space(env.share_observation_space[0], flatten_dicts=False)[0] # state space for all agents
-        action_dim = get_shape_from_act_space(env.action_space[0]) * len(env.action_space) # action space for all agents
-        transition_dim = share_obs_dim + action_dim
-        
-        # Create Diffuser model.
-        self.prediction_horizon = 8
-        diffuser_base = TemporalUnet(
-            horizon=self.prediction_horizon,
-            transition_dim=transition_dim,
-            cond_dim=0, #TODO: What is the correct value?
-            dim=32,
-            dim_mults=(8, 4, 2, 1),
-        ).to(device)
-        self.diffuser = GaussianDiffusion(
-            diffuser_base, horizon = self.prediction_horizon, observation_dim = share_obs_dim, 
-            action_dim = action_dim , n_timesteps=4, loss_type='l2', 
-            clip_denoised=False, predict_epsilon=False,
-            action_weight=10, loss_discount=1.0, loss_weights=None
-        ).to(device)
-        
-        # Create Guide model.
-        guide_base = ValueFunction(
-            horizon = self.prediction_horizon,
-            transition_dim = transition_dim,
-            cond_dim=0, #TODO: What is the correct value?
-            dim=32,
-            dim_mults=(8, 4, 2, 1),
-            out_dim=1
-        ).to(device)
-        self.guide = ValueDiffusion(
-            guide_base, horizon = self.prediction_horizon, observation_dim = share_obs_dim, 
-            action_dim = action_dim , n_timesteps=4, loss_type='value_l2', 
-            clip_denoised=False, predict_epsilon=True, action_weight=1.0, 
-            loss_discount=1.0, loss_weights=None
-        ).to(device)
-        
-        self.diffuser_optimizer = torch.optim.Adam(self.diffuser.parameters(), lr=2e-4)
-        self.guide_optimizer = torch.optim.Adam(self.guide.parameters(), lr=2e-4)
+        self.prediction_horizon = policy.prediction_horizon
 
 
     def diffusion_update(self, diffusion_model, optimizer, loss_args, update_model):
@@ -167,16 +129,16 @@ class QmasAlgorithm(R_MAPPO):
 
         # Update diffuser model.
         diffuser_loss, diffuser_grad_norm, diffuser_info = self.diffusion_update(
-            self.diffuser,
-            self.diffuser_optimizer,
+            self.policy.diffuser,
+            self.policy.diffuser_optimizer,
             (trajectories, cond),
             update_model=True
         )
 
         # Update guide model.
         guide_loss, guide_grad_norm, guide_info = self.diffusion_update(
-            self.guide,
-            self.guide_optimizer,
+            self.policy.guide,
+            self.policy.guide_optimizer,
             (trajectories, cond, returns_batch),
             update_model=True
         )
@@ -188,11 +150,11 @@ class QmasAlgorithm(R_MAPPO):
 
     def prep_training(self):
         super().prep_training()
-        self.diffuser.train()
-        self.guide.train()
+        self.policy.diffuser.train()
+        self.policy.guide.train()
     
 
     def prep_rollout(self):
         super().prep_rollout()
-        self.diffuser.eval()
-        self.guide.eval()
+        self.policy.diffuser.eval()
+        self.policy.guide.eval()

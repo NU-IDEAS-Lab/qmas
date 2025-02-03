@@ -162,7 +162,7 @@ class Runner(object):
 
     def save(self, episode=0):
         """Save policy's actor and critic networks."""
-        if self.algorithm_name == "mat" or self.algorithm_name == "mat_dec":
+        if hasattr(self.policy, "save") and callable(self.policy.save):
             self.policy.save(self.save_dir, episode)
         else:
             policy_actor = self.trainer.policy.actor
@@ -172,7 +172,7 @@ class Runner(object):
 
     def restore(self, model_dir):
         """Restore policy's networks from a saved model."""
-        if self.algorithm_name == "mat" or self.algorithm_name == "mat_dec":
+        if hasattr(self.policy, "restore") and callable(self.policy.restore):
             self.policy.restore(model_dir)
         else:
             policy_actor_state_dict = torch.load(str(self.model_dir) + '/actor.pt')
