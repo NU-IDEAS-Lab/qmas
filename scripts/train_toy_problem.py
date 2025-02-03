@@ -34,10 +34,11 @@ args = [
 	"--seed", "0",
 
 	"--n_rollout_threads", "10",
-	"--save_interval", "1000",
 	"--cuda",
 	"--cuda_idx", "0",
 
+	"--save_interval", "1000",
+    "--results_dir", "/data/group/mas/qmas/results",
 	"--use_wandb",
 ]
 
