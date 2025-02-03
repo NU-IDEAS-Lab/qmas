@@ -41,7 +41,7 @@ class PettingzooRunner(Runner):
         config['all_args'].model_dir = model_dir
         self.model_dir = config['all_args'].model_dir
         if self.model_dir is not None:
-            self.restore()
+            self.restore(self.model_dir)
        
     def run(self):
         start = time.time()
@@ -173,7 +173,7 @@ class PettingzooRunner(Runner):
         # Add information to the logger.
         keys = infos[0].keys()
         for key in keys:
-            if type(keys) == str:
+            if type(key) == str:
                 self.env_infos[key] = [i[key] for i in infos]
 
         masks = torch.ones((self.n_rollout_threads, self.num_agents, 1))
@@ -202,15 +202,18 @@ class PettingzooRunner(Runner):
     def compute(self):
         """Calculate returns for the collected data."""
         self.trainer.prep_rollout()
+
+        share_obs, obs, rnn_states, rnn_states_critic, masks, available_actions = self.buffer.compatibility_get_policy_input(-1)
+
         if self.algorithm_name == "mat" or self.algorithm_name == "mat_dec":
-            next_values = self.trainer.policy.get_values(self.buffer["share_obs"][-1],
-                                                        self.buffer["obs"][-1],
-                                                        self.buffer["rnn_states_critic"][-1],
-                                                        self.buffer["masks"][-1])
+            next_values = self.trainer.policy.get_values(share_obs,
+                                                        obs,
+                                                        rnn_states_critic,
+                                                        masks)
         else:
-            next_values = self.trainer.policy.get_values(self.buffer["share_obs"][-1],
-                                                        self.buffer["rnn_states_critic"][-1],
-                                                        self.buffer["masks"][-1])
+            next_values = self.trainer.policy.get_values(share_obs,
+                                                        rnn_states_critic,
+                                                        masks)
         next_values = next_values.detach().cpu().view(self.n_rollout_threads, self.num_agents, 1)
         self.buffer.compute_returns(next_values, self.trainer.value_normalizer)
 
@@ -252,9 +255,9 @@ class PettingzooRunner(Runner):
 
             # [n_envs, n_agents, ...] -> [n_envs*n_agents, ...]
             eval_actions, eval_rnn_states = self.trainer.policy.act(
-                np.concatenate(eval_obs),
-                np.concatenate(eval_rnn_states),
-                np.concatenate(eval_masks),
+                torch.concatenate(list(eval_obs)),
+                torch.concatenate(list(eval_rnn_states)),
+                torch.concatenate(list(eval_masks)),
                 deterministic=self.all_args.eval_deterministic
             )
             
@@ -328,12 +331,17 @@ class PettingzooRunner(Runner):
             dones = False
             while not np.all(dones):
                 self.trainer.prep_rollout()
+
+                aa = np.concatenate(available_actions)
+                if np.any(aa == None):
+                    aa = None
+
                 actions, rnn_states = self.trainer.policy.act(
                     np.concatenate(obs),
                     np.concatenate(rnn_states),
                     np.concatenate(masks),
                     deterministic=True,
-                    available_actions=np.concatenate(available_actions)
+                    available_actions=aa
                 )
 
                 # [n_envs*n_agents, ...] -> [n_envs, n_agents, ...]

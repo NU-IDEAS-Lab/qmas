@@ -215,8 +215,10 @@ def main(args):
         torch.set_num_threads(all_args.n_training_threads)
 
     # run dir
-    run_dir = Path(os.path.split(os.path.dirname(os.path.abspath(__file__)))[
-                   0] + "/results") / all_args.project_name / all_args.env_name / all_args.algorithm_name / all_args.experiment_name
+    base_dir = all_args.results_dir
+    if base_dir == "":
+        base_dir = os.path.split(os.path.dirname(os.path.abspath(__file__)))[0] + "/results"
+    run_dir = Path(base_dir) / all_args.env_name / all_args.algorithm_name / all_args.experiment_name
     if not run_dir.exists():
         os.makedirs(str(run_dir))
 
