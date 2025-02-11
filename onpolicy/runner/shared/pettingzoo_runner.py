@@ -8,6 +8,7 @@ import imageio
 import numpy as np
 import torch
 import wandb
+from tqdm.auto import tqdm
 
 from onpolicy.utils.util import update_linear_schedule, get_shape_from_act_space
 from onpolicy.runner.shared.base_runner import Runner
@@ -47,7 +48,7 @@ class PettingzooRunner(Runner):
         start = time.time()
         episodes = int(self.num_env_steps) // self.episode_length // self.n_rollout_threads
 
-        for episode in range(episodes):
+        for episode in (progress_bar := tqdm(range(episodes))):
             if self.use_linear_lr_decay:
                 self.trainer.policy.lr_decay(episode, episodes)
             
@@ -87,22 +88,21 @@ class PettingzooRunner(Runner):
             # log information
             if total_num_steps % self.log_interval == 0:
                 end = time.time()
-                print("\n Env {} Algo {} Exp {} updates {}/{} episodes, total num timesteps {}/{}, FPS {}.\n"
-                        .format(self.env_name,
-                                self.algorithm_name,
-                                self.experiment_name,
-                                episode,
-                                episodes,
-                                total_num_steps,
-                                self.num_env_steps,
-                                int(total_num_steps / (end - start))))
                 
                 train_infos["average_episode_rewards"] = avg_episode_rewards
                 train_infos["fps"] = total_num_steps / (end - start)
-                print("average episode reward is {}".format(train_infos["average_episode_rewards"]))
                 self.log_train(train_infos, total_num_steps)
                 self.log_env(self.env_infos, total_num_steps)
                 self.env_infos = defaultdict(list)
+
+            if episode == 0:
+                print("\n\n\nTraining Progress:") #give some space for the progress bar
+            progress_bar.set_postfix({
+                "exp": self.experiment_name,
+                "timesteps": f"{total_num_steps}/{self.num_env_steps}",
+                "avg_ep_rewards": avg_episode_rewards,
+                "fps": int(total_num_steps / (end - start))
+            })
 
             # eval
             if total_num_steps % self.eval_interval == 0 and self.use_eval:
