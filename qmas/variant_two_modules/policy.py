@@ -18,6 +18,7 @@ class QmasPolicy(R_MAPPOPolicy):
         self.critic_lr = args.critic_lr
         self.opti_eps = args.opti_eps
         self.weight_decay = args.weight_decay
+        self.args = args
 
         self.obs_space = obs_space
         self.share_obs_space = cent_obs_space
