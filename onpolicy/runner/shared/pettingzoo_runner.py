@@ -10,6 +10,7 @@ import torch
 import wandb
 from tqdm.auto import tqdm
 from collections import deque
+import matplotlib.pyplot as plt
 
 from onpolicy.utils.util import update_linear_schedule, get_shape_from_act_space
 from onpolicy.runner.shared.base_runner import Runner
@@ -320,7 +321,9 @@ class PettingzooRunner(Runner):
         render_goals = np.zeros(self.all_args.render_episodes)
         
         # eval trajectory
-        trajectory = deque(maxlen=2)
+        obs_traj = deque(maxlen=2)
+        action_traj = deque(maxlen=2)
+        pred = []
         pred_history = []
         
         for i_episode in range(self.all_args.render_episodes):
@@ -358,19 +361,41 @@ class PettingzooRunner(Runner):
 
                 # Take a step in the environment and get the results.
                 obs, share_obs, render_rewards, dones, infos, available_actions = render_env.step(actions_env)
+                obs_traj.append(torch.from_numpy(share_obs))
+                action_traj.append(torch.from_numpy(actions))
                 
-                trajectories.append(torch.cat([share_obs, actions], dim=-1))
-                
-                if len(traj) == 2:
-                    condition = {}
-                    pred = self.trainer.policy.diffuser(trajectory, condition)
+                # evaluate the traj on the rendenered diffuser
+                # how to make 2 traj into one model 
+                if len(obs_traj) == 2:
+                    
+                    share_obs_tensor = torch.cat(list(obs_traj))
+                    actions_tensor = torch.cat(list(action_traj))
+                    
+                    trajectory = torch.cat([share_obs_tensor, actions_tensor], dim=-1)
+                    condition = {i: share_obs_tensor[i] for i in range(len(share_obs_tensor))}
+                    # condition = {0: share_obs_tensor[0], 1: share_obs_tensor[1]}
+                    
+                    pred = self.trainer.policy.diffuser(condition).trajectories[0]
+                    horizon = len(pred)
+                    print("pred: ", pred)
+                    print("horizon: ", len(pred))
+                    print("denoising step: ", len(pred[0]))
+                    print("first: ", pred[:,-1])
+                    colors = ["red", "blue", "green", "orange"]
+                    for i in range(1, len(pred[0]) + 1):
+                        alpha = i / len(pred[0])  # This will give values from (1/n) to 1
+                        plt.scatter(np.linspace(0, 1, len(pred)), pred[:, -i], 
+                                color=colors[i - 1], #'orange', 
+                                alpha=alpha,
+                                label=f'denoising step {i}')
+                    plt.legend()
+                    plt.show()
                     pred_history.append(pred)
-                    # plt.plot(pred)
                 
                 if not np.all(dones):
                     if ipython_clear_output:
                         clear_output(wait = True)
-                    render_env.envs[0].env.render()
+                    render_env.envs[0].env.render(pred)
 
                 # append frame
                 if self.all_args.save_gifs:        

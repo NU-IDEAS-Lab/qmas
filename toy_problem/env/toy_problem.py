@@ -119,7 +119,7 @@ class parallel_env(ParallelEnv):
         return observation, info
 
 
-    def render(self, figsize=(9, 6)):
+    def render(self, pred, figsize=(9, 6)):
         ''' Renders the environment.
             
             Args:
@@ -134,6 +134,17 @@ class parallel_env(ParallelEnv):
         plt.plot(self.reference_state_history, label="Reference")
         for agent in self.agents:
             plt.plot(self.state_history[agent], label=f"Agent {agent}")
+        
+        # Plot denoising     
+        if (len(pred) != 0):
+            colors = ["red", "blue", "green", "orange"]
+            for i in range(1, len(pred[0]) + 1):
+                alpha = i / len(pred[0])  # This will give values from (1/n) to 1
+                plt.scatter(np.linspace(0, 1, len(pred)), pred[:, -i], 
+                        color=colors[i - 1], #'orange', 
+                        alpha=alpha,
+                        label=f'denoising step {i}')
+
         plt.xlabel("Time (s)")
         plt.ylabel("State")
         plt.legend()
