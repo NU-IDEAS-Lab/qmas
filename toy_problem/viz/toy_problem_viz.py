@@ -31,7 +31,7 @@ class ToyVisualization():
         '''
         set plot ready every [interval] step
         '''
-        return self.interval == intv
+        return self.interval % intv == 0
     
     def plot_traj(self):
         '''

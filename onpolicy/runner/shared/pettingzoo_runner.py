@@ -9,6 +9,7 @@ import numpy as np
 import torch
 import wandb
 from tqdm.auto import tqdm
+from collections import deque
 
 from onpolicy.utils.util import update_linear_schedule, get_shape_from_act_space
 from onpolicy.runner.shared.base_runner import Runner
@@ -314,9 +315,14 @@ class PettingzooRunner(Runner):
 
         # reset envs and init rnn and mask
         render_env = self.envs
-
+        
         # init goal
         render_goals = np.zeros(self.all_args.render_episodes)
+        
+        # eval trajectory
+        trajectory = deque(maxlen=2)
+        pred_history = []
+        
         for i_episode in range(self.all_args.render_episodes):
             # Reset the environment and get the initial observations.
             obs, share_obs, available_actions = render_env.reset()
@@ -352,7 +358,15 @@ class PettingzooRunner(Runner):
 
                 # Take a step in the environment and get the results.
                 obs, share_obs, render_rewards, dones, infos, available_actions = render_env.step(actions_env)
-
+                
+                trajectories.append(torch.cat([share_obs, actions], dim=-1))
+                
+                if len(traj) == 2:
+                    condition = {}
+                    pred = self.trainer.policy.diffuser(trajectory, condition)
+                    pred_history.append(pred)
+                    # plt.plot(pred)
+                
                 if not np.all(dones):
                     if ipython_clear_output:
                         clear_output(wait = True)
