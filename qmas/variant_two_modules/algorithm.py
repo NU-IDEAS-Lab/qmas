@@ -77,10 +77,10 @@ class QmasAlgorithm(R_MAPPO):
         ''' Overlays one tensor on another, based on the null value. '''
 
         # Determine which elements are null.
-        b_null = b == null_value
+        b_data = b != null_value
 
         # Overlay the tensors.
-        a[b_null] = b[b_null]
+        a[b_data] = b[b_data]
 
         return a
 
