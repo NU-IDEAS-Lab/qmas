@@ -15,6 +15,23 @@ def to_np(x):
 		x = x.detach().cpu().numpy()
 	return x
 
+DTYPE = torch.float
+DEVICE = 'cuda:0'
+def to_torch(x, dtype=None, device=None):
+	dtype = dtype or DTYPE
+	device = device or DEVICE
+	if type(x) is dict:
+		return {k: to_torch(v, dtype, device) for k, v in x.items()}
+	elif torch.is_tensor(x):
+		return x.to(device).type(dtype)
+	return torch.tensor(x, dtype=dtype, device=device)
+
+def apply_dict(fn, d, *args, **kwargs):
+	return {
+		k: fn(v, *args, **kwargs)
+		for k, v in d.items()
+	}
+
 
 #-----------------------------------------------------------------------------#
 #---------------------------------- modules ----------------------------------#

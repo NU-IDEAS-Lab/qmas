@@ -8,6 +8,10 @@ from onpolicy.models.diffusion.diffusion import GaussianDiffusion
 from onpolicy.models.diffusion.diffusion import ValueDiffusion
 from onpolicy.models.diffusion.temporal import TemporalUnet, ValueFunction
 
+from onpolicy.models.diffusion.sampling.policies import GuidedPolicy
+from onpolicy.models.diffusion.sampling.guides import ValueGuide
+from onpolicy.models.diffusion.sampling.functions import n_step_guided_p_sample
+
 
 class QmasPolicy(R_MAPPOPolicy):
     ''' This class implements the QMAS policy, including communication. '''
@@ -95,3 +99,6 @@ class QmasPolicy(R_MAPPOPolicy):
 
         guide_state_dict = torch.load(os.path.join(directory, 'guide.pt'))
         self.guide.load_state_dict(guide_state_dict)
+
+        self.diffuser_guide = ValueGuide(self.guide)
+        self.diffuser_policy = GuidedPolicy(self.diffuser_guide, self.diffuser, sample_fn=n_step_guided_p_sample)
