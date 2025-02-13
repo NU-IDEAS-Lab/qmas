@@ -17,6 +17,8 @@ from onpolicy.runner.shared.base_runner import Runner
 
 from onpolicy.utils.shared_buffer_torchrl import SharedReplayBuffer
 
+from onpolicy.models.diffusion.sampling.functions import n_step_guided_p_sample
+
 
 def _t2n(x):
     return x.detach().cpu().numpy()
@@ -375,7 +377,11 @@ class PettingzooRunner(Runner):
                     condition = {i: share_obs_tensor[i] for i in range(len(share_obs_tensor))}
                     # condition = {0: share_obs_tensor[0], 1: share_obs_tensor[1]}
                     
-                    pred = self.trainer.policy.diffuser(condition).trajectories[0]
+                    # pred = self.trainer.policy.diffuser(condition).trajectories[0]
+                    t = torch.arange(0, trajectory.size(0), device=trajectory.device)
+                    diffuser_out = n_step_guided_p_sample(self.trainer.policy.diffuser, trajectory, condition, t, self.trainer.policy.guide)
+                    pred = diffuser_out.trajectories[0]
+
                     horizon = len(pred)
                     print("pred: ", pred)
                     print("horizon: ", len(pred))
