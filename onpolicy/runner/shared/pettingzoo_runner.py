@@ -324,7 +324,6 @@ class PettingzooRunner(Runner):
         
         # eval trajectory
         obs_traj = deque(maxlen=2)
-        action_traj = deque(maxlen=2)
         pred = []
         pred_history = []
         
@@ -363,17 +362,14 @@ class PettingzooRunner(Runner):
 
                 # Take a step in the environment and get the results.
                 obs, share_obs, render_rewards, dones, infos, available_actions = render_env.step(actions_env)
-                obs_traj.append(torch.from_numpy(share_obs))
-                action_traj.append(torch.from_numpy(actions))
+                obs_traj.append(torch.from_numpy(share_obs[0]))
                 
                 # evaluate the traj on the rendenered diffuser
                 # how to make 2 traj into one model 
                 if len(obs_traj) == 2:
                     
                     share_obs_tensor = torch.cat(list(obs_traj))
-                    actions_tensor = torch.cat(list(action_traj))
                     
-                    trajectory = torch.cat([share_obs_tensor, actions_tensor], dim=-1)
                     condition = {i: share_obs_tensor[i] for i in range(len(share_obs_tensor))}
                     # condition = {0: share_obs_tensor[0], 1: share_obs_tensor[1]}
                     

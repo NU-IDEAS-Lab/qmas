@@ -22,7 +22,7 @@ class GuidedPolicy:
 
     def __call__(self, conditions, batch_size=1, verbose=True):
         # conditions = {k: self.preprocess_fn(v) for k, v in conditions.items()}
-        # conditions = self._format_conditions(conditions, batch_size)
+        conditions = self._format_conditions(conditions, batch_size)
 
         ## run reverse diffusion process
         samples = self.diffusion_model(conditions, guide=self.guide, verbose=verbose, **self.sample_kwargs)
