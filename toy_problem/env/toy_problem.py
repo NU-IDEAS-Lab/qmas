@@ -45,6 +45,7 @@ class parallel_env(ParallelEnv):
     metadata = {
         "name": "toy_problem_v0",
         "render_modes": ["human", "rgb_array"],
+        "null_value": -1.0
     }
 
 
@@ -69,10 +70,10 @@ class parallel_env(ParallelEnv):
         
         # Create the observation space.
         obs_space = spaces.Dict({
-            "reference": spaces.Box(low=-np.inf, high=np.inf, shape=(1,), dtype=np.float32),
-            "reference_velocity": spaces.Box(low=-np.inf, high=np.inf, shape=(1,), dtype=np.float32),
+            "reference": spaces.Box(low=0, high=np.inf, shape=(1,), dtype=np.float32),
+            "reference_velocity": spaces.Box(low=0, high=np.inf, shape=(1,), dtype=np.float32),
             "agent_states": spaces.Dict({
-                a: spaces.Box(low=-np.inf, high=np.inf, shape=(1,), dtype=np.float32) for a in self.possible_agents
+                a: spaces.Box(low=0, high=np.inf, shape=(1,), dtype=np.float32) for a in self.possible_agents
             })
         })
         self.observation_spaces = spaces.Dict({agent: obs_space for agent in self.possible_agents}) # type: ignore
