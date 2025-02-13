@@ -157,19 +157,19 @@ class GaussianDiffusion(nn.Module):
         return model_mean, posterior_variance, posterior_log_variance
 
     @torch.no_grad()
-    def p_sample_loop(self, shape, cond, verbose=True, return_chain=False, sample_fn=default_sample_fn, **sample_kwargs):
+    def p_sample_loop(self, shape, cond, verbose=True, return_chain=False, sample_fn=default_sample_fn, conditioning_fn=apply_conditioning, **sample_kwargs):
         device = self.betas.device
 
         batch_size = shape[0]
         x = torch.randn(shape, device=device)
-        x = apply_conditioning(x, cond, self.action_dim)
+        x = conditioning_fn(x, cond, self.action_dim)
 
         chain = [x] if return_chain else None
 
         for i in reversed(range(0, self.n_timesteps)):
             t = make_timesteps(batch_size, i, device)
             x, values = sample_fn(self, x, cond, t, **sample_kwargs)
-            x = apply_conditioning(x, cond, self.action_dim)
+            x = conditioning_fn(x, cond, self.action_dim)
 
             # plot x
             # print("traj x is ", x)
@@ -205,14 +205,14 @@ class GaussianDiffusion(nn.Module):
 
         return sample
 
-    def p_losses(self, x_start, cond, t):
+    def p_losses(self, x_start, cond, t, conditioning_fn=apply_conditioning):
         noise = torch.randn_like(x_start)
 
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
-        x_noisy = apply_conditioning(x_noisy, cond, self.action_dim)
+        x_noisy = conditioning_fn(x_noisy, cond, self.action_dim)
 
         x_recon = self.model(x_noisy, cond, t)
-        x_recon = apply_conditioning(x_recon, cond, self.action_dim)
+        x_recon = conditioning_fn(x_recon, cond, self.action_dim)
 
         assert noise.shape == x_recon.shape
 
@@ -223,10 +223,10 @@ class GaussianDiffusion(nn.Module):
 
         return loss, info
 
-    def loss(self, x, *args):
+    def loss(self, x, *args, **kwargs):
         batch_size = len(x)
         t = torch.randint(0, self.n_timesteps, (batch_size,), device=x.device).long()
-        return self.p_losses(x, *args, t)
+        return self.p_losses(x, *args, t, **kwargs)
 
     def forward(self, cond, *args, **kwargs):
         return self.conditional_sample(cond, *args, **kwargs)
@@ -234,11 +234,11 @@ class GaussianDiffusion(nn.Module):
 
 class ValueDiffusion(GaussianDiffusion):
 
-    def p_losses(self, x_start, cond, target, t):
+    def p_losses(self, x_start, cond, target, t, conditioning_fn=apply_conditioning):
         noise = torch.randn_like(x_start)
 
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
-        x_noisy = apply_conditioning(x_noisy, cond, self.action_dim)
+        x_noisy = conditioning_fn(x_noisy, cond, self.action_dim)
 
         pred = self.model(x_noisy, cond, t)
 
