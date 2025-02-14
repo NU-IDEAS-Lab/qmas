@@ -135,12 +135,15 @@ class parallel_env(ParallelEnv):
         for agent in self.agents:
             plt.plot(self.state_history[agent], label=f"Agent {agent} (Actual)", color="red", alpha=0.7)
         plt.plot(self.reference_state_history, label="Reference (Actual)", color="orange", alpha=0.7)
+
+        # Plot alpha
+        plt.plot([0, len(self.reference_state_history)-1], [self.alpha, self.alpha], color='g', alpha=0.7, label="Reference Speed (Actual)")
         
         # Plot denoising     
         if (len(pred) != 0):
             horizon = len(pred)
-            colors = ["red", "orange", "yellow", "green", "blue", "purple", "black", "grey"]
-            labels = [f"Agent 0 (Predicted at t={history_length-1})", f"Reference (Predicted at t={history_length-1})", None]
+            colors = ["red", "orange", "green", "yellow", "blue", "purple", "black", "grey"]
+            labels = [f"Agent 0 (Predicted at t={history_length-1})", f"Reference (Predicted at t={history_length-1})", "Reference Speed (Predicted)"]
             # labels = ["agent state", "reference state", None]
             for i in range(0, pred.shape[1]):
                 if labels[i] == None:
