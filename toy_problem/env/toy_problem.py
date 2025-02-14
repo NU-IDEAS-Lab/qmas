@@ -69,13 +69,15 @@ class parallel_env(ParallelEnv):
         self.action_spaces = spaces.Dict({agent: action_space for agent in self.possible_agents}) # type: ignore
         
         # Create the observation space.
-        obs_space = spaces.Dict({
+        obs_space_dict = {
             "reference": spaces.Box(low=0, high=np.inf, shape=(1,), dtype=np.float32),
             "reference_velocity": spaces.Box(low=0, high=np.inf, shape=(1,), dtype=np.float32),
             "agent_states": spaces.Dict({
                 a: spaces.Box(low=0, high=np.inf, shape=(1,), dtype=np.float32) for a in self.possible_agents
             })
-        })
+        }
+        obs_space_dict_sorted = {k: obs_space_dict[k] for k in sorted(obs_space_dict.keys())}
+        obs_space = spaces.Dict(obs_space_dict_sorted)
         self.observation_spaces = spaces.Dict({agent: obs_space for agent in self.possible_agents}) # type: ignore
 
         # The state space is a complete observation of the environment.
@@ -226,7 +228,10 @@ class parallel_env(ParallelEnv):
         # Agent states.
         obs["agent_states"] = self.agent_states
         
-        return obs
+        # Ensure the order of the keys is consistent.
+        obs_sorted = {k: obs[k] for k in sorted(obs.keys())}
+
+        return obs_sorted
     
 
     def step(self, action_dict={}, lastStep=False):
