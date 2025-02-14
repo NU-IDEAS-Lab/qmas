@@ -103,10 +103,10 @@ class parallel_env(ParallelEnv):
         # Reset other state.
         self.step_count = 0
         self.dones = dict.fromkeys(self.agents, False)
-        self.reference_state = 0
+        self.reference_state = 0.0
         self.alpha = random.random()
-        self.state_history = {agent: [] for agent in self.agents}
-        self.reference_state_history = []
+        self.state_history = {agent: [0.0] for agent in self.agents}
+        self.reference_state_history = [0.0]
 
         # Set available actions.
         self.available_actions_dict = {agent: self._getAvailableActions(agent) for agent in self.agents}
@@ -141,12 +141,10 @@ class parallel_env(ParallelEnv):
         # Plot alpha
         plt.plot([0, len(self.reference_state_history)-1], [self.alpha, self.alpha], color='g', alpha=0.7, label="Leader Speed (Actual)")
         
-        # Plot denoising     
+        # Plot predictions.     
         if (len(pred) != 0):
-            horizon = len(pred)
             colors = ["red", "orange", "green", "yellow", "blue", "purple", "black", "grey"]
             labels = [f"Follower 0 (Predicted at t={history_length-1})", f"Leader (Predicted at t={history_length-1})", "Leader Speed (Predicted)"]
-            # labels = ["agent state", "reference state", None]
             for i in range(0, pred.shape[1]):
                 if labels[i] == None:
                     continue
@@ -160,6 +158,9 @@ class parallel_env(ParallelEnv):
         plt.ylabel("State")
         plt.legend()
         plt.show()
+
+        print(f"Leader Actual: {self.reference_state_history}")
+        print(f"Leader Predicted: {pred[:, 1]}")
 
 
     def observation_space(self, agent):

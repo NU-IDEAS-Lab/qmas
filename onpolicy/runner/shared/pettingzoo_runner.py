@@ -329,10 +329,14 @@ class PettingzooRunner(Runner):
         pred_history = []
         
         for i_episode in range(self.all_args.render_episodes):
+            obs_traj.clear()
+
             # Reset the environment and get the initial observations.
             obs, share_obs, available_actions = render_env.reset()
             rnn_states = np.zeros((self.n_render_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=np.float32)
             masks = np.ones((self.n_render_rollout_threads, self.num_agents, 1), dtype=np.float32)
+
+            obs_traj.append(torch.from_numpy(share_obs[0]))
 
             if self.all_args.save_gifs:        
                 frames = []
@@ -367,7 +371,7 @@ class PettingzooRunner(Runner):
                 
                 # evaluate the traj on the rendenered diffuser
                 # how to make 2 traj into one model 
-                if len(obs_traj) == HISTORY_LENGTH and render_env.envs[0].env.step_count == HISTORY_LENGTH:
+                if len(obs_traj) == HISTORY_LENGTH and render_env.envs[0].env.step_count == HISTORY_LENGTH - 1:
                     
                     share_obs_tensor = torch.cat(list(obs_traj))
                     
@@ -416,3 +420,5 @@ class PettingzooRunner(Runner):
                     format="GIF",
                     duration=self.all_args.ifi,
                 )
+            
+            # time.sleep(3.0)
