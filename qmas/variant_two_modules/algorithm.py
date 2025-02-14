@@ -23,12 +23,15 @@ class QmasAlgorithm(R_MAPPO):
         self.prediction_horizon = policy.prediction_horizon
 
         # Get the "null" value for the environment and determine conditioning function.
-        self.null_value = env.envs[0].null_value
-        if self.null_value is None:
-            from onpolicy.models.diffusion.helpers import apply_conditioning
-            self.conditioning_fn = apply_conditioning
-        else:
-            self.conditioning_fn = self._condition_sample
+        # self.null_value = env.envs[0].null_value
+        # if self.null_value is None:
+        #     from onpolicy.models.diffusion.helpers import apply_conditioning
+        #     self.conditioning_fn = apply_conditioning
+        # else:
+        #     self.conditioning_fn = self.policy._condition_sample
+        # TODO: Temporarily hardcode these values.
+        self.null_value = -1.0
+        self.conditioning_fn = self.policy._condition_sample
         print(f"QmasAlgorithm: Null value for environment is {self.null_value}.")
 
 
@@ -62,28 +65,6 @@ class QmasAlgorithm(R_MAPPO):
             return loss.item(), model_grad_norm, info
         else:
             return None
-    
-
-    def _condition_sample(self, x, conditions, action_dim):
-        ''' Applies conditions to the sample. '''
-
-        for t, val in conditions.items():
-            # TODO: Does this need to use val.clone()? The original does, so we do as well.
-            x[:, t, action_dim:] = self._overlay_tensor(x[:, t, action_dim:], val.clone(), self.null_value)
-        return x
-    
-
-    def _overlay_tensor(self, a, b, null_value):
-        ''' Overlays one tensor on another, based on the null value. '''
-
-        # Determine which elements are null.
-        b_data = b != null_value
-
-        # Overlay the tensors.
-        a[b_data] = b[b_data]
-
-        return a
-
 
     def train(self, buffer, update_actor=True, update_critic=True, last_step=-1):
         """

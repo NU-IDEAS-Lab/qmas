@@ -43,6 +43,9 @@ class QmasPolicy(R_MAPPOPolicy):
         share_obs_dim = get_shape_from_obs_space(cent_obs_space, flatten_dicts=False)[0] # state space for all agents
         action_dim = get_shape_from_act_space(act_space) * args.num_agents # action space for all agents
         transition_dim = share_obs_dim + action_dim
+
+        # TODO: Need to get this null_value from the environment metadata.
+        self.null_value = -1.0
         
         # Create Diffuser model.
         self.prediction_horizon = 8
@@ -66,7 +69,8 @@ class QmasPolicy(R_MAPPOPolicy):
             transition_dim = transition_dim,
             cond_dim=0, #TODO: What is the correct value?
             dim=32,
-            dim_mults=(8, 4, 2, 1),
+            dim_mults=(1, 2, 4, 8),
+            # dim_mults=(8, 4, 2, 1),
             out_dim=1
         ).to(device)
         self.guide = ValueDiffusion(
@@ -101,4 +105,25 @@ class QmasPolicy(R_MAPPOPolicy):
         self.guide.load_state_dict(guide_state_dict)
 
         self.diffuser_guide = ValueGuide(self.guide)
-        self.diffuser_policy = GuidedPolicy(self.diffuser_guide, self.diffuser, sample_fn=n_step_guided_p_sample)
+        self.diffuser_policy = GuidedPolicy(self.diffuser_guide, self.diffuser, sample_fn=n_step_guided_p_sample, conditioning_fn=self._condition_sample)
+
+
+    def _condition_sample(self, x, conditions, action_dim):
+        ''' Applies conditions to the sample. '''
+
+        for t, val in conditions.items():
+            # TODO: Does this need to use val.clone()? The original does, so we do as well.
+            x[:, t, action_dim:] = self._overlay_tensor(x[:, t, action_dim:], val.clone(), self.null_value)
+        return x
+    
+
+    def _overlay_tensor(self, a, b, null_value):
+        ''' Overlays one tensor on another, based on the null value. '''
+
+        # Determine which elements are null.
+        b_data = b != null_value
+
+        # Overlay the tensors.
+        a[b_data] = b[b_data]
+
+        return a

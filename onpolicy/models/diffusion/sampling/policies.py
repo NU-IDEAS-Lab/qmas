@@ -39,6 +39,8 @@ class GuidedPolicy:
         normed_observations = trajectories[:, :, self.action_dim:]
         if self.normalizer is not None:
             observations = self.normalizer.unnormalize(normed_observations, 'observations')
+        else:
+            observations = normed_observations
 
         trajectories = Trajectories(actions, observations, samples.values)
         return action, trajectories
@@ -55,7 +57,7 @@ class GuidedPolicy:
                 conditions,
                 'observations',
             )
-        conditions = to_torch(conditions, dtype=torch.float32, device='cuda:0')
+        conditions = to_torch(conditions, dtype=torch.float32, device=self.device)
         conditions = apply_dict(
             einops.repeat,
             conditions,

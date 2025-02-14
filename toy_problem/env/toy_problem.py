@@ -138,7 +138,7 @@ class parallel_env(ParallelEnv):
         
         # Plot denoising     
         if (len(pred) != 0):
-            colors = ["red", "blue", "green", "orange"]
+            colors = ["red", "orange", "yellow", "green", "blue", "purple", "black", "grey"]
             for i in range(1, len(pred[0]) + 1):
                 alpha = i / len(pred[0])  # This will give values from (1/n) to 1
                 plt.scatter(np.linspace(0, 1, len(pred)), pred[:, -i], 

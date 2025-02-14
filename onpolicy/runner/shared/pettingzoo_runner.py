@@ -377,14 +377,15 @@ class PettingzooRunner(Runner):
                     # t = torch.arange(0, trajectory.size(0), device=trajectory.device)
                     # diffuser_out = n_step_guided_p_sample(self.trainer.policy.diffuser, trajectory, condition, t, self.trainer.policy.guide)
                     # pred = diffuser_out.trajectories[0]
-                    diffuser_out = self.trainer.policy.diffuser_policy(condition)
+                    pred_actions, pred_trajectories = self.trainer.policy.diffuser_policy(condition)
+                    pred = pred_trajectories.observations[0]
 
                     horizon = len(pred)
                     print("pred: ", pred)
                     print("horizon: ", len(pred))
                     print("denoising step: ", len(pred[0]))
                     print("first: ", pred[:,-1])
-                    colors = ["red", "blue", "green", "orange"]
+                    colors = ["red", "orange", "yellow", "green", "blue", "purple", "black", "grey"]
                     for i in range(1, len(pred[0]) + 1):
                         alpha = i / len(pred[0])  # This will give values from (1/n) to 1
                         plt.scatter(np.linspace(0, 1, len(pred)), pred[:, -i], 
