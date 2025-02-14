@@ -378,10 +378,8 @@ class PettingzooRunner(Runner):
                     condition = {i: share_obs_tensor[i] for i in range(len(share_obs_tensor))}
                     # condition = {0: share_obs_tensor[0], 1: share_obs_tensor[1]}
                     
-                    # pred = self.trainer.policy.diffuser(condition, guide=self.trainer.policy.guide).trajectories[0]
-                    # t = torch.arange(0, trajectory.size(0), device=trajectory.device)
-                    # diffuser_out = n_step_guided_p_sample(self.trainer.policy.diffuser, trajectory, condition, t, self.trainer.policy.guide)
-                    # pred = diffuser_out.trajectories[0]
+                    # pred = self.trainer.policy.diffuser(condition).trajectories[0, :, self.trainer.policy.diffuser.action_dim:]
+
                     pred_actions, pred_trajectories = self.trainer.policy.diffuser_policy(condition)
                     pred = pred_trajectories.observations[0]
 

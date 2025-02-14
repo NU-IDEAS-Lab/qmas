@@ -146,8 +146,10 @@ class QmasAlgorithm(R_MAPPO):
         discounts = torch.pow(discounts, torch.arange(1, rewards_batch.shape[1] + 1, dtype=torch.float32, device=self.device))
         returns_batch = torch.sum(rewards_batch * discounts, dim=1).reshape((-1, 1))
         
-        # TODO: Temporary placeholder for conditions. Currently empty.
-        cond = {}
+        # Set up conditions based on the shared observations.
+        # cond = {i: share_obs_batch[:, i] for i in range(share_obs_batch.shape[1])} # condition based on the entire trajectory
+        # cond = {i: share_obs_batch[:, i] for i in range(2)} # condition based on only the first two points
+        cond = {i: share_obs_batch[:, i] for i in range(1)} # condition based on only the first point
 
         # Build trajectories.
         trajectories = torch.cat([share_obs_batch, actions_batch], dim=-1)
