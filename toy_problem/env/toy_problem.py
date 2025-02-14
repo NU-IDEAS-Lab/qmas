@@ -132,9 +132,9 @@ class parallel_env(ParallelEnv):
 
         # Plot as a line graph using matplotlib.
         plt.figure(figsize=figsize)
-        plt.plot(self.reference_state_history, label="Reference", color="orange")
+        plt.plot(self.reference_state_history, label="Reference", color="orange", alpha=0.7)
         for agent in self.agents:
-            plt.plot(self.state_history[agent], label=f"Agent {agent}", color="red")
+            plt.plot(self.state_history[agent], label=f"Agent {agent}", color="red", alpha=0.7)
         
         # Plot denoising     
         if (len(pred) != 0):
@@ -147,7 +147,7 @@ class parallel_env(ParallelEnv):
                     continue
                 plt.plot(pred[:, i], 
                         color=colors[i],
-                        alpha=0.5,
+                        alpha=1.0,
                         linestyle="dashed",
                         label=labels[i])
 
