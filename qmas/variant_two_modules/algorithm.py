@@ -77,20 +77,34 @@ class QmasAlgorithm(R_MAPPO):
         :return train_info: (dict) contains information regarding training update (e.g. loss, grad norms, etc).
         """
 
-        train_info = super().train(buffer, update_actor, update_critic, last_step)
+        """
+        Perform training in two serial phases:
+        1. Policy training (actor-critic)
+        2. Diffusion model training
+        """
+        
+        train_info = {}
+        self.train_initialize_info(train_info)
 
-        num_updates = 0
-        for _ in range(self.ppo_epoch):
-            data_generator = buffer.sample_trajectories(self.num_mini_batch, self.prediction_horizon)
+        # Phase 1: Policy Training
+        policy_info = super().train(buffer, update_actor, update_critic, last_step)
+        train_info.update(policy_info)
 
-            for sample in data_generator:
-                self.train_sample_diffuser(sample.to(self.device), train_info, update_actor, update_critic)
-                num_updates += 1
+        # Phase 2: Diffusion Training
+        if update_actor or update_critic:  # Only train diffusion if we're updating either policy component
+            num_diffusion_updates = 0
+            for _ in range(self.ppo_epoch):
+                data_generator = buffer.sample_trajectories(self.num_mini_batch, self.prediction_horizon)
+                
+                for sample in data_generator:
+                    self.train_sample_diffuser(sample.to(self.device), train_info)
+                    num_diffusion_updates += 1
 
-        # Average the losses.
-        train_info['diffuser_loss'] /= num_updates
-        train_info['guide_loss'] /= num_updates
- 
+            # Average the diffusion losses
+            if num_diffusion_updates > 0:
+                train_info['diffuser_loss'] /= num_diffusion_updates
+                train_info['guide_loss'] /= num_diffusion_updates
+
         return train_info
 
 
