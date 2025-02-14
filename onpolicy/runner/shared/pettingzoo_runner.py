@@ -382,19 +382,20 @@ class PettingzooRunner(Runner):
 
                     horizon = len(pred)
                     print("pred: ", pred)
-                    print("horizon: ", len(pred))
-                    print("denoising step: ", len(pred[0]))
-                    print("first: ", pred[:,-1])
-                    colors = ["red", "orange", "yellow", "green", "blue", "purple", "black", "grey"]
-                    for i in range(1, len(pred[0]) + 1):
-                        alpha = i / len(pred[0])  # This will give values from (1/n) to 1
-                        plt.scatter(np.linspace(0, 1, len(pred)), pred[:, -i], 
-                                color=colors[i - 1], #'orange', 
-                                alpha=alpha,
-                                label=f'denoising step {i}')
-                    plt.legend()
-                    plt.show()
-                    pred_history.append(pred)
+                    print("horizon: ", horizon)
+                    # print("denoising step: ", pred.shape[0])
+                    # print("first: ", pred[:,-1])
+                    # colors = ["red", "orange", "yellow", "green", "blue", "purple", "black", "grey"]
+                    # labels = ["agent state", None, "reference state", None]
+                    # for i in range(0, pred.shape[1]):
+                    #     if labels[i] == None:
+                    #         continue
+                    #     plt.scatter(np.linspace(0, 1, horizon), pred[:, i], 
+                    #             color=colors[i - 1],
+                    #             label=labels[i])
+                    # plt.legend()
+                    # plt.show()
+                    # pred_history.append(pred)
                 
                 if not np.all(dones):
                     if ipython_clear_output:

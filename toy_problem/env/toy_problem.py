@@ -132,19 +132,24 @@ class parallel_env(ParallelEnv):
 
         # Plot as a line graph using matplotlib.
         plt.figure(figsize=figsize)
-        plt.plot(self.reference_state_history, label="Reference")
+        plt.plot(self.reference_state_history, label="Reference", color="orange")
         for agent in self.agents:
-            plt.plot(self.state_history[agent], label=f"Agent {agent}")
+            plt.plot(self.state_history[agent], label=f"Agent {agent}", color="red")
         
         # Plot denoising     
         if (len(pred) != 0):
+            horizon = len(pred)
             colors = ["red", "orange", "yellow", "green", "blue", "purple", "black", "grey"]
-            for i in range(1, len(pred[0]) + 1):
-                alpha = i / len(pred[0])  # This will give values from (1/n) to 1
-                plt.scatter(np.linspace(0, 1, len(pred)), pred[:, -i], 
-                        color=colors[i - 1], #'orange', 
-                        alpha=alpha,
-                        label=f'denoising step {i}')
+            labels = ["Agent 0 (Predicted)", "Reference (Predicted)", None]
+            # labels = ["agent state", "reference state", None]
+            for i in range(0, pred.shape[1]):
+                if labels[i] == None:
+                    continue
+                plt.plot(pred[:, i], 
+                        color=colors[i],
+                        alpha=0.5,
+                        linestyle="dashed",
+                        label=labels[i])
 
         plt.xlabel("Time (s)")
         plt.ylabel("State")
