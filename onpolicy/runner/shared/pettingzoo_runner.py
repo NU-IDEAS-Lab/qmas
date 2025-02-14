@@ -323,7 +323,8 @@ class PettingzooRunner(Runner):
         render_goals = np.zeros(self.all_args.render_episodes)
         
         # eval trajectory
-        obs_traj = deque(maxlen=2)
+        HISTORY_LENGTH = 2
+        obs_traj = deque(maxlen=HISTORY_LENGTH)
         pred = []
         pred_history = []
         
@@ -366,7 +367,7 @@ class PettingzooRunner(Runner):
                 
                 # evaluate the traj on the rendenered diffuser
                 # how to make 2 traj into one model 
-                if len(obs_traj) == 2 and render_env.envs[0].env.step_count == 2:
+                if len(obs_traj) == HISTORY_LENGTH and render_env.envs[0].env.step_count == HISTORY_LENGTH:
                     
                     share_obs_tensor = torch.cat(list(obs_traj))
                     
@@ -400,7 +401,7 @@ class PettingzooRunner(Runner):
                 if not np.all(dones):
                     if ipython_clear_output:
                         clear_output(wait = True)
-                    render_env.envs[0].env.render(pred)
+                    render_env.envs[0].env.render(pred, history_length=HISTORY_LENGTH)
 
                 # append frame
                 if self.all_args.save_gifs:        

@@ -120,7 +120,7 @@ class parallel_env(ParallelEnv):
         return observation, info
 
 
-    def render(self, pred, figsize=(9, 6)):
+    def render(self, pred, figsize=(9, 6), history_length=2):
         ''' Renders the environment.
             
             Args:
@@ -140,7 +140,7 @@ class parallel_env(ParallelEnv):
         if (len(pred) != 0):
             horizon = len(pred)
             colors = ["red", "orange", "yellow", "green", "blue", "purple", "black", "grey"]
-            labels = ["Agent 0 (Predicted at t=1)", "Reference (Predicted at t=1)", None]
+            labels = [f"Agent 0 (Predicted at t={history_length-1})", f"Reference (Predicted at t={history_length-1})", None]
             # labels = ["agent state", "reference state", None]
             for i in range(0, pred.shape[1]):
                 if labels[i] == None:
