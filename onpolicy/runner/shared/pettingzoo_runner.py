@@ -366,7 +366,7 @@ class PettingzooRunner(Runner):
                 
                 # evaluate the traj on the rendenered diffuser
                 # how to make 2 traj into one model 
-                if len(obs_traj) == 2:
+                if len(obs_traj) == 2 and render_env.envs[0].env.step_count == 2:
                     
                     share_obs_tensor = torch.cat(list(obs_traj))
                     
