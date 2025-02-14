@@ -49,6 +49,7 @@ class QmasPolicy(R_MAPPOPolicy):
         
         # Create Diffuser model.
         self.prediction_horizon = 8
+        diffusion_steps = 20
         diffuser_base = TemporalUnet(
             horizon=self.prediction_horizon,
             transition_dim=transition_dim,
@@ -58,7 +59,7 @@ class QmasPolicy(R_MAPPOPolicy):
         ).to(device)
         self.diffuser = GaussianDiffusion(
             diffuser_base, horizon = self.prediction_horizon, observation_dim = share_obs_dim, 
-            action_dim = action_dim , n_timesteps=4, loss_type='l2', 
+            action_dim = action_dim , n_timesteps=diffusion_steps, loss_type='l2', 
             clip_denoised=False, predict_epsilon=False,
             action_weight=10, loss_discount=1.0, loss_weights=None
         ).to(device)
@@ -75,7 +76,7 @@ class QmasPolicy(R_MAPPOPolicy):
         ).to(device)
         self.guide = ValueDiffusion(
             guide_base, horizon = self.prediction_horizon, observation_dim = share_obs_dim, 
-            action_dim = action_dim , n_timesteps=4, loss_type='value_l2', 
+            action_dim = action_dim , n_timesteps=diffusion_steps, loss_type='value_l2', 
             clip_denoised=False, predict_epsilon=True, action_weight=1.0, 
             loss_discount=1.0, loss_weights=None
         ).to(device)
