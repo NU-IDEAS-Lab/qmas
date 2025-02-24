@@ -8,6 +8,10 @@ from onpolicy.models.diffusion.diffusion import GaussianDiffusion
 from onpolicy.models.diffusion.diffusion import ValueDiffusion
 from onpolicy.models.diffusion.temporal import TemporalUnet, ValueFunction
 
+from onpolicy.models.diffusion.sampling.policies import GuidedPolicy
+from onpolicy.models.diffusion.sampling.guides import ValueGuide
+from onpolicy.models.diffusion.sampling.functions import n_step_guided_p_sample
+
 
 class QmasPolicy(R_MAPPOPolicy):
     ''' This class implements the QMAS policy, including communication. '''
@@ -39,9 +43,12 @@ class QmasPolicy(R_MAPPOPolicy):
         share_obs_dim = get_shape_from_obs_space(cent_obs_space, flatten_dicts=False)[0] # state space for all agents
         action_dim = get_shape_from_act_space(act_space) * args.num_agents # action space for all agents
         transition_dim = share_obs_dim + action_dim
+
+        # TODO: Need to get this null_value from the environment metadata.
+        self.null_value = -1.0
         
         # Create Diffuser model.
-        self.prediction_horizon = 8
+        self.prediction_horizon = args.diffusion_horizon
         diffuser_base = TemporalUnet(
             horizon=self.prediction_horizon,
             transition_dim=transition_dim,
@@ -51,7 +58,7 @@ class QmasPolicy(R_MAPPOPolicy):
         ).to(device)
         self.diffuser = GaussianDiffusion(
             diffuser_base, horizon = self.prediction_horizon, observation_dim = share_obs_dim, 
-            action_dim = action_dim , n_timesteps=4, loss_type='l2', 
+            action_dim = action_dim , n_timesteps=args.diffusion_steps, loss_type='l2', 
             clip_denoised=False, predict_epsilon=False,
             action_weight=10, loss_discount=1.0, loss_weights=None
         ).to(device)
@@ -62,12 +69,13 @@ class QmasPolicy(R_MAPPOPolicy):
             transition_dim = transition_dim,
             cond_dim=0, #TODO: What is the correct value?
             dim=32,
-            dim_mults=(8, 4, 2, 1),
+            dim_mults=(1, 2, 4, 8),
+            # dim_mults=(8, 4, 2, 1),
             out_dim=1
         ).to(device)
         self.guide = ValueDiffusion(
             guide_base, horizon = self.prediction_horizon, observation_dim = share_obs_dim, 
-            action_dim = action_dim , n_timesteps=4, loss_type='value_l2', 
+            action_dim = action_dim , n_timesteps=args.diffusion_steps, loss_type='value_l2', 
             clip_denoised=False, predict_epsilon=True, action_weight=1.0, 
             loss_discount=1.0, loss_weights=None
         ).to(device)
@@ -95,3 +103,27 @@ class QmasPolicy(R_MAPPOPolicy):
 
         guide_state_dict = torch.load(os.path.join(directory, 'guide.pt'))
         self.guide.load_state_dict(guide_state_dict)
+
+        self.diffuser_guide = ValueGuide(self.guide)
+        self.diffuser_policy = GuidedPolicy(self.diffuser_guide, self.diffuser, sample_fn=n_step_guided_p_sample, conditioning_fn=self._condition_sample)
+
+
+    def _condition_sample(self, x, conditions, action_dim):
+        ''' Applies conditions to the sample. '''
+
+        for t, val in conditions.items():
+            # TODO: Does this need to use val.clone()? The original does, so we do as well.
+            x[:, t, action_dim:] = self._overlay_tensor(x[:, t, action_dim:], val.clone(), self.null_value)
+        return x
+    
+
+    def _overlay_tensor(self, a, b, null_value):
+        ''' Overlays one tensor on another, based on the null value. '''
+
+        # Determine which elements are null.
+        b_data = b != null_value
+
+        # Overlay the tensors.
+        a[b_data] = b[b_data]
+
+        return a

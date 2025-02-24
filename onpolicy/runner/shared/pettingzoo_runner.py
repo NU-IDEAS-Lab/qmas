@@ -9,11 +9,15 @@ import numpy as np
 import torch
 import wandb
 from tqdm.auto import tqdm
+from collections import deque
+import matplotlib.pyplot as plt
 
 from onpolicy.utils.util import update_linear_schedule, get_shape_from_act_space
 from onpolicy.runner.shared.base_runner import Runner
 
 from onpolicy.utils.shared_buffer_torchrl import SharedReplayBuffer
+
+from onpolicy.models.diffusion.sampling.functions import n_step_guided_p_sample
 
 
 def _t2n(x):
@@ -314,14 +318,25 @@ class PettingzooRunner(Runner):
 
         # reset envs and init rnn and mask
         render_env = self.envs
-
+        
         # init goal
         render_goals = np.zeros(self.all_args.render_episodes)
+        
+        # eval trajectory
+        HISTORY_LENGTH = 2
+        obs_traj = deque(maxlen=HISTORY_LENGTH)
+        pred = []
+        pred_history = []
+        
         for i_episode in range(self.all_args.render_episodes):
+            obs_traj.clear()
+
             # Reset the environment and get the initial observations.
             obs, share_obs, available_actions = render_env.reset()
             rnn_states = np.zeros((self.n_render_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=np.float32)
             masks = np.ones((self.n_render_rollout_threads, self.num_agents, 1), dtype=np.float32)
+
+            obs_traj.append(torch.from_numpy(share_obs[0]))
 
             if self.all_args.save_gifs:        
                 frames = []
@@ -352,11 +367,43 @@ class PettingzooRunner(Runner):
 
                 # Take a step in the environment and get the results.
                 obs, share_obs, render_rewards, dones, infos, available_actions = render_env.step(actions_env)
+                obs_traj.append(torch.from_numpy(share_obs[0]))
+                
+                # evaluate the traj on the rendenered diffuser
+                # how to make 2 traj into one model 
+                if len(obs_traj) == HISTORY_LENGTH and render_env.envs[0].env.step_count == HISTORY_LENGTH - 1:
+                    
+                    share_obs_tensor = torch.cat(list(obs_traj))
+                    
+                    condition = {i: share_obs_tensor[i] for i in range(len(share_obs_tensor))}
+                    # condition = {0: share_obs_tensor[0], 1: share_obs_tensor[1]}
+                    
+                    # pred = self.trainer.policy.diffuser(condition).trajectories[0, :, self.trainer.policy.diffuser.action_dim:]
 
+                    pred_actions, pred_trajectories = self.trainer.policy.diffuser_policy(condition)
+                    pred = pred_trajectories.observations[0]
+
+                    horizon = len(pred)
+                    print("pred: ", pred)
+                    print("horizon: ", horizon)
+                    # print("denoising step: ", pred.shape[0])
+                    # print("first: ", pred[:,-1])
+                    # colors = ["red", "orange", "yellow", "green", "blue", "purple", "black", "grey"]
+                    # labels = ["agent state", None, "reference state", None]
+                    # for i in range(0, pred.shape[1]):
+                    #     if labels[i] == None:
+                    #         continue
+                    #     plt.scatter(np.linspace(0, 1, horizon), pred[:, i], 
+                    #             color=colors[i - 1],
+                    #             label=labels[i])
+                    # plt.legend()
+                    # plt.show()
+                    # pred_history.append(pred)
+                
                 if not np.all(dones):
                     if ipython_clear_output:
                         clear_output(wait = True)
-                    render_env.envs[0].env.render()
+                    render_env.envs[0].env.render(pred, history_length=HISTORY_LENGTH)
 
                 # append frame
                 if self.all_args.save_gifs:        
@@ -371,3 +418,5 @@ class PettingzooRunner(Runner):
                     format="GIF",
                     duration=self.all_args.ifi,
                 )
+            
+            # time.sleep(3.0)

@@ -171,6 +171,9 @@ class GaussianDiffusion(nn.Module):
             x, values = sample_fn(self, x, cond, t, **sample_kwargs)
             x = conditioning_fn(x, cond, self.action_dim)
 
+            # plot x
+            # print("traj x is ", x)
+            
             if return_chain: chain.append(x)
 
         x, values = sort_by_values(x, values)

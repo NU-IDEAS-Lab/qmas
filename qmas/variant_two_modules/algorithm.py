@@ -23,12 +23,15 @@ class QmasAlgorithm(R_MAPPO):
         self.prediction_horizon = policy.prediction_horizon
 
         # Get the "null" value for the environment and determine conditioning function.
-        self.null_value = env.envs[0].null_value
-        if self.null_value is None:
-            from onpolicy.models.diffusion.helpers import apply_conditioning
-            self.conditioning_fn = apply_conditioning
-        else:
-            self.conditioning_fn = self._condition_sample
+        # self.null_value = env.envs[0].null_value
+        # if self.null_value is None:
+        #     from onpolicy.models.diffusion.helpers import apply_conditioning
+        #     self.conditioning_fn = apply_conditioning
+        # else:
+        #     self.conditioning_fn = self.policy._condition_sample
+        # TODO: Temporarily hardcode these values.
+        self.null_value = -1.0
+        self.conditioning_fn = self.policy._condition_sample
         print(f"QmasAlgorithm: Null value for environment is {self.null_value}.")
 
 
@@ -62,28 +65,6 @@ class QmasAlgorithm(R_MAPPO):
             return loss.item(), model_grad_norm, info
         else:
             return None
-    
-
-    def _condition_sample(self, x, conditions, action_dim):
-        ''' Applies conditions to the sample. '''
-
-        for t, val in conditions.items():
-            # TODO: Does this need to use val.clone()? The original does, so we do as well.
-            x[:, t, action_dim:] = self._overlay_tensor(x[:, t, action_dim:], val.clone(), self.null_value)
-        return x
-    
-
-    def _overlay_tensor(self, a, b, null_value):
-        ''' Overlays one tensor on another, based on the null value. '''
-
-        # Determine which elements are null.
-        b_data = b != null_value
-
-        # Overlay the tensors.
-        a[b_data] = b[b_data]
-
-        return a
-
 
     def train(self, buffer, update_actor=True, update_critic=True, last_step=-1):
         """
@@ -96,20 +77,34 @@ class QmasAlgorithm(R_MAPPO):
         :return train_info: (dict) contains information regarding training update (e.g. loss, grad norms, etc).
         """
 
-        train_info = super().train(buffer, update_actor, update_critic, last_step)
+        """
+        Perform training in two serial phases:
+        1. Policy training (actor-critic)
+        2. Diffusion model training
+        """
+        
+        train_info = {}
+        self.train_initialize_info(train_info)
 
-        num_updates = 0
-        for _ in range(self.ppo_epoch):
-            data_generator = buffer.sample_trajectories(self.num_mini_batch, self.prediction_horizon)
+        # Phase 1: Policy Training
+        policy_info = super().train(buffer, update_actor, update_critic, last_step)
+        train_info.update(policy_info)
 
-            for sample in data_generator:
-                self.train_sample_diffuser(sample.to(self.device), train_info, update_actor, update_critic)
-                num_updates += 1
+        # Phase 2: Diffusion Training
+        if update_actor or update_critic:  # Only train diffusion if we're updating either policy component
+            num_diffusion_updates = 0
+            for _ in range(self.ppo_epoch):
+                data_generator = buffer.sample_trajectories(self.num_mini_batch, self.prediction_horizon)
+                
+                for sample in data_generator:
+                    self.train_sample_diffuser(sample.to(self.device), train_info)
+                    num_diffusion_updates += 1
 
-        # Average the losses.
-        train_info['diffuser_loss'] /= num_updates
-        train_info['guide_loss'] /= num_updates
- 
+            # Average the diffusion losses
+            if num_diffusion_updates > 0:
+                train_info['diffuser_loss'] /= num_diffusion_updates
+                train_info['guide_loss'] /= num_diffusion_updates
+
         return train_info
 
 
@@ -151,8 +146,10 @@ class QmasAlgorithm(R_MAPPO):
         discounts = torch.pow(discounts, torch.arange(1, rewards_batch.shape[1] + 1, dtype=torch.float32, device=self.device))
         returns_batch = torch.sum(rewards_batch * discounts, dim=1).reshape((-1, 1))
         
-        # TODO: Temporary placeholder for conditions. Currently empty.
-        cond = {}
+        # Set up conditions based on the shared observations.
+        # cond = {i: share_obs_batch[:, i] for i in range(share_obs_batch.shape[1])} # condition based on the entire trajectory
+        cond = {i: share_obs_batch[:, i] for i in range(2)} # condition based on only the first two points
+        # cond = {i: share_obs_batch[:, i] for i in range(1)} # condition based on only the first point
 
         # Build trajectories.
         trajectories = torch.cat([share_obs_batch, actions_batch], dim=-1)

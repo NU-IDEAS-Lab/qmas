@@ -334,5 +334,9 @@ def get_config():
     # add for online multi-task
     parser.add_argument("--train_maps", type=str, nargs='+', default=None)
     parser.add_argument("--eval_maps", type=str, nargs='+', default=None)
+
+    # diffuser parameters
+    parser.add_argument("--diffusion_steps", type=int, default=20)
+    parser.add_argument("--diffusion_horizon", type=int, default=8)
     
     return parser

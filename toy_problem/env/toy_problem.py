@@ -69,13 +69,15 @@ class parallel_env(ParallelEnv):
         self.action_spaces = spaces.Dict({agent: action_space for agent in self.possible_agents}) # type: ignore
         
         # Create the observation space.
-        obs_space = spaces.Dict({
+        obs_space_dict = {
             "reference": spaces.Box(low=0, high=np.inf, shape=(1,), dtype=np.float32),
             "reference_velocity": spaces.Box(low=0, high=np.inf, shape=(1,), dtype=np.float32),
             "agent_states": spaces.Dict({
                 a: spaces.Box(low=0, high=np.inf, shape=(1,), dtype=np.float32) for a in self.possible_agents
             })
-        })
+        }
+        obs_space_dict_sorted = {k: obs_space_dict[k] for k in sorted(obs_space_dict.keys())}
+        obs_space = spaces.Dict(obs_space_dict_sorted)
         self.observation_spaces = spaces.Dict({agent: obs_space for agent in self.possible_agents}) # type: ignore
 
         # The state space is a complete observation of the environment.
@@ -101,10 +103,10 @@ class parallel_env(ParallelEnv):
         # Reset other state.
         self.step_count = 0
         self.dones = dict.fromkeys(self.agents, False)
-        self.reference_state = 0
+        self.reference_state = 0.0
         self.alpha = random.random()
-        self.state_history = {agent: [] for agent in self.agents}
-        self.reference_state_history = []
+        self.state_history = {agent: [0.0] for agent in self.agents}
+        self.reference_state_history = [0.0]
 
         # Set available actions.
         self.available_actions_dict = {agent: self._getAvailableActions(agent) for agent in self.agents}
@@ -120,7 +122,7 @@ class parallel_env(ParallelEnv):
         return observation, info
 
 
-    def render(self, figsize=(9, 6)):
+    def render(self, pred, figsize=(9, 6), history_length=2):
         ''' Renders the environment.
             
             Args:
@@ -132,13 +134,33 @@ class parallel_env(ParallelEnv):
 
         # Plot as a line graph using matplotlib.
         plt.figure(figsize=figsize)
-        plt.plot(self.reference_state_history, label="Reference")
         for agent in self.agents:
-            plt.plot(self.state_history[agent], label=f"Agent {agent}")
+            plt.plot(self.state_history[agent], label=f"Follower {agent} (Actual)", color="red", alpha=0.7)
+        plt.plot(self.reference_state_history, label="Leader (Actual)", color="orange", alpha=0.7)
+
+        # Plot alpha
+        plt.plot([0, len(self.reference_state_history)-1], [self.alpha, self.alpha], color='g', alpha=0.7, label="Leader Speed (Actual)")
+        
+        # Plot predictions.     
+        if (len(pred) != 0):
+            colors = ["red", "orange", "green", "yellow", "blue", "purple", "black", "grey"]
+            labels = [f"Follower 0 (Predicted at t={history_length-1})", f"Leader (Predicted at t={history_length-1})", "Leader Speed (Predicted)"]
+            for i in range(0, pred.shape[1]):
+                if labels[i] == None:
+                    continue
+                plt.plot(pred[:, i], 
+                        color=colors[i],
+                        alpha=1.0,
+                        linestyle="dashed",
+                        label=labels[i])
+
         plt.xlabel("Time (s)")
         plt.ylabel("State")
         plt.legend()
         plt.show()
+
+        print(f"Leader Actual: {self.reference_state_history}")
+        print(f"Leader Predicted: {pred[:, 1]}")
 
 
     def observation_space(self, agent):
@@ -207,7 +229,10 @@ class parallel_env(ParallelEnv):
         # Agent states.
         obs["agent_states"] = self.agent_states
         
-        return obs
+        # Ensure the order of the keys is consistent.
+        obs_sorted = {k: obs[k] for k in sorted(obs.keys())}
+
+        return obs_sorted
     
 
     def step(self, action_dict={}, lastStep=False):
