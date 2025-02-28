@@ -1,4 +1,6 @@
 from onpolicy.scripts.train.train_pettingzoo import main
+import torch
+torch.multiprocessing.set_sharing_strategy('file_system')
 
 import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
