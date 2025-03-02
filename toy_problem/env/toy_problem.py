@@ -144,8 +144,8 @@ class parallel_env(ParallelEnv):
         
         # Plot predictions.     
         if (len(pred) != 0):
-            colors = ["red", "orange", "green", "yellow", "blue", "purple", "black", "grey"]
-            labels = [f"Follower 0 (Predicted at t={history_length-1})", f"Leader (Predicted at t={history_length-1})", "Leader Speed (Predicted)"]
+            colors = ["orange", "green", "red", "yellow", "blue", "purple", "black", "grey"]
+            labels = [f"Leader (Predicted at t={history_length-1})", "Leader Speed (Predicted)", f"Follower 0 (Predicted at t={history_length-1})"]
             for i in range(0, pred.shape[1]):
                 if labels[i] == None:
                     continue
