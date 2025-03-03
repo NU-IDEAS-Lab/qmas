@@ -152,7 +152,7 @@ class QmasAlgorithm(R_MAPPO):
         # cond = {i: share_obs_batch[:, i] for i in range(1)} # condition based on only the first point
 
         # Build trajectories.
-        trajectories = torch.cat([share_obs_batch, actions_batch], dim=-1)
+        trajectories = torch.cat([actions_batch, share_obs_batch], dim=-1)
 
         # Update diffuser model.
         diffuser_loss, diffuser_grad_norm, diffuser_info = self.diffusion_update(
