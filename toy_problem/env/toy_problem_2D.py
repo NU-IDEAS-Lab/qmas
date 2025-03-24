@@ -136,34 +136,46 @@ class parallel_env(ParallelEnv):
         # Plot as a line graph using matplotlib.
         plt.figure(figsize=figsize)
         for agent in self.agents:
-            plt.plot(self.state_history[agent], label=f"Follower {agent} (Actual)", color="red", alpha=0.7)
-        plt.plot(self.reference_state_history, label="Leader (Actual)", color="orange", alpha=0.7)
+            print("agent sate hist: ", self.state_history[agent])
+            plt.plot(self.state_history[agent][-1], label=f"Follower {agent} (Actual)", color="red", alpha=0.7)
+        
+        print("reference sate hist: ", self.reference_state_history)
+        plt.plot(self.reference_state_history[-1], label="Leader (Actual)", color="orange", alpha=0.7)
 
         # Plot alpha
-        plt.plot([0, len(self.reference_state_history)-1], [self.alpha, self.alpha], color='g', alpha=0.7, label="Leader Speed (Actual)")
+        print("alpha: ", self.alpha)
+        plt.plot([0, self.alpha[0]], [0, self.alpha[1]], color='g', alpha=0.7, label="Leader Speed (Actual)")
         
+        print("pred shape", pred.shape)
+        print("pred: ", pred)
+        print(pred[-1])
         # Plot predictions.     
-        if (len(pred) != 0):
+        if (len(pred[-1]) != 0):
             colors = ["orange", "green", "red", "yellow", "blue", "purple", "black", "grey"]
-            labels = [f"Leader (Predicted at t={history_length-1})", "Leader Speed (Predicted)", f"Follower 0 (Predicted at t={history_length-1})"]
-            for i in range(0, pred.shape[1]):
+            labels = [f"Leader (Predicted)", "Leader Speed (Predicted)", f"Follower 0 (Predicted)"]
+            for i in range(0, int(len(pred[-1])/2)):
                 if labels[i] == None:
                     continue
-                plt.plot(pred[:, i], 
+                
+                print("pred x: ", pred[:, i*2])
+                print("pred y: ", pred[:, i*2 + 1])
+                
+                plt.plot(pred[-1][i * 2], 
+                         pred[-1][i * 2 + 1],
                         color=colors[i],
                         alpha=1.0,
                         linestyle="dashed",
                         label=labels[i])
 
-        plt.xlabel("Time (s)")
-        plt.ylabel("State")
+        plt.xlabel("X position")
+        plt.ylabel("Y position")
         plt.legend()
         plt.show()
 
         print(f"Leader Actual: {self.reference_state_history}")
         print(f"Leader Predicted: {pred[:, 1]}")
 
-
+    
     def observation_space(self, agent):
         ''' Returns the observation space for the given agent. '''
         return self.observation_spaces[agent]
@@ -270,13 +282,7 @@ class parallel_env(ParallelEnv):
                 # if not self.action_space(agent).contains([action]):
                 #     raise ValueError(f"Invalid action {action} of type {type(action)} provided.")
 
-                # Increment the agent state.
-                print("agent state: ", self.agent_states[agent])
-                print("agent state shape: ", self.agent_states[agent].shape)
-        
-                print("action: ", action)
-                print("action space: ", action.shape)
-                
+                # Increment the agent state.                
                 self.agent_states[agent] += action
 
                 self.state_history[agent].append(self.agent_states[agent])
