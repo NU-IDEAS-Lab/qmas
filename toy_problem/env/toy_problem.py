@@ -69,16 +69,16 @@ class parallel_env(ParallelEnv):
         self.action_spaces = spaces.Dict({agent: action_space for agent in self.possible_agents}) # type: ignore
         
         # Create the observation space.
-        # obs_space_dict = {
-        #     "reference": spaces.Box(low=0, high=np.inf, shape=(1,), dtype=np.float32),
-        #     "reference_velocity": spaces.Box(low=0, high=np.inf, shape=(1,), dtype=np.float32),
-        #     "agent_states": spaces.Dict({
-        #         a: spaces.Box(low=0, high=np.inf, shape=(1,), dtype=np.float32) for a in self.possible_agents
-        #     })
-        # }
-        # obs_space_dict_sorted = {k: obs_space_dict[k] for k in sorted(obs_space_dict.keys())}
-        # obs_space = spaces.Dict(obs_space_dict_sorted)
-        obs_space = spaces.Box(low=-np.inf, high=np.inf, shape=(2 + num_agents,), dtype=np.float32)
+        obs_space_dict = {
+            "reference": spaces.Box(low=0, high=np.inf, shape=(1,), dtype=np.float32),
+            "reference_velocity": spaces.Box(low=0, high=np.inf, shape=(1,), dtype=np.float32),
+            "agent_states": spaces.Dict({
+                a: spaces.Box(low=0, high=np.inf, shape=(1,), dtype=np.float32) for a in self.possible_agents
+            })
+        }
+        obs_space_dict_sorted = {k: obs_space_dict[k] for k in sorted(obs_space_dict.keys())}
+        obs_space = spaces.Dict(obs_space_dict_sorted)
+        # obs_space = spaces.Box(low=-np.inf, high=np.inf, shape=(2 + num_agents,), dtype=np.float32)
         self.observation_spaces = spaces.Dict({agent: obs_space for agent in self.possible_agents}) # type: ignore
 
         # The state space is a complete observation of the environment.
@@ -221,8 +221,10 @@ class parallel_env(ParallelEnv):
     def _populateStateSpace(self, agent):
         ''' Returns a populated state/observation space.'''
 
-        obs = np.array([self.reference_state, self.alpha] + [self.agent_states[a] for a in self.possible_agents], dtype=np.float32)
-        return obs
+        # obs = np.array([self.reference_state, self.alpha] + [self.agent_states[a] for a in self.possible_agents], dtype=np.float32)
+        # return obs
+
+        obs = {}
 
         # Reference state.
         obs["reference"] = self.reference_state
