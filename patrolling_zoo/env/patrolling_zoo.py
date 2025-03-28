@@ -135,7 +135,6 @@ class PatrolAgent():
         self.currentAction = -1.0
         self.lastNode = self.startingNode
         self.lastNodeVisited = None
-        self.stateBelief = {i: -1.0 for i in range(self.max_nodes)}
      
 
 class parallel_env(ParallelEnv):
@@ -521,31 +520,6 @@ class parallel_env(ParallelEnv):
         return self.available_actions_dict[agent]
 
 
-    def communicate(self, receiver=None, allow_done_agents=False):
-        ''' Simulates messages sent by all agents to receiver.
-            If received successfully, the receiver updates its state belief.
-            If receiver is set to none, will perform communication for all. '''
-
-        # Determine which agents can communicate.
-        if allow_done_agents:
-            agentList = self.possible_agents
-        else:
-            agentList = self.agents
-        
-        if receiver == None:
-            receiverList = agentList
-        else:
-            receiverList = [receiver]
-
-        # Perform communication.
-        for rcvr in receiverList:
-            for a in agentList:
-                if a != rcvr and self.comms_model.canReceive(a, rcvr):
-                    for v in self.pg.graph.nodes:
-                        if self._dist(self.pg.getNodePosition(v), a.position) <= a.observationRadius:
-                            rcvr.stateBelief[v] = self.pg.getNodeVisitTime(v)
-
-
     def _populateStateSpace(self, observe_method, agent, radius, allow_done_agents):
         ''' Returns a populated state/observation space.'''
 
@@ -561,10 +535,6 @@ class parallel_env(ParallelEnv):
         vertices = [v for v in self.pg.graph.nodes if self._dist(self.pg.getNodePosition(v), agent.position) <= radius]
         agents = [a for a in agentList if self._dist(a.position, agent.position) <= radius]
 
-        # Update beliefs for nodes which we can see.
-        for v in vertices:
-            agent.stateBelief[v] = self.pg.getNodeVisitTime(v)
-
         # Perform communication.
         for a in agentList:
             if a != agent and self.comms_model.canReceive(a, agent):
@@ -574,8 +544,6 @@ class parallel_env(ParallelEnv):
                     if self._dist(self.pg.getNodePosition(v), a.position) <= radius:
                         if v not in vertices:
                             vertices.append(v)
-                        # Update state belief for communicates nodes.
-                        agent.stateBelief[v] = self.pg.getNodeVisitTime(v)
         
         agents = sorted(agents, key=lambda a: a.id)
         vertices = sorted(vertices)
@@ -794,7 +762,7 @@ class parallel_env(ParallelEnv):
             g = deepcopy(self.pg.graph)
  
             # Get a list of last visit times for each node.
-            lastVisits = [agent.stateBelief[i] for i in range(self.pg.graph.number_of_nodes())]
+            lastVisits = [self.pg.getNodeVisitTime(i) for i in range(self.pg.graph.number_of_nodes())]
             
             # Get min and max idleness times for normalization.
             maxIdleness = self.step_count - min(lastVisits)
