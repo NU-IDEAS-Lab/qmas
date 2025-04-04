@@ -323,7 +323,7 @@ class PettingzooRunner(Runner):
         render_goals = np.zeros(self.all_args.render_episodes)
         
         # eval trajectory
-        HISTORY_LENGTH = 2
+        HISTORY_LENGTH = self.all_args.diffusion_horizon
         obs_traj = deque(maxlen=HISTORY_LENGTH)
         pred = []
         pred_history = []
@@ -351,6 +351,8 @@ class PettingzooRunner(Runner):
                 if np.any(aa == None):
                     aa = None
 
+
+                # TODO: Need to act on the prediction of the diffusion model.
                 actions, rnn_states = self.trainer.policy.act(
                     np.concatenate(obs),
                     np.concatenate(rnn_states),
