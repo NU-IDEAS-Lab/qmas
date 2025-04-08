@@ -48,6 +48,8 @@ class parallel_env(ParallelEnv):
 
     def __init__(self,
                  num_agents = 3,
+                 num_adversaries = 5,
+                 num_goals = 5,
                  max_cycles: int = -1,
                 ):
         """
@@ -59,7 +61,9 @@ class parallel_env(ParallelEnv):
         self.max_cycles = max_cycles
 
         # Create the agents.
-        self.possible_agents = list(range(num_agents))
+        self.possible_agents = [Agent() for i in range(num_agents)]
+        self.possible_adversaries = [Adversary() for i in range(num_adversaries)]
+        self.possible_goals = [GoalZone() for i in range(num_goals)]
 
         space_r2 = spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32)
 
@@ -101,18 +105,22 @@ class parallel_env(ParallelEnv):
 
         # Reset the agents.
         self.agents = copy(self.possible_agents)
-        self.agent_states = {agent: 0 for agent in self.agents}
+        for agent in self.agents:
+            agent.reset()
         
+        # Reset the adversaries.
+        self.adversaries = copy(self.possible_adversaries)
+        for adversary in self.adversaries:
+            adversary.reset()
+        
+        # Reset the goals.
+        self.goals = copy(self.possible_goals)
+        for goal in self.goals:
+            goal.reset()
+
         # Reset other state.
         self.step_count = 0
         self.dones = dict.fromkeys(self.agents, False)
-        self.reference_state = 0.0
-        self.alpha = random.random()
-        self.state_history = {agent: [0.0] for agent in self.agents}
-        self.reference_state_history = [0.0]
-
-        # Set available actions.
-        self.available_actions_dict = {agent: self._getAvailableActions(agent) for agent in self.agents}
 
         # Return the initial observation.
         observation = {agent: self.observe(agent) for agent in self.agents}
@@ -137,33 +145,25 @@ class parallel_env(ParallelEnv):
 
         # Plot as a line graph using matplotlib.
         plt.figure(figsize=figsize)
-        for agent in self.agents:
-            plt.plot(self.state_history[agent], label=f"Follower {agent} (Actual)", color="red", alpha=0.7)
-        plt.plot(self.reference_state_history, label="Leader (Actual)", color="orange", alpha=0.7)
-
-        # Plot alpha
-        plt.plot([0, len(self.reference_state_history)-1], [self.alpha, self.alpha], color='g', alpha=0.7, label="Leader Speed (Actual)")
         
-        # Plot predictions.     
-        if (len(pred) != 0):
-            colors = ["orange", "green", "red", "yellow", "blue", "purple", "black", "grey"]
-            labels = [f"Leader (Predicted at t={history_length-1})", "Leader Speed (Predicted)", f"Follower 0 (Predicted at t={history_length-1})"]
-            for i in range(0, pred.shape[1]):
-                if labels[i] == None:
-                    continue
-                plt.plot(pred[:, i], 
-                        color=colors[i],
-                        alpha=1.0,
-                        linestyle="dashed",
-                        label=labels[i])
+        # Plot the agent positions.
+        positions = [a.position for a in self.agents]
+        plt.plot([p[0] for p in positions], [p[1] for p in positions], 'bo', label='Agents')
+        for i, agent in enumerate(self.agents):
+            plt.annotate(f"Agent {i}", (positions[i][0], positions[i][1]), fontsize=8, color='blue')
+        
+        # Plot the adversary positions.
+        positions = [a.position for a in self.adversaries]
+        plt.plot([p[0] for p in positions], [p[1] for p in positions], 'ro', label='Adversaries')
+        for i, adversary in enumerate(self.adversaries):
+            plt.annotate(f"Adversary {i}", (positions[i][0], positions[i][1]), fontsize=8, color='red')
+        
+        # Plot the goal positions.
+        positions = [g.position for g in self.goals]
+        plt.plot([p[0] for p in positions], [p[1] for p in positions], 'go', label='Goals')
 
-        plt.xlabel("Time (s)")
-        plt.ylabel("State")
-        plt.legend()
-        plt.show()
-
-        print(f"Leader Actual: {self.reference_state_history}")
-        print(f"Leader Predicted: {pred[:, 1]}")
+        # Add legend.
+        plt.legend()            
 
 
     def observation_space(self, agent):
@@ -223,18 +223,17 @@ class parallel_env(ParallelEnv):
     def _populateStateSpace(self, agent):
         ''' Returns a populated state/observation space.'''
 
-        # obs = np.array([self.reference_state, self.alpha] + [self.agent_states[a] for a in self.possible_agents], dtype=np.float32)
-        # return obs
-
         obs = {}
 
-        # Reference state.
-        obs["reference"] = self.reference_state
-        obs["reference_velocity"] = self.alpha
+        # Adversary states.
+        obs["adversary_states"] = {a: a.position for a in self.adversaries}
 
         # Agent states.
-        obs["agent_states"] = self.agent_states
-        
+        obs["agent_states"] = {a: a.position for a in self.agents}
+
+        # Goal states.
+        obs["goal_states"] = {g: g.position for g in self.goals}
+
         # Ensure the order of the keys is consistent.
         obs_sorted = {k: obs[k] for k in sorted(obs.keys())}
 
