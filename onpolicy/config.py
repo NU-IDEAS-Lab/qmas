@@ -338,5 +338,7 @@ def get_config():
     # diffuser parameters
     parser.add_argument("--diffusion_steps", type=int, default=20)
     parser.add_argument("--diffusion_horizon", type=int, default=8)
+    parser.add_argument("--diffuser_start_fraction", type=float, default=0.0,
+                        help="Fraction of the episodes that must pass before the diffuser begins training")
     
     return parser

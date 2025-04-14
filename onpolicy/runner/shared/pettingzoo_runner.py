@@ -78,9 +78,12 @@ class PettingzooRunner(Runner):
             # Get certain stats.
             avg_episode_rewards = self.buffer.rewards.mean().item() * self.episode_length
 
-            # compute return and update network
+            # compute returns
             self.compute()
-            train_infos = self.train()
+
+            # Update networks.
+            update_diffuser = episode >= self.all_args.diffuser_start_fraction * episodes
+            train_infos = self.train(update_diffuser=update_diffuser)
             
             # post process
             total_num_steps = (episode + 1) * self.episode_length * self.n_rollout_threads

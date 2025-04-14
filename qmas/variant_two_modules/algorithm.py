@@ -66,7 +66,7 @@ class QmasAlgorithm(R_MAPPO):
         else:
             return None
 
-    def train(self, buffer, update_actor=True, update_critic=True, last_step=-1):
+    def train(self, buffer, update_actor=True, update_critic=True, update_diffuser=True, last_step=-1):
         """
         Perform a training update using minibatch GD.
         :param buffer: (SharedReplayBuffer) buffer containing training data.
@@ -91,7 +91,7 @@ class QmasAlgorithm(R_MAPPO):
         train_info.update(policy_info)
 
         # Phase 2: Diffusion Training
-        if update_actor or update_critic:  # Only train diffusion if we're updating either policy component
+        if update_diffuser:
             num_diffusion_updates = 0
             for _ in range(self.ppo_epoch):
                 data_generator = buffer.sample_trajectories(self.num_mini_batch, self.prediction_horizon)
