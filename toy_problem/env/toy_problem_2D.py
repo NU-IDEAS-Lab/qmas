@@ -137,41 +137,81 @@ class parallel_env(ParallelEnv):
         plt.figure(figsize=figsize)
         for agent in self.agents:
             print("agent sate hist: ", self.state_history[agent])
-            plt.plot(self.state_history[agent][-1], label=f"Follower {agent} (Actual)", color="red", alpha=0.7)
+            x_hist = [point[0] for point in self.state_history[agent]]
+            y_hist = [point[1] for point in self.state_history[agent]]
+            plt.plot(x_hist, y_hist, label=f"Follower {agent} (Actual)", color="red", alpha=0.7)
         
         print("reference sate hist: ", self.reference_state_history)
-        plt.plot(self.reference_state_history[-1], label="Leader (Actual)", color="orange", alpha=0.7)
+        x_ref = [point[0] for point in self.reference_state_history]
+        y_ref = [point[1] for point in self.reference_state_history]
+        plt.plot(x_ref, y_ref, label="Leader (Actual)", color="orange", alpha=0.7)
 
-        # Plot alpha
-        print("alpha: ", self.alpha)
-        plt.plot([0, self.alpha[0]], [0, self.alpha[1]], color='g', alpha=0.7, label="Leader Speed (Actual)")
-        
         print("pred shape", pred.shape)
         print("pred: ", pred)
+        print("pred[0]: ", pred[0])
+        # raise Exception("done 1")
         print(pred[-1])
         # Plot predictions.     
-        if (len(pred[-1]) != 0):
-            colors = ["orange", "green", "red", "yellow", "blue", "purple", "black", "grey"]
-            labels = [f"Leader (Predicted)", "Leader Speed (Predicted)", f"Follower 0 (Predicted)"]
-            for i in range(0, int(len(pred[-1])/2)):
-                if labels[i] == None:
-                    continue
+        # if (len(pred[-1]) != 0):
+        #     colors = ["orange", "green", "red", "yellow", "blue", "purple", "black", "grey"]
+        #     labels = [f"Leader (Predicted)", "Leader Speed (Predicted)", f"Follower 0 (Predicted)"]
+        #     for i in range(0, int(len(pred[-1])/2)):
+        #         if labels[i] == None:
+        #             continue
                 
-                print("pred x: ", pred[:, i*2])
-                print("pred y: ", pred[:, i*2 + 1])
+        #         print("pred x: ", pred[:, i*2])
+        #         print("pred y: ", pred[:, i*2 + 1])
                 
-                plt.plot(pred[-1][i * 2], 
-                         pred[-1][i * 2 + 1],
-                        color=colors[i],
-                        alpha=1.0,
-                        linestyle="dashed",
-                        label=labels[i])
-
+        #         plt.plot(pred[-1][i * 2], 
+        #                  pred[-1][i * 2 + 1],
+        #                 color=colors[i],
+        #                 alpha=1.0,
+        #                 linestyle="dashed",
+        #                 label=labels[i])
+                
+        colors = ["orange", "green", "red", "yellow", "blue", "purple", "black", "grey"]
+        labels = [f"Leader (Predicted)", "Leader Speed (Predicted)", f"Follower 0 (Predicted)"]
+        # Leader prediected
+        leader_x = []
+        leader_y = []
+        for i in range(len(pred)):
+            leader_x.append(pred[i][0])
+            leader_y.append(pred[i][1])
+        plt.plot(leader_x, leader_y, color = colors[0], alpha = 1.0, linestyle = "dashed", label = labels[0])
+        
+        
+        # Follower predicted
+        follower_x = []
+        follower_y = []
+        for i in range(len(pred)):
+            follower_x.append(pred[i][0])
+            follower_y.append(pred[i][1])
+        plt.plot(follower_x, follower_y, color = colors[2], alpha = 1.0, linestyle = "dashed", label = labels[2])
         plt.xlabel("X position")
         plt.ylabel("Y position")
         plt.legend()
         plt.show()
 
+
+        # Plot Speed
+        plt.figure(figsize=figsize)
+        # Leader Speed predicted 
+        leader_vx = []
+        leader_vy = []
+        for i in range(len(pred)):
+            leader_x.append(pred[i][2])
+            leader_y.append(pred[i][3])
+        plt.plot(leader_vx, leader_vy, color = colors[1], alpha = 1.0, linestyle = "dashed", label = labels[1])
+        
+        # Plot alpha
+        print("alpha: ", self.alpha)
+        plt.plot([0, self.alpha[0]], [0, self.alpha[1]], color='g', alpha=0.7, label="Leader Speed (Actual)")
+        
+        plt.xlabel("X position")
+        plt.ylabel("Y position")
+        plt.legend()
+        plt.show()
+        
         print(f"Leader Actual: {self.reference_state_history}")
         print(f"Leader Predicted: {pred[:, 1]}")
 
