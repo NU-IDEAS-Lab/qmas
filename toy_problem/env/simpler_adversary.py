@@ -51,6 +51,8 @@ class parallel_env(ParallelEnv):
                  num_adversaries = 5,
                  num_goals = 5,
                  max_cycles: int = -1,
+                 render_mode: str = "human",
+                 world_size: float = 100.0,
                 ):
         """
         Initialize the environment.
@@ -59,11 +61,26 @@ class parallel_env(ParallelEnv):
 
         # Configuration.
         self.max_cycles = max_cycles
+        self.world_dims = np.array([world_size, world_size])
+        self.render_mode = render_mode
 
         # Create the agents.
-        self.possible_agents = [Agent() for i in range(num_agents)]
-        self.possible_adversaries = [Adversary() for i in range(num_adversaries)]
-        self.possible_goals = [GoalZone() for i in range(num_goals)]
+        self.possible_agents = [
+            Agent(
+                position=self.get_random_position()
+            ) for i in range(num_agents)
+        ]
+        self.possible_adversaries = [
+            Adversary(
+                position=self.get_random_position()
+            ) for i in range(num_adversaries)
+        ]
+        self.possible_goals = [
+            GoalZone(
+                position=self.get_random_position(),
+                radius=2.0
+            ) for i in range(num_goals)
+        ]
 
         space_r2 = spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32)
 
@@ -106,17 +123,26 @@ class parallel_env(ParallelEnv):
         # Reset the agents.
         self.agents = copy(self.possible_agents)
         for agent in self.agents:
-            agent.reset()
+            agent.reset(
+                reset_start_position=True,
+                position=self.get_random_position()
+            )
         
         # Reset the adversaries.
         self.adversaries = copy(self.possible_adversaries)
         for adversary in self.adversaries:
-            adversary.reset()
+            adversary.reset(
+                reset_start_position=True,
+                position=self.get_random_position()
+            )
         
         # Reset the goals.
         self.goals = copy(self.possible_goals)
         for goal in self.goals:
-            goal.reset()
+            goal.reset(
+                reset_start_position=True,
+                position=self.get_random_position()
+            )
 
         # Reset other state.
         self.step_count = 0
@@ -133,7 +159,12 @@ class parallel_env(ParallelEnv):
         return observation, info
 
 
-    def render(self, pred, figsize=(9, 6), history_length=2):
+    def get_random_position(self):
+        ''' Returns a random position in the world. '''
+
+        return np.random.uniform(-self.world_dims / 2, self.world_dims / 2)
+
+    def render(self, figsize=(9, 6)):
         ''' Renders the environment.
             
             Args:
@@ -145,25 +176,38 @@ class parallel_env(ParallelEnv):
 
         # Plot as a line graph using matplotlib.
         plt.figure(figsize=figsize)
+
+        # Set the axis limits.
+        plt.xlim(-self.world_dims[0] / 2, self.world_dims[0] / 2)
+        plt.ylim(-self.world_dims[1] / 2, self.world_dims[1] / 2)
+        plt.gca().set_aspect('equal', adjustable='box')
+        plt.axhline(0, color='black', lw=0.5)
+        plt.axvline(0, color='black', lw=0.5)
+        plt.title("Simpler Adversary Environment")
+        plt.grid()
         
+        # Plot the goal positions.
+        positions = [g.position for g in self.goals]
+        plt.plot([p[0] for p in positions], [p[1] for p in positions], 'go', label='Goals', markersize=self.goals[0].radius*10)
+
         # Plot the agent positions.
         positions = [a.position for a in self.agents]
         plt.plot([p[0] for p in positions], [p[1] for p in positions], 'bo', label='Agents')
         for i, agent in enumerate(self.agents):
-            plt.annotate(f"Agent {i}", (positions[i][0], positions[i][1]), fontsize=8, color='blue')
+            plt.annotate(f"{agent}", (positions[i][0] + 1, positions[i][1]), fontsize=8, color='blue')
         
         # Plot the adversary positions.
         positions = [a.position for a in self.adversaries]
         plt.plot([p[0] for p in positions], [p[1] for p in positions], 'ro', label='Adversaries')
         for i, adversary in enumerate(self.adversaries):
-            plt.annotate(f"Adversary {i}", (positions[i][0], positions[i][1]), fontsize=8, color='red')
-        
-        # Plot the goal positions.
-        positions = [g.position for g in self.goals]
-        plt.plot([p[0] for p in positions], [p[1] for p in positions], 'go', label='Goals')
+            plt.annotate(f"{adversary}", (positions[i][0] + 1, positions[i][1]), fontsize=8, color='red')        
 
-        # Add legend.
-        plt.legend()            
+        # Add legend outside the plot.
+        plt.legend(loc='upper left', bbox_to_anchor=(1, 1), fontsize=8)
+        plt.tight_layout()
+
+        # Show the plot.
+        plt.show()      
 
 
     def observation_space(self, agent):
@@ -176,27 +220,21 @@ class parallel_env(ParallelEnv):
         return self.action_spaces[agent]
 
 
-    def available_actions_space(self, agent):
-        ''' Generate a Space for the available actions, given the action space. '''
+    # def available_actions_space(self, agent):
+    #     ''' Generate a Space for the available actions, given the action space. '''
 
-        action_space = self.action_space(agent)
-        def get_available_action_space(action_space):
-            if action_space.__class__.__name__ in ["Tuple", "Dict"]:
-                return spaces.Dict({k: get_available_action_space(v) for k, v in action_space.spaces.items()})
-            elif action_space.__class__.__name__ == "Discrete":
-                return spaces.MultiBinary(action_space.n)
-            elif action_space.__class__.__name__ == "MultiDiscrete":
-                return spaces.MultiBinary(len(action_space.nvec), np.max(action_space.nvec))
-            else:
-                raise NotImplementedError(f"Action space {action_space} not supported for action masking.")
-        return get_available_action_space(action_space)
+    #     action_space = self.action_space(agent)
+    #     def get_available_action_space(action_space):
+    #         if action_space.__class__.__name__ in ["Tuple", "Dict"]:
+    #             return spaces.Dict({k: get_available_action_space(v) for k, v in action_space.spaces.items()})
+    #         elif action_space.__class__.__name__ == "Discrete":
+    #             return spaces.MultiBinary(action_space.n)
+    #         elif action_space.__class__.__name__ == "MultiDiscrete":
+    #             return spaces.MultiBinary(len(action_space.nvec), np.max(action_space.nvec))
+    #         else:
+    #             raise NotImplementedError(f"Action space {action_space} not supported for action masking.")
+    #     return get_available_action_space(action_space)
 
-
-    def state_old(self):
-        ''' Returns the global state of the environment.
-            This is useful for centralized training, decentralized execution. '''
-        
-        return self._populateStateSpace(self.possible_agents[0])
 
     def state(self):
         ''' Similar to the state_old() method, but this returns a customized copy of the state space for each agent.
@@ -214,10 +252,10 @@ class parallel_env(ParallelEnv):
         return self._populateStateSpace(agent)
 
 
-    def available_actions(self, agent):
-        ''' Returns the dictionary of available actions for all agents.
-            This is not standard in the Pettingzoo API but is useful. '''
-        return self.available_actions_dict[agent]
+    # def available_actions(self, agent):
+    #     ''' Returns the dictionary of available actions for all agents.
+    #         This is not standard in the Pettingzoo API but is useful. '''
+    #     return self.available_actions_dict[agent]
 
 
     def _populateStateSpace(self, agent):
@@ -272,29 +310,29 @@ class parallel_env(ParallelEnv):
                 # if not self.action_space(agent).contains([action]):
                 #     raise ValueError(f"Invalid action {action} of type {type(action)} provided.")
 
-                # Increment the agent state.
-                self.agent_states[agent] += action
+                action = np.clip(action, -1.0, 1.0)
 
-                self.state_history[agent].append(self.agent_states[agent])
+                # Update the agent's state.
+                agent.velocity = action * agent.speed_max           
+                agent.position += agent.velocity
 
-        # Increment the reference state.
-        self.reference_state += self.alpha
-        self.reference_state_history.append(self.reference_state)
+
+        # Update the adversaries.
+        self.step_adversaries()
 
         # Provide reward.
         for agent in self.agents:
+            pass
             # reward_dict[agent] = -abs(action_dict[agent] - self.alpha)
-            reward_dict[agent] = -abs(self.agent_states[agent] - self.reference_state)
+            # reward_dict[agent] = -abs(self.agent_states[agent] - self.reference_state)
             # reward_dict[agent] = -np.log(abs(self.agent_states[agent] - self.reference_state))
 
         # Perform observations.
         for agent in self.possible_agents:
-            agent_observation = self.observe(agent)
-            obs_dict[agent] = agent_observation
+            obs_dict[agent] = self.observe(agent)
         
         # Record miscellaneous information.
         info_dict["agent_count"] = len(self.agents)
-        info_dict["avg_distance"] = np.mean([abs(self.agent_states[agent] - self.reference_state) for agent in self.agents])
         # for agent in self.agents:
         #     info_dict[f"x/{agent}"] = self.agent_states[agent]
         # info_dict["x/reference"] = self.reference_state
@@ -309,12 +347,20 @@ class parallel_env(ParallelEnv):
         done_dict = {agent: self.dones[agent] for agent in self.possible_agents}
 
         # Set available actions.
-        self.available_actions_dict = {agent: self._getAvailableActions(agent) for agent in self.possible_agents}
+        # self.available_actions_dict = {agent: self._getAvailableActions(agent) for agent in self.possible_agents}
 
         return obs_dict, reward_dict, done_dict, truncated_dict, info_dict
 
 
-    def _getAvailableActions(self, agent):
-        ''' Returns the available actions for the given agent. '''
+    def step_adversaries(self):
+        ''' Updates the adversaries. '''
 
-        return None
+        for adversary in self.adversaries:
+            # Adversary logic goes here.
+            pass
+
+
+    # def _getAvailableActions(self, agent):
+    #     ''' Returns the available actions for the given agent. '''
+
+    #     return None

@@ -14,7 +14,8 @@ class Entity():
 
     def __init__(self, position=None):
 
-        self.name = f"{self.__class__.__name__.lower()}_{Entity.entity_count}"
+        self.entity_id = Entity.entity_count
+        self.name = f"{self.__class__.__name__.lower()}_{self.entity_id}"
         Entity.entity_count += 1
 
         if position is None:
@@ -25,10 +26,13 @@ class Entity():
         self.reset()
     
 
-    def reset(self, reset_start_position=False):
+    def reset(self, reset_start_position=False, position=None):
         ''' Resets the entity to its initial state. '''
         if reset_start_position:
-            self.startingPosition = self.get_random_start_position()
+            if position is None:
+                self.startingPosition = self.get_random_start_position()
+            else:
+                self.startingPosition = position
         
         self.position = np.copy(self.startingPosition)
         self.velocity = np.array([0.0, 0.0])
@@ -62,6 +66,11 @@ class Entity():
     def velocity(self, vel):
         ''' Sets the agent velocity. '''
         self._velocity = vel
+    
+
+    def __repr__(self):
+        ''' Returns a string representation of the entity. '''
+        return self.name
 
 
 class Agent(Entity):
