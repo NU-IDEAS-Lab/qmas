@@ -120,6 +120,14 @@ class parallel_env(ParallelEnv):
         if seed != None:
             random.seed(seed)
 
+        # Reset the goals.
+        self.goals = copy(self.possible_goals)
+        for goal in self.goals:
+            goal.reset(
+                reset_start_position=True,
+                position=self.get_random_position()
+            )
+
         # Reset the agents.
         self.agents = copy(self.possible_agents)
         for agent in self.agents:
@@ -133,17 +141,10 @@ class parallel_env(ParallelEnv):
         for adversary in self.adversaries:
             adversary.reset(
                 reset_start_position=True,
-                position=self.get_random_position()
+                position=self.get_random_position(),
+                target=random.choice(self.goals)
             )
         
-        # Reset the goals.
-        self.goals = copy(self.possible_goals)
-        for goal in self.goals:
-            goal.reset(
-                reset_start_position=True,
-                position=self.get_random_position()
-            )
-
         # Reset other state.
         self.step_count = 0
         self.dones = dict.fromkeys(self.agents, False)
@@ -356,8 +357,13 @@ class parallel_env(ParallelEnv):
         ''' Updates the adversaries. '''
 
         for adversary in self.adversaries:
-            # Adversary logic goes here.
-            pass
+            target = adversary.target
+            if target is not None:
+                # Move towards the target.
+                direction = target.position - adversary.position
+                direction /= np.linalg.norm(direction)
+                adversary.velocity = direction * adversary.speed_max
+                adversary.position += adversary.velocity
 
 
     # def _getAvailableActions(self, agent):

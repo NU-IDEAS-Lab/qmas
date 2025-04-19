@@ -96,6 +96,10 @@ class Adversary(Entity):
         super().__init__(*args, **kwargs)
         self.speed_max = speed_max
 
+    def reset(self, *args, target=None, **kwargs):
+        self.target = target
+        super().reset(*args, **kwargs)
+
 
 class CircularZone(Entity):
     ''' Position and radius information for zones '''
