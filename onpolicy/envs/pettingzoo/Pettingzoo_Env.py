@@ -12,19 +12,25 @@ class PettingzooEnv(object):
     def __init__(self, environment_class, args):
         self.args = args
         self.num_agents = args.num_agents
-        
-        if "args" in environment_class.__init__.__code__.co_varnames:
-            print("PettingzooEnv: Attempting to pass argparse namespace directly to environment.")
-            self.env = environment_class(
-                args=args
-            )
+
+        # Check whether we can auto-fill the environment arguments.
+        if hasattr(environment_class.__init__, "__code__"):
+            if "args" in environment_class.__init__.__code__.co_varnames:
+                print("PettingzooEnv: Attempting to pass argparse namespace directly to environment.")
+                self.env = environment_class(
+                    args=args
+                )
+            else:
+                print("PettingzooEnv: Attempting to pass unpacked argparse namespace to environment.")
+                args_dict = self._get_matching_arg_dict(environment_class.__init__, vars(args))
+                print(f"PettingzooEnv: Passing the following arguments to the environment: {args_dict}")
+                self.env = environment_class(
+                    **args_dict
+                )
         else:
-            print("PettingzooEnv: Attempting to pass unpacked argparse namespace to environment.")
-            args_dict = self._get_matching_arg_dict(environment_class.__init__, vars(args))
-            print(f"PettingzooEnv: Passing the following arguments to the environment: {args_dict}")
-            self.env = environment_class(
-                **args_dict
-            )
+            # Just take the defaults.
+            print("PettingzooEnv: Unable to pass arguments to environment!")
+            self.env = environment_class()
         
         self.share_reward = args.share_reward
         self.action_space = []
@@ -71,6 +77,9 @@ class PettingzooEnv(object):
             self.share_observation_space = [flatten_space(self.env.state_space) for a in self.env.possible_agents]
         else:
             self.share_observation_space = [self.env.state_space for a in self.env.possible_agents]
+        
+        # Determine whether to use available_actions.
+        self.has_available_actions = hasattr(self.env, "available_actions") and callable(self.env.available_actions)
 
 
     def reset(self):
@@ -85,7 +94,10 @@ class PettingzooEnv(object):
             ret_share_obs = self._share_obs_wrapper(self.env.state())
         else:
             ret_share_obs = self._share_state_wrapper(self.env.state())
-        available_actions = {a: self.env.available_actions(a) for a in self.env.possible_agents}
+        if self.has_available_actions:
+            available_actions = {a: self.env.available_actions(a) for a in self.env.possible_agents}
+        else:
+            available_actions = {a: None for a in self.env.possible_agents}
         ret_available_actions = self._available_actions_wrapper(available_actions)
 
         return ret_obs, ret_share_obs, ret_available_actions
@@ -126,7 +138,10 @@ class PettingzooEnv(object):
                 ret_share_obs = self._share_obs_wrapper(self.env.state())
             else:
                 ret_share_obs = self._share_state_wrapper(self.env.state())
-            available_actions = {a: self.env.available_actions(a) for a in self.env.possible_agents}
+            if self.has_available_actions:
+                available_actions = {a: self.env.available_actions(a) for a in self.env.possible_agents}
+            else:
+                available_actions = {a: None for a in self.env.possible_agents}
             ret_available_actions = self._available_actions_wrapper(available_actions)
             info = self._info_wrapper(info)
 

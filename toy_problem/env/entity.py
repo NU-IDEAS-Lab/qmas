@@ -146,5 +146,26 @@ class GoalZone(CircularZone):
     ''' Position and radius information for goal zones '''
     entity_type = ENTITY_TYPE.ZONE
 
+    class GOAL_STATE(IntEnum):
+        UNREACHED = 0
+        REACHED_ADVERSARY = 1
+        REACHED_AGENT = 2
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, entity_type=self.entity_type, **kwargs)
+    
+    def reset(self, *args, **kwargs):
+        super().reset(*args, **kwargs)
+        self.state = GoalZone.GOAL_STATE.UNREACHED
+    
+    def reached_check(self, entity):
+        ''' Returns True and sets state if the entity is within the zone. '''
+        if self.state != GoalZone.GOAL_STATE.UNREACHED:
+            return False
+        if self.contains(entity.position):
+            if isinstance(entity, Adversary):
+                self.state = GoalZone.GOAL_STATE.REACHED_ADVERSARY
+            elif isinstance(entity, Agent):
+                self.state = GoalZone.GOAL_STATE.REACHED_AGENT
+            return True
+        return False

@@ -48,9 +48,9 @@ class parallel_env(ParallelEnv):
 
     def __init__(self,
                  num_agents = 3,
-                 num_adversaries = 5,
-                 num_goals = 5,
-                 max_cycles: int = -1,
+                 num_adversaries = 3,
+                 num_goals = 6,
+                #  max_cycles: int = -1,
                  render_mode: str = "human",
                  world_size: float = 100.0,
                 ):
@@ -60,19 +60,21 @@ class parallel_env(ParallelEnv):
         super().__init__()
 
         # Configuration.
-        self.max_cycles = max_cycles
+        # self.max_cycles = max_cycles
         self.world_dims = np.array([world_size, world_size])
         self.render_mode = render_mode
 
         # Create the agents.
         self.possible_agents = [
             Agent(
-                position=self.get_random_position()
+                position=self.get_random_position(),
+                speed_max=2.0,
             ) for i in range(num_agents)
         ]
         self.possible_adversaries = [
             Adversary(
-                position=self.get_random_position()
+                position=self.get_random_position(),
+                speed_max=1.0,
             ) for i in range(num_adversaries)
         ]
         self.possible_goals = [
@@ -91,7 +93,10 @@ class parallel_env(ParallelEnv):
         # Create the observation space.
         obs_space_dict = {
             "adversary_states": spaces.Dict({
-                b: space_r2 for b in self.possible_adversaries
+                b: spaces.Dict({
+                    "position": space_r2,
+                    "target": space_r2
+                 }) for b in self.possible_adversaries
             }),
             "agent_states": spaces.Dict({
                 a: space_r2 for a in self.possible_agents
@@ -138,11 +143,12 @@ class parallel_env(ParallelEnv):
         
         # Reset the adversaries.
         self.adversaries = copy(self.possible_adversaries)
+        targets = random.sample(self.goals, len(self.adversaries))
         for adversary in self.adversaries:
             adversary.reset(
                 reset_start_position=True,
                 position=self.get_random_position(),
-                target=random.choice(self.goals)
+                target=targets.pop(0)
             )
         
         # Reset other state.
@@ -188,17 +194,27 @@ class parallel_env(ParallelEnv):
         plt.grid()
         
         # Plot the goal positions.
-        positions = [g.position for g in self.goals]
-        plt.plot([p[0] for p in positions], [p[1] for p in positions], 'go', label='Goals', markersize=self.goals[0].radius*10)
+        for goal in self.goals:
+            if goal.state == GoalZone.GOAL_STATE.UNREACHED:
+                color = 'grey'
+            elif goal.state == GoalZone.GOAL_STATE.REACHED_AGENT:
+                color = 'green'
+            elif goal.state == GoalZone.GOAL_STATE.REACHED_ADVERSARY:
+                color = 'red'
+            label = f"Goal {goal.entity_id}"
+            marker = plt.Circle(goal.position, goal.radius, color=color, alpha=0.5, label=label)
+            plt.gca().add_artist(marker)
+        # positions = [g.position for g in self.goals]
+        # plt.plot([p[0] for p in positions], [p[1] for p in positions], 'go', label='Goals', markersize=self.goals[0].radius*10)
 
         # Plot the agent positions.
-        positions = [a.position for a in self.agents]
+        positions = [a.position for a in self.possible_agents]
         plt.plot([p[0] for p in positions], [p[1] for p in positions], 'bo', label='Agents')
         for i, agent in enumerate(self.agents):
             plt.annotate(f"{agent}", (positions[i][0] + 1, positions[i][1]), fontsize=8, color='blue')
         
         # Plot the adversary positions.
-        positions = [a.position for a in self.adversaries]
+        positions = [a.position for a in self.possible_adversaries]
         plt.plot([p[0] for p in positions], [p[1] for p in positions], 'ro', label='Adversaries')
         for i, adversary in enumerate(self.adversaries):
             plt.annotate(f"{adversary}", (positions[i][0] + 1, positions[i][1]), fontsize=8, color='red')        
@@ -265,13 +281,18 @@ class parallel_env(ParallelEnv):
         obs = {}
 
         # Adversary states.
-        obs["adversary_states"] = {a: a.position for a in self.adversaries}
+        obs["adversary_states"] = {
+            a: {
+                "position": a.position,
+                "target": a.target.position
+            } for a in self.possible_adversaries
+        }
 
         # Agent states.
-        obs["agent_states"] = {a: a.position for a in self.agents}
+        obs["agent_states"] = {a: a.position for a in self.possible_agents}
 
         # Goal states.
-        obs["goal_states"] = {g: g.position for g in self.goals}
+        obs["goal_states"] = {g: g.position for g in self.possible_goals}
 
         # Ensure the order of the keys is consistent.
         obs_sorted = {k: obs[k] for k in sorted(obs.keys())}
@@ -317,16 +338,20 @@ class parallel_env(ParallelEnv):
                 agent.velocity = action * agent.speed_max           
                 agent.position += agent.velocity
 
+                # Check whether agent reached any goals.
+                for goal in self.goals:
+                    reached = goal.reached_check(agent)
+                    if reached:
+                        # Provide reward.
+                        reward_dict[agent] += 1.0
+
 
         # Update the adversaries.
         self.step_adversaries()
 
         # Provide reward.
         for agent in self.agents:
-            pass
-            # reward_dict[agent] = -abs(action_dict[agent] - self.alpha)
-            # reward_dict[agent] = -abs(self.agent_states[agent] - self.reference_state)
-            # reward_dict[agent] = -np.log(abs(self.agent_states[agent] - self.reference_state))
+            reward_dict[agent] = self.reward(agent)
 
         # Perform observations.
         for agent in self.possible_agents:
@@ -338,13 +363,19 @@ class parallel_env(ParallelEnv):
         #     info_dict[f"x/{agent}"] = self.agent_states[agent]
         # info_dict["x/reference"] = self.reference_state
 
-        # Check truncation conditions.
-        if lastStep or (self.max_cycles >= 0 and self.step_count >= self.max_cycles):
-            for agent in self.agents:
-                info_dict[agent]["ready"] = True
-                truncated_dict[agent] = True
-            self.agents = []
+        # Check whether all targets are reached.
+        done = True
+        for adversary in self.adversaries:
+            goal = adversary.target
+            if goal.state == GoalZone.GOAL_STATE.UNREACHED:
+                done = False
+                break
         
+        # End the game.
+        if done:
+            for agent in self.agents:
+                self.dones[agent] = True
+            self.agents = []
         done_dict = {agent: self.dones[agent] for agent in self.possible_agents}
 
         # Set available actions.
@@ -364,6 +395,22 @@ class parallel_env(ParallelEnv):
                 direction /= np.linalg.norm(direction)
                 adversary.velocity = direction * adversary.speed_max
                 adversary.position += adversary.velocity
+
+            # Check whether any goals have been reached.
+            for goal in self.goals:
+                goal.reached_check(adversary)
+
+
+    def reward(self, agent):
+        ''' Returns the reward for the given agent. '''
+
+        rwd = 0.0
+        for goal in self.goals:
+            if goal.state != GoalZone.GOAL_STATE.REACHED_ADVERSARY:
+                rwd += 1.0
+        rwd /= len(self.goals)
+
+        return rwd
 
 
     # def _getAvailableActions(self, agent):
