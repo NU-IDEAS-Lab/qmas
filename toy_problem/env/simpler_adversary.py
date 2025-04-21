@@ -340,10 +340,11 @@ class parallel_env(ParallelEnv):
 
                 # Check whether agent reached any goals.
                 for goal in self.goals:
-                    reached = goal.reached_check(agent)
-                    if reached:
-                        # Provide reward.
-                        reward_dict[agent] += 1.0
+                    goal.reached_check(agent)
+                    # reached = goal.reached_check(agent)
+                    # if reached:
+                    #     # Provide reward.
+                    #     reward_dict[agent] += 1.0
 
 
         # Update the adversaries.
@@ -405,10 +406,16 @@ class parallel_env(ParallelEnv):
         ''' Returns the reward for the given agent. '''
 
         rwd = 0.0
-        for goal in self.goals:
-            if goal.state != GoalZone.GOAL_STATE.REACHED_ADVERSARY:
-                rwd += 1.0
-        rwd /= len(self.goals)
+
+        pos_prev = agent.position - agent.velocity
+        pos_curr = agent.position
+
+        # Reward for moving towards adversary targets.
+        for adversary in self.adversaries:
+            if adversary.target is not None and adversary.target.state == GoalZone.GOAL_STATE.UNREACHED:
+                dist_prev = np.linalg.norm(adversary.target.position - pos_prev)
+                dist_curr = np.linalg.norm(adversary.target.position - pos_curr)
+                rwd += (dist_prev - dist_curr) / agent.speed_max
 
         return rwd
 
