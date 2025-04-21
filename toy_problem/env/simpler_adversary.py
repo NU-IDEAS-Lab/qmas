@@ -102,7 +102,10 @@ class parallel_env(ParallelEnv):
                 a: space_r2 for a in self.possible_agents
             }),
             "goal_states": spaces.Dict({
-                g: space_r2 for g in self.possible_goals
+                g: spaces.Dict({
+                    "position": space_r2,
+                    "state": spaces.Discrete(len(GoalZone.GOAL_STATE))
+                }) for g in self.possible_goals
             }),
         }
         obs_space_dict_sorted = {k: obs_space_dict[k] for k in sorted(obs_space_dict.keys())}
@@ -292,7 +295,12 @@ class parallel_env(ParallelEnv):
         obs["agent_states"] = {a: a.position for a in self.possible_agents}
 
         # Goal states.
-        obs["goal_states"] = {g: g.position for g in self.possible_goals}
+        obs["goal_states"] = {
+            g: {
+                "position": g.position,
+                "state": g.state
+            } for g in self.possible_goals
+        }
 
         # Ensure the order of the keys is consistent.
         obs_sorted = {k: obs[k] for k in sorted(obs.keys())}
