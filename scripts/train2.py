@@ -37,7 +37,7 @@ args = [
 	"--layer_N", "2",
 	"--seed", "0",
 
-	"--n_rollout_threads", "10",
+	"--n_rollout_threads", "100",
 	"--cuda",
 	"--cuda_idx", "4",
 

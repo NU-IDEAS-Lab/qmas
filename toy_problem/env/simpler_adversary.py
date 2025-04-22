@@ -92,21 +92,24 @@ class parallel_env(ParallelEnv):
         
         # Create the observation space.
         obs_space_dict = {
-            "adversary_states": spaces.Dict({
-                b: spaces.Dict({
-                    "position": space_r2,
-                    "target": space_r2
-                 }) for b in self.possible_adversaries
-            }),
-            "agent_states": spaces.Dict({
-                a: space_r2 for a in self.possible_agents
-            }),
-            "goal_states": spaces.Dict({
-                g: spaces.Dict({
-                    "position": space_r2,
-                    "state": spaces.Discrete(len(GoalZone.GOAL_STATE))
-                }) for g in self.possible_goals
-            }),
+            "adversary_states": spaces.Box(
+                low=-np.inf,
+                high=np.inf,
+                shape=(len(self.possible_adversaries), 2 + 2), # position + target
+                dtype=np.float32
+            ),
+            "agent_states": spaces.Box(
+                low=-np.inf,
+                high=np.inf,
+                shape=(len(self.possible_agents), 2),
+                dtype=np.float32
+            ),
+            "goal_states": spaces.Box(
+                low=-np.inf,
+                high=np.inf,
+                shape=(len(self.possible_goals), 2 + 1), # position + state
+                dtype=np.float32
+            )
         }
         obs_space_dict_sorted = {k: obs_space_dict[k] for k in sorted(obs_space_dict.keys())}
         obs_space = spaces.Dict(obs_space_dict_sorted)
@@ -284,23 +287,25 @@ class parallel_env(ParallelEnv):
         obs = {}
 
         # Adversary states.
-        obs["adversary_states"] = {
-            a: {
-                "position": a.position,
-                "target": a.target.position
-            } for a in self.possible_adversaries
-        }
+        obs["adversary_states"] = np.zeros((len(self.possible_adversaries), 2 + 2), dtype=np.float32)
+        for i, adversary in enumerate(self.possible_adversaries):
+            obs["adversary_states"][i, 0:2] = adversary.position
+            obs["adversary_states"][i, 2:4] = adversary.target.position
 
-        # Agent states.
-        obs["agent_states"] = {a: a.position for a in self.possible_agents}
+        # Agent states. Ensure current agent is always first.
+        obs["agent_states"] = np.zeros((len(self.possible_agents), 2), dtype=np.float32)
+        obs["agent_states"][0, :] = agent.position
+        idx = 1
+        for other_agent in self.possible_agents:
+            if other_agent != agent:
+                obs["agent_states"][idx, :] = other_agent.position
+                idx += 1
 
         # Goal states.
-        obs["goal_states"] = {
-            g: {
-                "position": g.position,
-                "state": g.state
-            } for g in self.possible_goals
-        }
+        obs["goal_states"] = np.zeros((len(self.possible_goals), 2 + 1), dtype=np.float32)
+        for i, goal in enumerate(self.possible_goals):
+            obs["goal_states"][i, 0:2] = goal.position
+            obs["goal_states"][i, 2] = goal.state.value
 
         # Ensure the order of the keys is consistent.
         obs_sorted = {k: obs[k] for k in sorted(obs.keys())}
@@ -423,7 +428,7 @@ class parallel_env(ParallelEnv):
             if adversary.target is not None and adversary.target.state == GoalZone.GOAL_STATE.UNREACHED:
                 dist_prev = np.linalg.norm(adversary.target.position - pos_prev)
                 dist_curr = np.linalg.norm(adversary.target.position - pos_curr)
-                rwd += (dist_prev - dist_curr) / agent.speed_max
+                rwd += max(dist_prev - dist_curr, 0.0) / agent.speed_max
 
         return rwd
 
