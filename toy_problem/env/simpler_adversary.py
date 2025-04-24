@@ -53,6 +53,7 @@ class parallel_env(ParallelEnv):
                 #  max_cycles: int = -1,
                  render_mode: str = "human",
                  world_size: float = 100.0,
+                 partially_observable: bool = False
                 ):
         """
         Initialize the environment.
@@ -63,6 +64,7 @@ class parallel_env(ParallelEnv):
         # self.max_cycles = max_cycles
         self.world_dims = np.array([world_size, world_size])
         self.render_mode = render_mode
+        self.partially_observable = partially_observable
 
         # Create the agents.
         self.possible_agents = [
@@ -286,25 +288,32 @@ class parallel_env(ParallelEnv):
 
         obs = {}
 
+        def normalize_position(position):
+            ''' Normalizes the position to be between -1 and 1. '''
+            return (position + self.world_dims / 2) / self.world_dims
+
         # Adversary states.
         obs["adversary_states"] = np.zeros((len(self.possible_adversaries), 2 + 2), dtype=np.float32)
         for i, adversary in enumerate(self.possible_adversaries):
-            obs["adversary_states"][i, 0:2] = adversary.position
-            obs["adversary_states"][i, 2:4] = adversary.target.position
+            obs["adversary_states"][i, 0:2] = normalize_position(adversary.position)
+            if self.partially_observable:
+                obs["adversary_states"][i, 2:4] = np.ones((2,), dtype=np.float32) * self.metadata["null_value"]
+            else:
+                obs["adversary_states"][i, 2:4] = normalize_position(adversary.target.position)
 
         # Agent states. Ensure current agent is always first.
         obs["agent_states"] = np.zeros((len(self.possible_agents), 2), dtype=np.float32)
-        obs["agent_states"][0, :] = agent.position
+        obs["agent_states"][0, :] = normalize_position(agent.position)
         idx = 1
         for other_agent in self.possible_agents:
             if other_agent != agent:
-                obs["agent_states"][idx, :] = other_agent.position
+                obs["agent_states"][idx, :] = normalize_position(other_agent.position)
                 idx += 1
 
         # Goal states.
         obs["goal_states"] = np.zeros((len(self.possible_goals), 2 + 1), dtype=np.float32)
         for i, goal in enumerate(self.possible_goals):
-            obs["goal_states"][i, 0:2] = goal.position
+            obs["goal_states"][i, 0:2] = normalize_position(goal.position)
             obs["goal_states"][i, 2] = goal.state.value
 
         # Ensure the order of the keys is consistent.
@@ -428,7 +437,9 @@ class parallel_env(ParallelEnv):
             if adversary.target is not None and adversary.target.state == GoalZone.GOAL_STATE.UNREACHED:
                 dist_prev = np.linalg.norm(adversary.target.position - pos_prev)
                 dist_curr = np.linalg.norm(adversary.target.position - pos_curr)
-                rwd += max(dist_prev - dist_curr, 0.0) / agent.speed_max
+                r = max(dist_prev - dist_curr, 0.0) / agent.speed_max
+                r /= dist_curr # Provide higher reward as we get closer. Disincentivize flip-flopping.
+                rwd += r
 
         return rwd
 
