@@ -366,7 +366,7 @@ class PettingzooRunner(Runner):
                 actions = np.array(np.split(_t2n(actions), self.n_render_rollout_threads))
                 rnn_states = np.array(np.split(_t2n(rnn_states), self.n_render_rollout_threads))
 
-                actions_env = [actions[idx, :, 0] for idx in range(self.n_render_rollout_threads)]
+                actions_env = [actions[idx, :, :] for idx in range(self.n_render_rollout_threads)]
 
                 # Take a step in the environment and get the results.
                 obs, share_obs, render_rewards, dones, infos, available_actions = render_env.step(actions_env)
