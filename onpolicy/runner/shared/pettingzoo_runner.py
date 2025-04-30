@@ -371,7 +371,7 @@ class PettingzooRunner(Runner):
                 
                 # evaluate the traj on the rendenered diffuser
                 # how to make 2 traj into one model 
-                if len(obs_traj) == HISTORY_LENGTH and render_env.envs[0].env.step_count == HISTORY_LENGTH - 1:
+                if len(obs_traj) == HISTORY_LENGTH: # and render_env.envs[0].env.step_count == HISTORY_LENGTH - 1:
                     
                     share_obs_tensor = torch.cat(list(obs_traj))
                     
@@ -383,9 +383,9 @@ class PettingzooRunner(Runner):
                     pred_actions, pred_trajectories = self.trainer.policy.diffuser_policy(condition)
                     pred = pred_trajectories.observations[0]
 
-                    horizon = len(pred)
-                    print("pred: ", pred)
-                    print("horizon: ", horizon)
+                    # horizon = len(pred)
+                    # print("pred: ", pred)
+                    # print("horizon: ", horizon)
                     # print("denoising step: ", pred.shape[0])
                     # print("first: ", pred[:,-1])
                     # colors = ["red", "orange", "yellow", "green", "blue", "purple", "black", "grey"]

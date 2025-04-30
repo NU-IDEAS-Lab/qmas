@@ -179,7 +179,8 @@ class parallel_env(ParallelEnv):
 
         # Convert the predicted state back into a dictionary (unflatten).
         pred_unflattened = []
-        for i in range(len(pred)):
+        pred_steps = len(pred)
+        for i in range(pred_steps):
             p = spaces.unflatten(self.observation_spaces, pred[i])
             pred_unflattened.append(p)
 
@@ -233,11 +234,18 @@ class parallel_env(ParallelEnv):
         # Plot history of predictions from the perspective of agent 0.
         if len(pred_unflattened) > 0:
             agent_preds = [pred_unflattened[i][self.possible_agents[0]]["agents"] for i in range(len(pred_unflattened))]
-            for i, agent in enumerate(self.agents):
+            for i, agent in enumerate(self.possible_agents):
                 # Get the history of predictions for this agent.
                 history = [p[agent] for p in agent_preds]
                 plt.plot([h[0] for h in history], [h[1] for h in history], 'b--', alpha=0.5, linewidth=0.5)            
                 plt.annotate(f"Pred {agent}", (history[-1][0] + 1, history[-1][1]), fontsize=8, color='blue')
+            
+            adversary_preds = [pred_unflattened[i][self.possible_agents[0]]["adversaries"] for i in range(len(pred_unflattened))]
+            for i, adversary in enumerate(self.possible_adversaries):
+                # Get the history of predictions for this adversary.
+                history = [p[adversary] for p in adversary_preds]
+                plt.plot([h[0] for h in history], [h[1] for h in history], 'r--', alpha=0.5, linewidth=0.5)            
+                plt.annotate(f"Pred {adversary}", (history[-1][0] + 1, history[-1][1]), fontsize=8, color='red')
 
         # Add legend outside the plot.
         plt.legend(loc='upper left', bbox_to_anchor=(1, 1), fontsize=8)

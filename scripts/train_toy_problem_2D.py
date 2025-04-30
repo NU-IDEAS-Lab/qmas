@@ -14,8 +14,8 @@ args = [
 	"--polynomial_degree", "0",
 
 	"--num_env_steps", "1000000",
-	"--episode_length", "10",
-	"--max_cycles", "10",
+	"--episode_length", "50",
+	"--max_cycles", "50",
 
 	"--algorithm_class", "qmas.variant_two_modules.algorithm.QmasAlgorithm",
 	"--policy_class", "qmas.variant_two_modules.policy.QmasPolicy",
@@ -36,7 +36,7 @@ args = [
 
 	"--n_rollout_threads", "100",
 	"--cuda",
-	"--cuda_idx", "4",
+	"--cuda_idx", "1",
 
 	"--save_interval", "1000",
     "--results_dir", "/data/group/mas/qmas/results",
