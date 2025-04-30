@@ -217,7 +217,7 @@ class parallel_env(ParallelEnv):
 
             # Plot actual history for the agent.
             history = self.state_history[agent]
-            plt.plot([h[0] for h in history], [h[1] for h in history], 'b--', alpha=0.5, linewidth=0.5)            
+            plt.plot([h[0] for h in history], [h[1] for h in history], 'b', alpha=0.5, linewidth=0.5)            
         
         # Plot the adversary positions.
         positions = [a.position for a in self.possible_adversaries]
@@ -227,7 +227,7 @@ class parallel_env(ParallelEnv):
 
             # Plot actual history for the adversary.
             history = self.state_history[adversary]
-            plt.plot([h[0] for h in history], [h[1] for h in history], 'r--', alpha=0.5, linewidth=0.5)
+            plt.plot([h[0] for h in history], [h[1] for h in history], 'r', alpha=0.5, linewidth=0.5)
 
 
         # Plot history of predictions from the perspective of agent 0.
