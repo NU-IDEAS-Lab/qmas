@@ -14,6 +14,8 @@ from enum import IntEnum
 from torch_geometric.utils.convert import from_networkx
 from torch_geometric.data import Data
 
+from toy_problem.env.entity import ENTITY_TYPE, Agent, Adversary
+
 
 def add_args(parser):
     ''' Adds environment arguments. '''
@@ -52,6 +54,7 @@ class parallel_env(ParallelEnv):
     def __init__(self,
                  num_agents = 3,
                  max_cycles: int = -1,
+                 world_size: float = 20.0,
                 ):
         """
         Initialize the environment.
@@ -60,9 +63,22 @@ class parallel_env(ParallelEnv):
 
         # Configuration.
         self.max_cycles = max_cycles
+        self.world_dims = np.array([world_size, world_size], dtype=np.float32)
+        num_adversaries = 1 #just 1 leader for now
 
-        # Create the agents.
-        self.possible_agents = list(range(num_agents))
+        # Set up entities.
+        self.possible_agents = [
+            Agent(
+                position=self.get_random_position(),
+                speed_max=2.0,
+            ) for i in range(num_agents)
+        ]
+        self.possible_adversaries = [
+            Adversary(
+                position=self.get_random_position(),
+                speed_max=1.0,
+            ) for i in range(num_adversaries)
+        ]
 
         # Create the action space.
         action_space = spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32)
@@ -90,20 +106,32 @@ class parallel_env(ParallelEnv):
 
         # Reset the agents.
         self.agents = copy(self.possible_agents)
-        self.agent_states = {agent: np.array([0.0, 0.0], dtype=np.float32) for agent in self.agents}
+        for agent in self.agents:
+            agent.reset(
+                reset_start_position=True,
+                position=self.get_random_position()
+            )
+        
+        # Reset the adversaries.
+        self.adversaries = copy(self.possible_adversaries)
+        for adversary in self.adversaries:
+            adversary.reset(
+                reset_start_position=True,
+                position=self.get_random_position(),
+            )
         
         # Reset other state.
         self.step_count = 0
         self.dones = dict.fromkeys(self.agents, False)
-        self.reference_state = np.array([0.0, 0.0], dtype=np.float32)
         
         # Initialize alpha (velocity) and save base value for variations
         self.alpha = np.array([random.random(), random.random()], dtype=np.float32)
         self.base_alpha = self.alpha.copy()  # Store the initial alpha for reference
         self.alpha_history = [self.alpha.copy()]
         
-        self.state_history = {agent: [np.array([0.0, 0.0], dtype=np.float32)] for agent in self.agents}
-        self.reference_state_history = [np.array([0.0, 0.0], dtype=np.float32)]
+        self.state_history = {
+            a: [np.array([0.0, 0.0], dtype=np.float32)] for a in self.agents + self.adversaries
+        }
 
         # Set available actions.
         self.available_actions_dict = {agent: self._getAvailableActions(agent) for agent in self.agents}
@@ -119,6 +147,16 @@ class parallel_env(ParallelEnv):
         return observation, info
 
 
+    def get_random_position(self):
+        ''' Returns a random position in the world. '''
+
+        # Just return [0,0] for now. Compatible with the existing trained policy.
+        # Remove when we are ready to train a new policy.
+        return np.array([0.0, 0.0], dtype=np.float32)
+
+        # return np.random.uniform(-self.world_dims / 2, self.world_dims / 2)
+
+
     def render(self, pred, figsize=(9, 6), history_length=2):
         ''' Renders the environment.
             
@@ -129,69 +167,117 @@ class parallel_env(ParallelEnv):
                 None
         '''
 
+
         # Plot as a line graph using matplotlib.
         plt.figure(figsize=figsize)
-        for agent in self.agents:
-            print("agent sate hist: ", self.state_history[agent])
-            x_hist = [point[0] for point in self.state_history[agent]]
-            y_hist = [point[1] for point in self.state_history[agent]]
-            plt.plot(x_hist, y_hist, label=f"Follower {agent} (Actual)", color="red", alpha=0.7)
-        
-        print("reference sate hist: ", self.reference_state_history)
-        x_ref = [point[0] for point in self.reference_state_history]
-        y_ref = [point[1] for point in self.reference_state_history]
-        plt.plot(x_ref, y_ref, label="Leader (Actual)", color="orange", alpha=0.7)
 
-        print("pred shape", pred.shape)
-        print("pred: ", pred)
-        print("pred[0]: ", pred[0])
+        # Set the axis limits.
+        plt.xlim(-self.world_dims[0] / 2, self.world_dims[0] / 2)
+        plt.ylim(-self.world_dims[1] / 2, self.world_dims[1] / 2)
+        plt.gca().set_aspect('equal', adjustable='box')
+        plt.axhline(0, color='black', lw=0.5)
+        plt.axvline(0, color='black', lw=0.5)
+        plt.title("2D Leader-Follower Environment")
+        plt.grid()
+        
+        # Plot the goal positions.
+        # for goal in self.goals:
+        #     if goal.state == GoalZone.GOAL_STATE.UNREACHED:
+        #         color = 'grey'
+        #     elif goal.state == GoalZone.GOAL_STATE.REACHED_AGENT:
+        #         color = 'green'
+        #     elif goal.state == GoalZone.GOAL_STATE.REACHED_ADVERSARY:
+        #         color = 'red'
+        #     label = f"Goal {goal.entity_id}"
+        #     marker = plt.Circle(goal.position, goal.radius, color=color, alpha=0.5, label=label)
+        #     plt.gca().add_artist(marker)
+        # positions = [g.position for g in self.goals]
+        # plt.plot([p[0] for p in positions], [p[1] for p in positions], 'go', label='Goals', markersize=self.goals[0].radius*10)
+
+        # Plot the agent positions.
+        positions = [a.position for a in self.possible_agents]
+        plt.plot([p[0] for p in positions], [p[1] for p in positions], 'bo', label='Agents')
+        for i, agent in enumerate(self.agents):
+            plt.annotate(f"{agent}", (positions[i][0] + 1, positions[i][1]), fontsize=8, color='blue')
+        
+        # Plot the adversary positions.
+        positions = [a.position for a in self.possible_adversaries]
+        plt.plot([p[0] for p in positions], [p[1] for p in positions], 'ro', label='Adversaries')
+        for i, adversary in enumerate(self.adversaries):
+            plt.annotate(f"{adversary}", (positions[i][0] + 1, positions[i][1]), fontsize=8, color='red')        
+
+        # Add legend outside the plot.
+        plt.legend(loc='upper left', bbox_to_anchor=(1, 1), fontsize=8)
+        plt.tight_layout()
+
+        # Show the plot.
+        plt.show()      
+
+
+
+        # Plot as a line graph using matplotlib.
+        # plt.figure(figsize=figsize)
+        # for agent in self.agents:
+        #     print("agent sate hist: ", self.state_history[agent])
+        #     x_hist = [point[0] for point in self.state_history[agent]]
+        #     y_hist = [point[1] for point in self.state_history[agent]]
+        #     plt.plot(x_hist, y_hist, label=f"Follower {agent} (Actual)", color="red", alpha=0.7)
+        
+        # print("reference sate hist: ", self.reference_state_history)
+        # x_ref = [point[0] for point in self.reference_state_history]
+        # y_ref = [point[1] for point in self.reference_state_history]
+        # plt.plot(x_ref, y_ref, label="Leader (Actual)", color="orange", alpha=0.7)
+
+        # print("pred shape", pred.shape)
+        # print("pred: ", pred)
+        # print("pred[0]: ", pred[0])
                 
-        colors = ["orange", "green", "red", "yellow", "blue", "purple", "black", "grey"]
-        labels = [f"Leader (Predicted)", "Leader Speed (Predicted)", f"Follower 0 (Predicted)"]
-        # Leader predicted
-        leader_x = []
-        leader_y = []
-        for i in range(len(pred)):
-            leader_x.append(pred[i][0])
-            leader_y.append(pred[i][1])
-        plt.plot(leader_x, leader_y, color = colors[0], alpha = 1.0, linestyle = "dashed", label = labels[0])
+        # colors = ["orange", "green", "red", "yellow", "blue", "purple", "black", "grey"]
+        # labels = [f"Leader (Predicted)", "Leader Speed (Predicted)", f"Follower 0 (Predicted)"]
+        # # Leader predicted
+        # leader_x = []
+        # leader_y = []
+        # for i in range(len(pred)):
+        #     leader_x.append(pred[i][0])
+        #     leader_y.append(pred[i][1])
+        # plt.plot(leader_x, leader_y, color = colors[0], alpha = 1.0, linestyle = "dashed", label = labels[0])
         
         
-        # Follower predicted
-        follower_x = []
-        follower_y = []
-        for i in range(len(pred)):
-            follower_x.append(pred[i][4])
-            follower_y.append(pred[i][5])
-        plt.plot(follower_x, follower_y, color = colors[2], alpha = 1.0, linestyle = "dashed", label = labels[2])
-        plt.xlabel("X position")
-        plt.ylabel("Y position")
-        plt.legend()
-        plt.show()
+        # # Follower predicted
+        # follower_x = []
+        # follower_y = []
+        # for i in range(len(pred)):
+        #     follower_x.append(pred[i][4])
+        #     follower_y.append(pred[i][5])
+        # plt.plot(follower_x, follower_y, color = colors[2], alpha = 1.0, linestyle = "dashed", label = labels[2])
+        # plt.xlabel("X position")
+        # plt.ylabel("Y position")
+        # plt.legend()
+        # plt.show()
 
 
-        # Plot Speed
-        plt.figure(figsize=figsize)
-        # Leader Speed predicted 
-        leader_vx = []
-        leader_vy = []
-        for i in range(len(pred)):
-            leader_vx.append(pred[i][2])
-            leader_vy.append(pred[i][3])
-        plt.plot(leader_vx, leader_vy, color = colors[1], alpha = 1.0, linestyle = "dashed", label = labels[1])
+        # # Plot Speed
+        # plt.figure(figsize=figsize)
+        # # Leader Speed predicted 
+        # leader_vx = []
+        # leader_vy = []
+        # for i in range(len(pred)):
+        #     leader_vx.append(pred[i][2])
+        #     leader_vy.append(pred[i][3])
+        # plt.plot(leader_vx, leader_vy, color = colors[1], alpha = 1.0, linestyle = "dashed", label = labels[1])
         
-        # Plot alpha history instead of just current alpha
-        alpha_x = [alpha[0] for alpha in self.alpha_history]
-        alpha_y = [alpha[1] for alpha in self.alpha_history]
-        plt.plot(alpha_x, alpha_y, color='g', alpha=0.7, label="Leader Speed (Actual)")
+        # # Plot alpha history instead of just current alpha
+        # alpha_x = [alpha[0] for alpha in self.alpha_history]
+        # alpha_y = [alpha[1] for alpha in self.alpha_history]
+        # plt.plot(alpha_x, alpha_y, color='g', alpha=0.7, label="Leader Speed (Actual)")
         
-        plt.xlabel("X Speed")
-        plt.ylabel("Y Speed")
-        plt.legend()
-        plt.show()
+        # plt.xlabel("X Speed")
+        # plt.ylabel("Y Speed")
+        # plt.legend()
+        # plt.show()
         
-        print(f"Leader Actual: {self.reference_state_history}")
-        print(f"Leader Predicted: {pred[:, 1]}")
+        # print(f"Leader Actual: {self.reference_state_history}")
+        # print(f"Leader Predicted: {pred[:, 1]}")
 
     
     def observation_space(self, agent):
@@ -251,7 +337,7 @@ class parallel_env(ParallelEnv):
     def _populateStateSpace(self, agent):
         ''' Returns a populated state/observation space.'''
 
-        obs = np.array([self.reference_state, self.alpha] + [self.agent_states[a] for a in self.possible_agents], dtype=np.float32)
+        obs = np.array([a.position for a in self.possible_adversaries] + [self.alpha] + [a.position for a in self.possible_agents], dtype=np.float32)
         obs = obs.flatten()
         return obs
     
@@ -308,28 +394,30 @@ class parallel_env(ParallelEnv):
                 action = action_dict[agent]
 
                 # Increment the agent state.                
-                self.agent_states[agent] += action
+                agent.position += action
 
-                self.state_history[agent].append(self.agent_states[agent])
+                self.state_history[agent].append(agent.position.copy())
 
         # Increment the reference state using the time-varying alpha
-        self.reference_state += self.alpha
-        self.reference_state_history.append(self.reference_state)
+        for adversary in self.adversaries:
+            adversary.position += self.alpha
+            self.state_history[adversary].append(adversary.position.copy())
 
         # Provide reward based on distance to reference state
+        meanAdversary = np.mean([a.position for a in self.adversaries], axis=0)
         for agent in self.agents:
-            distance = np.linalg.norm(self.agent_states[agent] - self.reference_state)
+            distance = np.linalg.norm(agent.position - meanAdversary)
             reward_dict[agent] = -distance
 
         # Perform observations.
         for agent in self.possible_agents:
             agent_observation = self.observe(agent)
             obs_dict[agent] = agent_observation
-            info_dict[f"distance/{agent}"] = np.linalg.norm(self.agent_states[agent] - self.reference_state)
-            info_dict[f"position/{agent}"] = self.agent_states[agent].tolist()
+            info_dict[f"distance/{agent}"] = np.linalg.norm(agent.position - meanAdversary)
+            info_dict[f"position/{agent}"] = agent.position.tolist()
         
         # Record miscellaneous information.
-        info_dict["reference_position"] = self.reference_state.tolist()
+        info_dict["reference_position"] = meanAdversary.tolist()
         info_dict["reference_velocity"] = self.alpha.tolist()
 
         # Check truncation conditions.
