@@ -69,15 +69,6 @@ class parallel_env(ParallelEnv):
         self.action_spaces = spaces.Dict({agent: action_space for agent in self.possible_agents}) # type: ignore
         
         # Create the observation space.
-        # obs_space_dict = {
-        #     "reference": spaces.Box(low=0, high=np.inf, shape=(1,), dtype=np.float32),
-        #     "reference_velocity": spaces.Box(low=0, high=np.inf, shape=(1,), dtype=np.float32),
-        #     "agent_states": spaces.Dict({
-        #         a: spaces.Box(low=0, high=np.inf, shape=(1,), dtype=np.float32) for a in self.possible_agents
-        #     })
-        # }
-        # obs_space_dict_sorted = {k: obs_space_dict[k] for k in sorted(obs_space_dict.keys())}
-        # obs_space = spaces.Dict(obs_space_dict_sorted)
         obs_space = spaces.Box(low=-np.inf, high=np.inf, shape=(4 + num_agents*2, ), dtype=np.float32)
         self.observation_spaces = spaces.Dict({agent: obs_space for agent in self.possible_agents}) # type: ignore
 
@@ -105,7 +96,12 @@ class parallel_env(ParallelEnv):
         self.step_count = 0
         self.dones = dict.fromkeys(self.agents, False)
         self.reference_state = np.array([0.0, 0.0], dtype=np.float32)
+        
+        # Initialize alpha (velocity) and save base value for variations
         self.alpha = np.array([random.random(), random.random()], dtype=np.float32)
+        self.base_alpha = self.alpha.copy()  # Store the initial alpha for reference
+        self.alpha_history = [self.alpha.copy()]
+        
         self.state_history = {agent: [np.array([0.0, 0.0], dtype=np.float32)] for agent in self.agents}
         self.reference_state_history = [np.array([0.0, 0.0], dtype=np.float32)]
 
@@ -149,29 +145,10 @@ class parallel_env(ParallelEnv):
         print("pred shape", pred.shape)
         print("pred: ", pred)
         print("pred[0]: ", pred[0])
-        # raise Exception("done 1")
-        print(pred[-1])
-        # Plot predictions.     
-        # if (len(pred[-1]) != 0):
-        #     colors = ["orange", "green", "red", "yellow", "blue", "purple", "black", "grey"]
-        #     labels = [f"Leader (Predicted)", "Leader Speed (Predicted)", f"Follower 0 (Predicted)"]
-        #     for i in range(0, int(len(pred[-1])/2)):
-        #         if labels[i] == None:
-        #             continue
-                
-        #         print("pred x: ", pred[:, i*2])
-        #         print("pred y: ", pred[:, i*2 + 1])
-                
-        #         plt.plot(pred[-1][i * 2], 
-        #                  pred[-1][i * 2 + 1],
-        #                 color=colors[i],
-        #                 alpha=1.0,
-        #                 linestyle="dashed",
-        #                 label=labels[i])
                 
         colors = ["orange", "green", "red", "yellow", "blue", "purple", "black", "grey"]
         labels = [f"Leader (Predicted)", "Leader Speed (Predicted)", f"Follower 0 (Predicted)"]
-        # Leader prediected
+        # Leader predicted
         leader_x = []
         leader_y = []
         for i in range(len(pred)):
@@ -184,8 +161,8 @@ class parallel_env(ParallelEnv):
         follower_x = []
         follower_y = []
         for i in range(len(pred)):
-            follower_x.append(pred[i][0])
-            follower_y.append(pred[i][1])
+            follower_x.append(pred[i][4])
+            follower_y.append(pred[i][5])
         plt.plot(follower_x, follower_y, color = colors[2], alpha = 1.0, linestyle = "dashed", label = labels[2])
         plt.xlabel("X position")
         plt.ylabel("Y position")
@@ -199,16 +176,17 @@ class parallel_env(ParallelEnv):
         leader_vx = []
         leader_vy = []
         for i in range(len(pred)):
-            leader_x.append(pred[i][2])
-            leader_y.append(pred[i][3])
+            leader_vx.append(pred[i][2])
+            leader_vy.append(pred[i][3])
         plt.plot(leader_vx, leader_vy, color = colors[1], alpha = 1.0, linestyle = "dashed", label = labels[1])
         
-        # Plot alpha
-        print("alpha: ", self.alpha)
-        plt.plot([0, self.alpha[0]], [0, self.alpha[1]], color='g', alpha=0.7, label="Leader Speed (Actual)")
+        # Plot alpha history instead of just current alpha
+        alpha_x = [alpha[0] for alpha in self.alpha_history]
+        alpha_y = [alpha[1] for alpha in self.alpha_history]
+        plt.plot(alpha_x, alpha_y, color='g', alpha=0.7, label="Leader Speed (Actual)")
         
-        plt.xlabel("X position")
-        plt.ylabel("Y position")
+        plt.xlabel("X Speed")
+        plt.ylabel("Y Speed")
         plt.legend()
         plt.show()
         
@@ -276,20 +254,27 @@ class parallel_env(ParallelEnv):
         obs = np.array([self.reference_state, self.alpha] + [self.agent_states[a] for a in self.possible_agents], dtype=np.float32)
         obs = obs.flatten()
         return obs
-
-        # Reference state.
-        obs["reference"] = self.reference_state
-        obs["reference_velocity"] = self.alpha
-
-        # Agent states.
-        obs["agent_states"] = self.agent_states
-        
-        # Ensure the order of the keys is consistent.
-        obs_sorted = {k: obs[k] for k in sorted(obs.keys())}
-
-        return obs_sorted
     
-
+    def _update_alpha(self):
+        """
+        Update alpha based on the step count to create a more complex pattern.
+        This function creates a time-varying alpha that follows different patterns.
+        """
+        # Base frequency for oscillation
+        freq = 0.1
+        angle = freq * self.step_count
+        
+        # Create a more interesting pattern with multiple frequencies
+        self.alpha[0] = self.base_alpha[0] * (math.sin(angle) + 0.5 * math.sin(2.5 * angle))
+        self.alpha[1] = self.base_alpha[1] * (math.cos(angle) + 0.5 * math.cos(3.0 * angle))
+        
+        # Add some random noise to make the trajectory more natural
+        noise_magnitude = 0.05 * min(1.0, self.step_count / 50.0)  # Gradually increase noise
+        self.alpha += np.random.normal(0, noise_magnitude, size=2)
+        
+        # Record alpha history
+        self.alpha_history.append(self.alpha.copy())
+        
     def step(self, action_dict={}, lastStep=False):
         ''''
         Perform a step in the environment based on the given action dictionary.
@@ -304,6 +289,10 @@ class parallel_env(ParallelEnv):
             info_dict (dict): A dictionary containing additional information for each agent.
         '''
         self.step_count += 1
+        
+        # Update alpha with time-varying pattern
+        self._update_alpha()
+        
         obs_dict = {}
         reward_dict = {agent: 0.0 for agent in self.possible_agents}
         truncated_dict = {agent: False for agent in self.possible_agents}
@@ -318,27 +307,19 @@ class parallel_env(ParallelEnv):
             if agent in action_dict:
                 action = action_dict[agent]
 
-                # Check if the action is valid.
-                # if not self.action_space(agent).contains([action]):
-                #     raise ValueError(f"Invalid action {action} of type {type(action)} provided.")
-
                 # Increment the agent state.                
                 self.agent_states[agent] += action
 
                 self.state_history[agent].append(self.agent_states[agent])
 
-        # Increment the reference state.
+        # Increment the reference state using the time-varying alpha
         self.reference_state += self.alpha
         self.reference_state_history.append(self.reference_state)
 
-        # Provide reward.
+        # Provide reward based on distance to reference state
         for agent in self.agents:
-            # reward_dict[agent] = -abs(action_dict[agent] - self.alpha)
-            # reward_dict[agent] = -abs(self.agent_states[agent] - self.reference_state)
-            
             distance = np.linalg.norm(self.agent_states[agent] - self.reference_state)
             reward_dict[agent] = -distance
-            # reward_dict[agent] = -np.log(abs(self.agent_states[agent] - self.reference_state))
 
         # Perform observations.
         for agent in self.possible_agents:
@@ -350,11 +331,6 @@ class parallel_env(ParallelEnv):
         # Record miscellaneous information.
         info_dict["reference_position"] = self.reference_state.tolist()
         info_dict["reference_velocity"] = self.alpha.tolist()
-        # info_dict["agent_count"] = len(self.agents)
-        # info_dict["avg_distance"] = np.mean([abs(self.agent_states[agent] - self.reference_state) for agent in self.agents])
-        # for agent in self.agents:
-        #     info_dict[f"x/{agent}"] = self.agent_states[agent]
-        # info_dict["x/reference"] = self.reference_state
 
         # Check truncation conditions.
         if lastStep or (self.max_cycles >= 0 and self.step_count >= self.max_cycles):
