@@ -323,7 +323,7 @@ class PettingzooRunner(Runner):
         render_goals = np.zeros(self.all_args.render_episodes)
         
         # eval trajectory
-        HISTORY_LENGTH = 2
+        HISTORY_LENGTH = 8
         obs_traj = deque(maxlen=HISTORY_LENGTH)
         pred = []
         pred_history = []
@@ -375,30 +375,18 @@ class PettingzooRunner(Runner):
                     
                     share_obs_tensor = torch.cat(list(obs_traj))
                     
-                    condition = {i: share_obs_tensor[i] for i in range(len(share_obs_tensor))}
+                    condition = {}
+                    for i in range(len(share_obs_tensor)):
+                        if np.random.rand() > 0.8 or i == 0:
+                            # We must have the t=0 condition.
+                            condition[i] = share_obs_tensor[i]
                     # condition = {0: share_obs_tensor[0], 1: share_obs_tensor[1]}
+                    # condition = {i: share_obs_tensor[i] for i in range(len(share_obs_tensor) // 2)}
                     
                     # pred = self.trainer.policy.diffuser(condition).trajectories[0, :, self.trainer.policy.diffuser.action_dim:]
 
                     pred_actions, pred_trajectories = self.trainer.policy.diffuser_policy(condition)
                     pred = pred_trajectories.observations[0]
-
-                    # horizon = len(pred)
-                    # print("pred: ", pred)
-                    # print("horizon: ", horizon)
-                    # print("denoising step: ", pred.shape[0])
-                    # print("first: ", pred[:,-1])
-                    # colors = ["red", "orange", "yellow", "green", "blue", "purple", "black", "grey"]
-                    # labels = ["agent state", None, "reference state", None]
-                    # for i in range(0, pred.shape[1]):
-                    #     if labels[i] == None:
-                    #         continue
-                    #     plt.scatter(np.linspace(0, 1, horizon), pred[:, i], 
-                    #             color=colors[i - 1],
-                    #             label=labels[i])
-                    # plt.legend()
-                    # plt.show()
-                    # pred_history.append(pred)
                 
                 if not np.all(dones):
                     if ipython_clear_output:
