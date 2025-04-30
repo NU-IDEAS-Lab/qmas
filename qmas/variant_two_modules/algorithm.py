@@ -148,8 +148,9 @@ class QmasAlgorithm(R_MAPPO):
         
         # Set up conditions based on the shared observations.
         # cond = {i: share_obs_batch[:, i] for i in range(share_obs_batch.shape[1])} # condition based on the entire trajectory
-        cond = {i: share_obs_batch[:, i] for i in range(2)} # condition based on only the first two points
+        # cond = {i: share_obs_batch[:, i] for i in range(2)} # condition based on only the first two points
         # cond = {i: share_obs_batch[:, i] for i in range(1)} # condition based on only the first point
+        cond = {i: share_obs_batch[:, i] for i in range(share_obs_batch.shape[1] // 2)} # condition based on half of the trajectory
 
         # Build trajectories.
         trajectories = torch.cat([actions_batch, share_obs_batch], dim=-1)
