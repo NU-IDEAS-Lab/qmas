@@ -88,10 +88,10 @@ class parallel_env(ParallelEnv):
             "adversaries": spaces.Dict({
                 adversary: spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32) for adversary in self.possible_adversaries
             }),
-            "alpha": spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32),
             "agents": spaces.Dict({
                 agent: spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32) for agent in self.possible_agents
             }),
+            "alpha": spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32),
         })
         self.observation_spaces = spaces.Dict({agent: obs_space for agent in self.possible_agents}) # type: ignore
 
@@ -315,8 +315,8 @@ class parallel_env(ParallelEnv):
 
         obs = {
             "adversaries": {a: a.position for a in self.possible_adversaries},
-            "alpha": self.alpha,
             "agents": {a: a.position for a in self.possible_agents},
+            "alpha": self.alpha,
         }
 
         return obs
