@@ -152,6 +152,13 @@ class QmasAlgorithm(R_MAPPO):
         # cond = {i: share_obs_batch[:, i] for i in range(1)} # condition based on only the first point
         cond = {i: share_obs_batch[:, i] for i in range(share_obs_batch.shape[1] // 2)} # condition based on half of the trajectory
 
+        # Condition randomly.
+        condition = {}
+        for i in range(share_obs_batch.shape[1]):
+            # We must have the t=0 condition.
+            if np.random.rand() > 0.5 or i == 0:
+                condition[i] = share_obs_batch[:, i]
+
         # Build trajectories.
         trajectories = torch.cat([actions_batch, share_obs_batch], dim=-1)
 
