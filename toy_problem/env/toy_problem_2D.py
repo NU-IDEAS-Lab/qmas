@@ -174,7 +174,6 @@ class parallel_env(ParallelEnv):
                 None
         '''
 
-
         # Convert the predicted state back into a dictionary (unflatten).
         pred_unflattened = []
         pred_steps = len(pred)
@@ -186,8 +185,10 @@ class parallel_env(ParallelEnv):
         plt.figure(figsize=figsize)
 
         # Set the axis limits.
-        plt.xlim(-self.world_dims[0] / 2, self.world_dims[0] / 2)
-        plt.ylim(-self.world_dims[1] / 2, self.world_dims[1] / 2)
+        # plt.xlim(-self.world_dims[0] / 2, self.world_dims[0] / 2)
+        # plt.ylim(-self.world_dims[1] / 2, self.world_dims[1] / 2)
+        plt.xlim(0, self.world_dims[0])
+        plt.ylim(0, self.world_dims[1])
         plt.gca().set_aspect('equal', adjustable='box')
         plt.axhline(0, color='black', lw=0.5)
         plt.axvline(0, color='black', lw=0.5)
