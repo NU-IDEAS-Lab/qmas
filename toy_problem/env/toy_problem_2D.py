@@ -187,8 +187,10 @@ class parallel_env(ParallelEnv):
         # Set the axis limits.
         # plt.xlim(-self.world_dims[0] / 2, self.world_dims[0] / 2)
         # plt.ylim(-self.world_dims[1] / 2, self.world_dims[1] / 2)
-        plt.xlim(0, self.world_dims[0])
-        plt.ylim(0, self.world_dims[1])
+        # plt.xlim(0, self.world_dims[0])
+        # plt.ylim(0, self.world_dims[1])
+        plt.xlim(-self.world_dims[0], self.world_dims[0])
+        plt.ylim(-self.world_dims[1], self.world_dims[1])
         plt.gca().set_aspect('equal', adjustable='box')
         plt.axhline(0, color='black', lw=0.5)
         plt.axvline(0, color='black', lw=0.5)
