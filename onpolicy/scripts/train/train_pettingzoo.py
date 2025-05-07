@@ -11,6 +11,7 @@ import numpy as np
 import setproctitle
 import torch
 import wandb
+import random
 
 # code repository sub-packages
 from onpolicy.config import get_config
@@ -242,6 +243,7 @@ def main(args):
                             dir=str(run_dir),
                             job_type="training",
                             reinit=True)
+        run_dir = Path(wandb.run.dir)
     else:
         if not run_dir.exists():
             curr_run = 'run1'
@@ -254,6 +256,8 @@ def main(args):
         run_dir = run_dir / curr_run
         if not run_dir.exists():
             os.makedirs(str(run_dir))
+    
+    print(f"run_dir: {run_dir}")
 
     setproctitle.setproctitle("-".join([
         all_args.project_name, 
@@ -266,6 +270,7 @@ def main(args):
     torch.manual_seed(all_args.seed)
     torch.cuda.manual_seed_all(all_args.seed)
     np.random.seed(all_args.seed)
+    random.seed(all_args.seed)
 
     # env init
     envs = make_train_env(all_args)
@@ -293,12 +298,15 @@ def main(args):
         runner.run()
     except KeyboardInterrupt:
         wandb.finish(exit_code=1)
-        print("wandb due to keyboard interrupt")
+        print("exit due to keyboard interrupt")
 
     # post process
     envs.close()
     if all_args.use_eval and eval_envs is not envs:
         eval_envs.close()
+
+    # Save the models.
+    runner.save()
 
     if all_args.use_wandb:
         run.finish()
