@@ -376,6 +376,11 @@ class PettingzooRunner(Runner):
                     pred_actions, pred_trajectories = self.trainer.policy.diffuser_policy(condition)
                     pred = pred_trajectories.observations[0]
 
+                    # Pred is the series of denoised predictions over the denoising steps.
+                    # Pred[0] is then the most accurate prediction.
+                    # We currently only use the last timestep of that prediction.
+
+                    
                     state_pred = pred[-1:]
                 else:
                     state_pred = np.concatenate(obs)
