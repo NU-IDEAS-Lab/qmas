@@ -505,7 +505,10 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
         active_masks_batch = sample["active_masks"].reshape(*index_shape, 1)
         old_action_log_probs_batch = sample["action_log_probs"].reshape(*index_shape, sample["action_log_probs"].shape[-1])
         adv_targ = sample["advantages"].reshape(*index_shape, 1)
-        available_actions_batch = sample["available_actions"].reshape(*index_shape, sample["available_actions"].shape[-1])
+        if np.any(sample["available_actions"] == None):
+            available_actions_batch = None
+        else:
+            available_actions_batch = sample["available_actions"].reshape(*index_shape, sample["available_actions"].shape[-1])
 
         return share_obs_batch, obs_batch, rnn_states_batch, rnn_states_critic_batch, actions_batch, \
         value_preds_batch, return_batch, masks_batch, active_masks_batch, old_action_log_probs_batch, \
@@ -529,7 +532,10 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
         rnn_states_actor = np.concatenate(sample["rnn_states_actor"].numpy())
         rnn_states_critic = np.concatenate(sample["rnn_states_critic"].numpy())
         masks = np.concatenate(sample["masks"].numpy())
-        available_actions = np.concatenate(sample["available_actions"].numpy())
+        if np.any(sample["available_actions"] == None):
+            available_actions = None
+        else:
+            available_actions = np.concatenate(sample["available_actions"].numpy())
 
         return share_obs, obs, rnn_states_actor, rnn_states_critic, masks, available_actions
 
