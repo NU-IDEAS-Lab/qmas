@@ -728,9 +728,9 @@ class parallel_env(ParallelEnv):
         if observe_method in ["adjacency"]:
             # Create adjacency matrix.
             adjacency = -1.0 * np.ones((self.pg.graph.number_of_nodes(), self.pg.graph.number_of_nodes()), dtype=np.float32)
+            maxWeight = max([self.pg.graph.edges[e]["weight"] for e in self.pg.graph.edges])
+            minWeight = min([self.pg.graph.edges[e]["weight"] for e in self.pg.graph.edges])
             for edge in self.pg.graph.edges:
-                maxWeight = max([self.pg.graph.edges[e]["weight"] for e in self.pg.graph.edges])
-                minWeight = min([self.pg.graph.edges[e]["weight"] for e in self.pg.graph.edges])
                 weight = self._minMaxNormalize(self.pg.graph.edges[edge]["weight"], minimum=minWeight, maximum=maxWeight)
                 adjacency[edge[0], edge[1]] = weight
                 adjacency[edge[1], edge[0]] = weight
