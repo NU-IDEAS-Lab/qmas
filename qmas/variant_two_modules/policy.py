@@ -4,13 +4,19 @@ from onpolicy.algorithms.r_mappo.rMAPPOPolicy import R_MAPPOPolicy
 from .actor_critic import QmasActor, QmasCritic
 
 from onpolicy.utils.util import get_shape_from_obs_space, get_shape_from_act_space
-from onpolicy.models.diffusion.diffusion import GaussianDiffusion
-from onpolicy.models.diffusion.diffusion import ValueDiffusion
-from onpolicy.models.diffusion.temporal import TemporalUnet, ValueFunction
+# from onpolicy.models.diffusion.diffusion import GaussianDiffusion
+# from onpolicy.models.diffusion.diffusion import ValueDiffusion
+# from onpolicy.models.diffusion.temporal import TemporalUnet, ValueFunction
 
 from onpolicy.models.diffusion.sampling.policies import GuidedPolicy
 from onpolicy.models.diffusion.sampling.guides import ValueGuide
 from onpolicy.models.diffusion.sampling.functions import n_step_guided_p_sample
+
+
+from cleandiffuser.diffusion import ContinuousDiffusionSDE
+from cleandiffuser.classifier import OptimalityClassifier
+from cleandiffuser.nn_classifier import HalfDiT1d
+from cleandiffuser.nn_diffusion import DiT1d
 
 
 class QmasPolicy(R_MAPPOPolicy):
@@ -46,39 +52,69 @@ class QmasPolicy(R_MAPPOPolicy):
 
         # TODO: Need to get this null_value from the environment metadata.
         self.null_value = -1.0
+
+        self.prediction_horizon = args.diffusion_horizon
+
+        fix_mask = torch.zeros((self.prediction_horizon, transition_dim))
+        fix_mask[0, :share_obs_dim] = 1.
+        loss_weight = torch.ones((self.prediction_horizon, transition_dim))
+        loss_weight[0, share_obs_dim:] = 10.0
         
         # Create Diffuser model.
-        self.prediction_horizon = args.diffusion_horizon
-        diffuser_base = TemporalUnet(
-            horizon=self.prediction_horizon,
-            transition_dim=transition_dim,
-            cond_dim=0, #TODO: What is the correct value?
-            dim=32,
-            dim_mults=(8, 4, 2, 1),
-        ).to(device)
-        self.diffuser = GaussianDiffusion(
-            diffuser_base, horizon = self.prediction_horizon, observation_dim = share_obs_dim, 
-            action_dim = action_dim , n_timesteps=args.diffusion_steps, loss_type='l2', 
-            clip_denoised=False, predict_epsilon=False,
-            action_weight=10, loss_discount=1.0, loss_weights=None
-        ).to(device)
+        # diffuser_base = TemporalUnet(
+        #     horizon=self.prediction_horizon,
+        #     transition_dim=transition_dim,
+        #     cond_dim=0, #TODO: What is the correct value?
+        #     dim=32,
+        #     dim_mults=(8, 4, 2, 1),
+        # ).to(device)
+        diffuser_base = DiT1d(
+            x_dim=transition_dim,
+            x_seq_len=self.prediction_horizon,
+            emb_dim=128,
+            d_model=256,
+            n_heads=8,
+            depth=4,
+            timestep_emb_type="untrainable_fourier",
+            timestep_emb_params={"scale": 0.02},
+        )
+        # self.diffuser = GaussianDiffusion(
+        #     diffuser_base, horizon = self.prediction_horizon, observation_dim = share_obs_dim, 
+        #     action_dim = action_dim , n_timesteps=args.diffusion_steps, loss_type='l2', 
+        #     clip_denoised=False, predict_epsilon=False,
+        #     action_weight=10, loss_discount=1.0, loss_weights=None
+        # ).to(device)
         
         # Create Guide model.
-        guide_base = ValueFunction(
-            horizon = self.prediction_horizon,
-            transition_dim = transition_dim,
-            cond_dim=0, #TODO: What is the correct value?
-            dim=32,
-            dim_mults=(1, 2, 4, 8),
-            # dim_mults=(8, 4, 2, 1),
-            out_dim=1
-        ).to(device)
-        self.guide = ValueDiffusion(
-            guide_base, horizon = self.prediction_horizon, observation_dim = share_obs_dim, 
-            action_dim = action_dim , n_timesteps=args.diffusion_steps, loss_type='value_l2', 
-            clip_denoised=False, predict_epsilon=True, action_weight=1.0, 
-            loss_discount=1.0, loss_weights=None
-        ).to(device)
+        # guide_base = ValueFunction(
+        #     horizon = self.prediction_horizon,
+        #     transition_dim = transition_dim,
+        #     cond_dim=0, #TODO: What is the correct value?
+        #     dim=32,
+        #     dim_mults=(1, 2, 4, 8),
+        #     # dim_mults=(8, 4, 2, 1),
+        #     out_dim=1
+        # ).to(device)
+        guide_base = HalfDiT1d(
+            x_dim=transition_dim,
+            out_dim=1,
+            x_seq_len=self.prediction_horizon,
+            emb_dim=128,
+            d_model=256,
+            n_heads=8,
+            depth=4,
+            timestep_emb_type="untrainable_fourier",
+            timestep_emb_params={"scale": 0.02},
+        )
+        # self.guide = ValueDiffusion(
+        #     guide_base, horizon = self.prediction_horizon, observation_dim = share_obs_dim, 
+        #     action_dim = action_dim , n_timesteps=args.diffusion_steps, loss_type='value_l2', 
+        #     clip_denoised=False, predict_epsilon=True, action_weight=1.0, 
+        #     loss_discount=1.0, loss_weights=None
+        # ).to(device)
+        self.guide = OptimalityClassifier(guide_base).to(device)
+
+        self.diffuser = ContinuousDiffusionSDE(diffuser_base, None, fix_mask, loss_weight, classifier=self.guide).to(device)
         
         self.diffuser_optimizer = torch.optim.Adam(self.diffuser.parameters(), lr=2e-4)
         self.guide_optimizer = torch.optim.Adam(self.guide.parameters(), lr=2e-4)

@@ -51,7 +51,8 @@ class QmasAlgorithm(R_MAPPO):
             
             # Accumulate gradients.
             for _ in range(gradient_accumulate_every):
-                loss, info = diffusion_model.loss(*loss_args, conditioning_fn=self.conditioning_fn)
+                loss, info = diffusion_model.loss(*loss_args)
+                # loss, info = diffusion_model.loss(*loss_args, conditioning_fn=self.conditioning_fn)
                 loss = loss / gradient_accumulate_every
 
                 loss.backward()
