@@ -147,9 +147,17 @@ class QmasAlgorithm(R_MAPPO):
         returns_batch = torch.sum(rewards_batch * discounts, dim=1).reshape((-1, 1))
         
         # Set up conditions based on the shared observations.
-        # cond = {i: share_obs_batch[:, i] for i in range(share_obs_batch.shape[1])} # condition based on the entire trajectory
-        cond = {i: share_obs_batch[:, i] for i in range(2)} # condition based on only the first two points
-        # cond = {i: share_obs_batch[:, i] for i in range(1)} # condition based on only the first point
+        # conditions = {i: share_obs_batch[:, i] for i in range(share_obs_batch.shape[1])} # condition based on the entire trajectory
+        # conditions = {i: share_obs_batch[:, i] for i in range(2)} # condition based on only the first two points
+        # conditions = {i: share_obs_batch[:, i] for i in range(1)} # condition based on only the first point
+        # conditions = {i: share_obs_batch[:, i] for i in range(share_obs_batch.shape[1] // 2)} # condition based on half of the trajectory
+
+        # Condition randomly.
+        conditions = {}
+        for i in range(share_obs_batch.shape[1]):
+            # We must have the t=0 condition.
+            if np.random.rand() > 0.5 or i == 0:
+                conditions[i] = share_obs_batch[:, i]
 
         # Build trajectories.
         trajectories = torch.cat([actions_batch, share_obs_batch], dim=-1)
@@ -158,7 +166,7 @@ class QmasAlgorithm(R_MAPPO):
         diffuser_loss, diffuser_grad_norm, diffuser_info = self.diffusion_update(
             self.policy.diffuser,
             self.policy.diffuser_optimizer,
-            (trajectories, cond),
+            (trajectories, conditions),
             update_model=True
         )
 
@@ -166,7 +174,7 @@ class QmasAlgorithm(R_MAPPO):
         guide_loss, guide_grad_norm, guide_info = self.diffusion_update(
             self.policy.guide,
             self.policy.guide_optimizer,
-            (trajectories, cond, returns_batch),
+            (trajectories, conditions, returns_batch),
             update_model=True
         )
 

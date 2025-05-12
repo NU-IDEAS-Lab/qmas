@@ -325,11 +325,10 @@ class PettingzooRunner(Runner):
         # eval trajectory
         HISTORY_LENGTH = self.all_args.diffusion_horizon
         obs_traj = deque(maxlen=HISTORY_LENGTH)
-        pred = []
-        pred_history = []
         
         for i_episode in range(self.all_args.render_episodes):
             obs_traj.clear()
+            pred = []
 
             # Reset the environment and get the initial observations.
             obs, share_obs, available_actions = render_env.reset()
@@ -351,10 +350,43 @@ class PettingzooRunner(Runner):
                 if np.any(aa == None):
                     aa = None
 
+                # evaluate the traj on the rendenered diffuser
+                # how to make 2 traj into one model 
+                if len(obs_traj) == HISTORY_LENGTH: # and render_env.envs[0].env.step_count == HISTORY_LENGTH - 1:
+                    
+                    share_obs_tensor = torch.cat(list(obs_traj))
+                    
+                    # Condition randomly.
+                    condition = {}
+                    for i in range(len(share_obs_tensor)):
+                        if np.random.rand() > 0.8 or i == 0:
+                            # We must have the t=0 condition.
+                            condition[i] = share_obs_tensor[i]
+                    
 
-                # TODO: Need to act on the prediction of the diffusion model.
+                    # Other conditioning methods.
+                    # condition = {0: share_obs_tensor[0], len(obs_traj)-1: share_obs_tensor[len(obs_traj)-1], 3: share_obs_tensor[3]}
+                    # condition = {0: share_obs_tensor[0], 1: share_obs_tensor[1]}
+                    # condition = {i: share_obs_tensor[i] for i in range(4)}
+                    # condition = {i: share_obs_tensor[i] for i in range(len(share_obs_tensor))}
+                    # condition = {i: share_obs_tensor[i] for i in range(len(share_obs_tensor) - 4)}
+                    
+                    # pred = self.trainer.policy.diffuser(condition).trajectories[0, :, self.trainer.policy.diffuser.action_dim:]
+
+                    pred_actions, pred_trajectories = self.trainer.policy.diffuser_policy(condition)
+                    pred = pred_trajectories.observations[0]
+
+                    # Pred is the series of denoised predictions over the denoising steps.
+                    # Pred[0] is then the most accurate prediction.
+                    # We currently only use the last timestep of that prediction.
+
+                    
+                    state_pred = pred[-1:]
+                else:
+                    state_pred = np.concatenate(obs)
+
                 actions, rnn_states = self.trainer.policy.act(
-                    np.concatenate(obs),
+                    state_pred,
                     np.concatenate(rnn_states),
                     np.concatenate(masks),
                     deterministic=True,
@@ -365,43 +397,12 @@ class PettingzooRunner(Runner):
                 actions = np.array(np.split(_t2n(actions), self.n_render_rollout_threads))
                 rnn_states = np.array(np.split(_t2n(rnn_states), self.n_render_rollout_threads))
 
-                actions_env = [actions[idx, :, 0] for idx in range(self.n_render_rollout_threads)]
+                actions_env = [actions[idx, :, :] for idx in range(self.n_render_rollout_threads)]
 
                 # Take a step in the environment and get the results.
                 obs, share_obs, render_rewards, dones, infos, available_actions = render_env.step(actions_env)
                 obs_traj.append(torch.from_numpy(share_obs[0]))
-                
-                # evaluate the traj on the rendenered diffuser
-                # how to make 2 traj into one model 
-                if len(obs_traj) == HISTORY_LENGTH and render_env.envs[0].env.step_count == HISTORY_LENGTH - 1:
-                    
-                    share_obs_tensor = torch.cat(list(obs_traj))
-                    
-                    condition = {i: share_obs_tensor[i] for i in range(len(share_obs_tensor))}
-                    # condition = {0: share_obs_tensor[0], 1: share_obs_tensor[1]}
-                    
-                    # pred = self.trainer.policy.diffuser(condition).trajectories[0, :, self.trainer.policy.diffuser.action_dim:]
-
-                    pred_actions, pred_trajectories = self.trainer.policy.diffuser_policy(condition)
-                    pred = pred_trajectories.observations[0]
-
-                    horizon = len(pred)
-                    print("pred: ", pred)
-                    print("horizon: ", horizon)
-                    # print("denoising step: ", pred.shape[0])
-                    # print("first: ", pred[:,-1])
-                    # colors = ["red", "orange", "yellow", "green", "blue", "purple", "black", "grey"]
-                    # labels = ["agent state", None, "reference state", None]
-                    # for i in range(0, pred.shape[1]):
-                    #     if labels[i] == None:
-                    #         continue
-                    #     plt.scatter(np.linspace(0, 1, horizon), pred[:, i], 
-                    #             color=colors[i - 1],
-                    #             label=labels[i])
-                    # plt.legend()
-                    # plt.show()
-                    # pred_history.append(pred)
-                
+                                
                 if not np.all(dones):
                     if ipython_clear_output:
                         clear_output(wait = True)
