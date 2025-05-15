@@ -12,7 +12,7 @@ from tqdm.auto import tqdm
 from collections import deque
 import matplotlib.pyplot as plt
 
-from onpolicy.utils.util import update_linear_schedule, get_shape_from_act_space
+from onpolicy.utils.util import update_linear_schedule, get_shape_from_act_space, get_shape_from_obs_space
 from onpolicy.runner.shared.base_runner import Runner
 
 from onpolicy.utils.shared_buffer_torchrl import SharedReplayBuffer
@@ -322,12 +322,17 @@ class PettingzooRunner(Runner):
         # init goal
         render_goals = np.zeros(self.all_args.render_episodes)
         
+        # Get shape of observation space.
+        obs_shape = get_shape_from_obs_space(self.buffer.obs_space)
+
         # eval trajectory
         HISTORY_LENGTH = self.all_args.diffusion_horizon
-        obs_traj = deque(maxlen=HISTORY_LENGTH)
+        obs_traj = [deque(maxlen=HISTORY_LENGTH) for _ in range(self.num_agents)]
+        state_pred = torch.zeros((self.num_agents, *obs_shape), dtype=torch.float32)
         
         for i_episode in range(self.all_args.render_episodes):
-            obs_traj.clear()
+            for i in range(self.num_agents):
+                obs_traj[i].clear()
             pred = []
 
             # Reset the environment and get the initial observations.
@@ -335,7 +340,9 @@ class PettingzooRunner(Runner):
             rnn_states = np.zeros((self.n_render_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=np.float32)
             masks = np.ones((self.n_render_rollout_threads, self.num_agents, 1), dtype=np.float32)
 
-            obs_traj.append(torch.from_numpy(share_obs[0]))
+            # obs_traj.append(torch.from_numpy(share_obs[0]))
+            for i in range(self.num_agents):
+                obs_traj[i].append(torch.from_numpy(obs[0][i]))
 
             if self.all_args.save_gifs:        
                 frames = []
@@ -350,40 +357,41 @@ class PettingzooRunner(Runner):
                 if np.any(aa == None):
                     aa = None
 
-                # evaluate the traj on the rendenered diffuser
-                # how to make 2 traj into one model 
-                if len(obs_traj) == HISTORY_LENGTH: # and render_env.envs[0].env.step_count == HISTORY_LENGTH - 1:
-                    
-                    share_obs_tensor = torch.cat(list(obs_traj))
-                    
-                    # Condition randomly.
-                    condition = {}
-                    for i in range(len(share_obs_tensor)):
-                        if np.random.rand() > 0.8 or i == 0:
-                            # We must have the t=0 condition.
-                            condition[i] = share_obs_tensor[i]
-                    
+                for agentIdx in range(self.num_agents):
+                    # evaluate the traj on the rendenered diffuser
+                    # how to make 2 traj into one model 
+                    if len(obs_traj[agentIdx]) == HISTORY_LENGTH: # and render_env.envs[0].env.step_count == HISTORY_LENGTH - 1:
+                        
+                        obs_tensor = torch.stack(list(obs_traj[agentIdx]), dim=0)
+                        
+                        # Condition randomly.
+                        condition = {}
+                        for i in range(len(obs_tensor)):
+                            if np.random.rand() > 0.8 or i == 0:
+                                # We must have the t=0 condition.
+                                condition[i] = obs_tensor[i]
+                        
 
-                    # Other conditioning methods.
-                    # condition = {0: share_obs_tensor[0], len(obs_traj)-1: share_obs_tensor[len(obs_traj)-1], 3: share_obs_tensor[3]}
-                    # condition = {0: share_obs_tensor[0], 1: share_obs_tensor[1]}
-                    # condition = {i: share_obs_tensor[i] for i in range(4)}
-                    # condition = {i: share_obs_tensor[i] for i in range(len(share_obs_tensor))}
-                    # condition = {i: share_obs_tensor[i] for i in range(len(share_obs_tensor) - 4)}
-                    
-                    # pred = self.trainer.policy.diffuser(condition).trajectories[0, :, self.trainer.policy.diffuser.action_dim:]
+                        # Other conditioning methods.
+                        # condition = {0: obs_tensor[0], len(obs_traj)-1: obs_tensor[len(obs_traj)-1], 3: obs_tensor[3]}
+                        # condition = {0: obs_tensor[0], 1: obs_tensor[1]}
+                        # condition = {i: obs_tensor[i] for i in range(4)}
+                        # condition = {i: obs_tensor[i] for i in range(len(obs_tensor))}
+                        # condition = {i: obs_tensor[i] for i in range(len(obs_tensor) - 4)}
+                        
+                        # pred = self.trainer.policy.diffuser(condition).trajectories[0, :, self.trainer.policy.diffuser.action_dim:]
 
-                    pred_actions, pred_trajectories = self.trainer.policy.diffuser_policy(condition)
-                    pred = pred_trajectories.observations[0]
+                        pred_actions, pred_trajectories = self.trainer.policy.diffuser_policy(condition)
+                        pred = pred_trajectories.observations[0]
 
-                    # Pred is the series of denoised predictions over the denoising steps.
-                    # Pred[0] is then the most accurate prediction.
-                    # We currently only use the last timestep of that prediction.
+                        # Pred is the series of denoised predictions over the denoising steps.
+                        # Pred[0] is then the most accurate prediction.
+                        # We currently only use the last timestep of that prediction.
 
-                    
-                    state_pred = pred[-1:]
-                else:
-                    state_pred = np.concatenate(obs)
+                        
+                        state_pred[agentIdx] = torch.from_numpy(pred[-1])
+                    else:
+                        state_pred[agentIdx] = torch.from_numpy(obs[0, agentIdx])
 
                 actions, rnn_states = self.trainer.policy.act(
                     state_pred,
@@ -401,12 +409,15 @@ class PettingzooRunner(Runner):
 
                 # Take a step in the environment and get the results.
                 obs, share_obs, render_rewards, dones, infos, available_actions = render_env.step(actions_env)
-                obs_traj.append(torch.from_numpy(share_obs[0]))
+                # obs_traj.append(torch.from_numpy(share_obs[0]))
+                for i in range(self.num_agents):
+                    obs_traj[i].append(torch.from_numpy(obs[0][i]))
                                 
                 if not np.all(dones):
                     if ipython_clear_output:
                         clear_output(wait = True)
-                    render_env.envs[0].env.render(pred, history_length=HISTORY_LENGTH)
+                    # render_env.envs[0].env.render(pred, history_length=HISTORY_LENGTH)
+                    render_env.envs[0].env.render()
 
                 # append frame
                 if self.all_args.save_gifs:        
