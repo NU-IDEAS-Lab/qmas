@@ -82,9 +82,12 @@ class ACTLayer(nn.Module):
             if isinstance(module, DiagGaussian):
                 action_logit = module(x)
             else:
-                aa = available_actions[:, available_actions_idx:available_actions_idx + module.available_action_dim]
-                available_actions_idx += module.available_action_dim
-                action_logit = module(x, aa)
+                if available_actions is None:
+                    action_logit = module(x)
+                else:
+                    aa = available_actions[:, available_actions_idx:available_actions_idx + module.available_action_dim]
+                    available_actions_idx += module.available_action_dim
+                    action_logit = module(x, aa)
             action = action_logit.mode() if deterministic else action_logit.sample()
             action_log_prob = action_logit.log_probs(action)
             actions.append(action)
