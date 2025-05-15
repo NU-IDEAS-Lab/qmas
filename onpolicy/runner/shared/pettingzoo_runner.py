@@ -8,6 +8,7 @@ import imageio
 import numpy as np
 import torch
 import wandb
+import zarr
 from tqdm.auto import tqdm
 from collections import deque
 import matplotlib.pyplot as plt
@@ -232,83 +233,55 @@ class PettingzooRunner(Runner):
                 else:
                     self.writter.add_scalars(k, {k: np.mean(v)}, total_num_steps)    
 
-    @torch.no_grad()
-    def eval(self, total_num_steps):
-        # reset envs and init rnn and mask
-        eval_obs = self.eval_envs.reset()
-        eval_rnn_states = np.zeros((self.n_eval_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=np.float32)
-        eval_masks = np.ones((self.n_eval_rollout_threads, self.num_agents, 1), dtype=np.float32)
+    # @torch.no_grad()
+    def eval(self):
+        log_root = zarr.open_group(self.all_args.eval_output_file, mode="a")
+        log_exp = log_root.require_group(self.experiment_name)
 
-        # init eval goals
-        num_done = 0
-        eval_goals = np.zeros(self.all_args.eval_episodes)
-        eval_win_rates = np.zeros(self.all_args.eval_episodes)
-        eval_steps = np.zeros(self.all_args.eval_episodes)
-        step = 0
-        quo = self.all_args.eval_episodes // self.n_eval_rollout_threads
-        rem = self.all_args.eval_episodes % self.n_eval_rollout_threads
-        done_episodes_per_thread = np.zeros(self.n_eval_rollout_threads, dtype=int)
-        eval_episodes_per_thread = done_episodes_per_thread + quo
-        eval_episodes_per_thread[:rem] += 1
-        unfinished_thread = (done_episodes_per_thread != eval_episodes_per_thread)
+        eval_env = self.envs
 
-        # loop until enough episodes
-        while num_done < self.all_args.eval_episodes and step < self.episode_length:
-            # get actions
-            self.trainer.prep_rollout()
-
-            # [n_envs, n_agents, ...] -> [n_envs*n_agents, ...]
-            eval_actions, eval_rnn_states = self.trainer.policy.act(
-                torch.concatenate(list(eval_obs)),
-                torch.concatenate(list(eval_rnn_states)),
-                torch.concatenate(list(eval_masks)),
-                deterministic=self.all_args.eval_deterministic
-            )
+        for i_episode in range(self.all_args.eval_episodes):
             
-            # [n_envs*n_agents, ...] -> [n_envs, n_agents, ...]
-            eval_actions = np.array(np.split(_t2n(eval_actions), self.n_eval_rollout_threads))
-            eval_rnn_states = np.array(np.split(_t2n(eval_rnn_states), self.n_eval_rollout_threads))
+            rnn_states = np.zeros((self.n_eval_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=np.float32)
+            masks = np.ones((self.n_eval_rollout_threads, self.num_agents, 1), dtype=np.float32)
 
-            eval_actions_env = [eval_actions[idx, :, 0] for idx in range(self.n_eval_rollout_threads)]
+            # Reset the environments.
+            obs, share_obs, available_actions = eval_env.reset()
 
-            # step
-            eval_obs, eval_rewards, eval_dones, eval_infos = self.eval_envs.step(eval_actions_env)
+            dones = False
+            for j in range(self.all_args.episode_length):
+                self.trainer.prep_rollout()
 
-            # update goals if done
-            eval_dones_env = np.all(eval_dones, axis=-1)
-            eval_dones_unfinished_env = eval_dones_env[unfinished_thread]
-            if np.any(eval_dones_unfinished_env):
-                for idx_env in range(self.n_eval_rollout_threads):
-                    if unfinished_thread[idx_env] and eval_dones_env[idx_env]:
-                        eval_goals[num_done] = eval_infos[idx_env]["score_reward"]
-                        eval_win_rates[num_done] = 1 if eval_infos[idx_env]["score_reward"] > 0 else 0
-                        eval_steps[num_done] = eval_infos[idx_env]["max_steps"] - eval_infos[idx_env]["steps_left"]
-                        # print("episode {:>2d} done by env {:>2d}: {}".format(num_done, idx_env, eval_infos[idx_env]["score_reward"]))
-                        num_done += 1
-                        done_episodes_per_thread[idx_env] += 1
-            unfinished_thread = (done_episodes_per_thread != eval_episodes_per_thread)
+                actions, rnn_states = self.trainer.policy.act(
+                    np.concatenate(obs),
+                    np.concatenate(rnn_states),
+                    np.concatenate(masks),
+                    deterministic=True,
+                    # available_actions=np.concatenate(available_actions)
+                )
 
-            # reset rnn and masks for done envs
-            eval_rnn_states[eval_dones_env == True] = np.zeros(((eval_dones_env == True).sum(), self.num_agents, self.recurrent_N, self.hidden_size), dtype=np.float32)
-            eval_masks = np.ones((self.all_args.n_eval_rollout_threads, self.num_agents, 1), dtype=np.float32)
-            eval_masks[eval_dones_env == True] = np.zeros(((eval_dones_env == True).sum(), self.num_agents, 1), dtype=np.float32)
-            step += 1
+                # [n_envs*n_agents, ...] -> [n_envs, n_agents, ...]
+                actions = np.array(np.split(_t2n(actions), self.n_eval_rollout_threads))
+                rnn_states = np.array(np.split(_t2n(rnn_states), self.n_eval_rollout_threads))
 
-        # get expected goal
-        eval_goal = np.mean(eval_goals)
-        eval_win_rate = np.mean(eval_win_rates)
-        eval_step = np.mean(eval_steps)
-    
-        # log and print
-        print("eval expected goal is {}.".format(eval_goal))
-        if self.use_wandb:
-            wandb.log({"eval_goal": eval_goal}, step=total_num_steps)
-            wandb.log({"eval_win_rate": eval_win_rate}, step=total_num_steps)
-            wandb.log({"eval_step": eval_step}, step=total_num_steps)
-        else:
-            self.writter.add_scalars("eval_goal", {"expected_goal": eval_goal}, total_num_steps)
-            self.writter.add_scalars("eval_win_rate", {"eval_win_rate": eval_win_rate}, total_num_steps)
-            self.writter.add_scalars("eval_step", {"expected_step": eval_step}, total_num_steps)
+                actions_env = [actions[idx, :, :] for idx in range(self.n_eval_rollout_threads)]
+
+                # Take a step in the environment.
+                obs, share_obs, eval_rewards, dones, infos, available_actions = eval_env.step(actions_env)
+
+                # Log information.
+                keys = infos[0].keys()
+                for key in keys:
+                    if type(key) == str:
+                        # Set up the Zarr array if it doesn't exist.
+                        array = log_exp.require_array(
+                            key,
+                            shape=(self.all_args.eval_episodes, self.all_args.episode_length),
+                            dtype=np.float32,
+                            fill_value=0.0
+                        )
+                        array[i_episode, j] = infos[0][key]
+                        # self.env_infos[key] = [i[key] for i in infos]
 
     @torch.no_grad()
     def render(self, ipython_clear_output=True):        

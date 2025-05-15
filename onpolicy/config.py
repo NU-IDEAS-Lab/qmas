@@ -313,6 +313,7 @@ def get_config():
     parser.add_argument("--use_eval", action=argparse.BooleanOptionalAction, default=False, help="by default, do not start evaluation. If set`, start evaluation alongside with training.")
     parser.add_argument("--eval_interval", type=int, default=25, help="time duration between contiunous twice evaluation progress.")
     parser.add_argument("--eval_episodes", type=int, default=32, help="number of episodes of a single evaluation.")
+    parser.add_argument("--eval_output_file", type=str, default="", help="Location of the output Zarr file.")
 
     # render parameters
     parser.add_argument("--save_gifs", action=argparse.BooleanOptionalAction, default=False, help="by default, do not save render video. If set, save video.")
