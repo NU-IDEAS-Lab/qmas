@@ -252,12 +252,16 @@ class PettingzooRunner(Runner):
             for j in range(self.all_args.episode_length):
                 self.trainer.prep_rollout()
 
+                aa = np.concatenate(available_actions)
+                if np.any(aa == None):
+                    aa = None
+
                 actions, rnn_states = self.trainer.policy.act(
                     np.concatenate(obs),
                     np.concatenate(rnn_states),
                     np.concatenate(masks),
                     deterministic=True,
-                    # available_actions=np.concatenate(available_actions)
+                    available_actions=aa
                 )
 
                 # [n_envs*n_agents, ...] -> [n_envs, n_agents, ...]
@@ -274,13 +278,17 @@ class PettingzooRunner(Runner):
                 for key in keys:
                     if type(key) == str:
                         # Set up the Zarr array if it doesn't exist.
-                        array = log_exp.require_array(
+                        array = log_exp.require_dataset(
                             key,
-                            shape=(self.all_args.eval_episodes, self.all_args.episode_length),
+                            shape=(
+                                self.all_args.eval_episodes,
+                                self.all_args.episode_length,
+                                *np.array(infos[0][key]).shape
+                            ),
                             dtype=np.float32,
-                            fill_value=0.0
+                            fill_value=0.0,
                         )
-                        array[i_episode, j] = infos[0][key]
+                        array[i_episode, j] = np.array(infos[0][key])
                         # self.env_infos[key] = [i[key] for i in infos]
 
     @torch.no_grad()
