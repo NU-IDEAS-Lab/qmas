@@ -17,7 +17,7 @@ args = [
 	"--observation_radius", "999999.0",
     "--state_per_agent",
 	"--communication_model", "bernoulli",
-	"--communication_probability", "0.0",
+	"--communication_probability", "0.5",
 	"--alpha", "1.0",
 	"--beta", "0.5",
 	"--reward_method_terminal", "average",
@@ -48,11 +48,11 @@ args = [
 	"--layer_N", "4",
 	"--seed", "0",
 
-	"--n_rollout_threads", "5",
+	"--n_rollout_threads", "25",
 	"--cuda",
-	"--cuda_idx", "2",
+	"--cuda_idx", "6",
 
-	"--save_interval", "1000",
+	"--save_interval", "10000",
     "--results_dir", "/data/group/mas/qmas/results",
 	"--use_wandb",
 ]

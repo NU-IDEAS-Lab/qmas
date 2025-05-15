@@ -23,6 +23,7 @@ def add_args(parser):
 
     import os.path
     import patrolling_zoo.graphs
+    import argparse
 
     # Define all arguments.
     parser.add_argument("--alpha", type=float, default=1.0,
@@ -35,7 +36,7 @@ def add_args(parser):
     parser.add_argument("--graph_name", type=str,
                         default="cumberland", 
                         help="which graph to run on.")
-    parser.add_argument("--graph_random", type=bool, default=False,
+    parser.add_argument("--graph_random", action=argparse.BooleanOptionalAction, default=False,
                         help="Whether to use a random graph.")
     parser.add_argument("--graph_random_nodes", type=int,
                         default=40,
@@ -69,13 +70,13 @@ def add_args(parser):
                         help="the model name to use for communication. The \"none\" model indicates no comms allowed")
     parser.add_argument("--communication_probability", type=float, default=0.1, 
                         help="the probability of successful communication")
-    parser.add_argument("--regenerate_graph_on_reset", type=bool, default=False,
+    parser.add_argument("--regenerate_graph_on_reset", action=argparse.BooleanOptionalAction, default=False,
                         help="Whether to regenerate the graph on reset.")
     parser.add_argument("--max_nodes", type=int, default=50,
                         help="The maximum number of nodes in a single graph observation.")
     parser.add_argument("--max_neighbors", type=int, default=10,
                         help="The maximum number of neighbors per node in graph observations.")
-    parser.add_argument("--require_explicit_visit", type=bool, default=True,
+    parser.add_argument("--require_explicit_visit", action=argparse.BooleanOptionalAction, default=True,
                         help="Whether to require explicit visitation of nodes.")
     parser.add_argument("--action_full_max_nodes", type=int, default=40,
                         help="The maximum number of nodes in the full action space.")
@@ -954,7 +955,7 @@ class parallel_env(ParallelEnv):
         # Perform actions.
         for agent in self.agents:
             if agent in action_dict:
-                action = action_dict[agent]
+                action = action_dict[agent][0]
 
                 # Check if the action is valid.
                 if not self.action_space(agent).contains(action):
