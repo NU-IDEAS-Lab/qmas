@@ -48,9 +48,9 @@ args = [
 	"--layer_N", "4",
 	"--seed", "0",
 
-	"--n_rollout_threads", "25",
+	"--n_rollout_threads", "20",
 	"--cuda",
-	"--cuda_idx", "6",
+	"--cuda_idx", "3",
 
 	"--save_interval", "10000",
     "--results_dir", "/data/group/mas/qmas/results",

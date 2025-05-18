@@ -339,5 +339,6 @@ def get_config():
     # diffuser parameters
     parser.add_argument("--diffusion_steps", type=int, default=20)
     parser.add_argument("--diffusion_horizon", type=int, default=8)
+    parser.add_argument("--diffusion_disable", action=argparse.BooleanOptionalAction, default=False)
     
     return parser

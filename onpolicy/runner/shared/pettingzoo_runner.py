@@ -233,31 +233,83 @@ class PettingzooRunner(Runner):
                 else:
                     self.writter.add_scalars(k, {k: np.mean(v)}, total_num_steps)    
 
-    # @torch.no_grad()
+    @torch.no_grad()
     def eval(self):
         log_root = zarr.open_group(self.all_args.eval_output_file, mode="a")
         log_exp = log_root.require_group(self.experiment_name)
 
         eval_env = self.envs
 
+        # Get shape of observation space.
+        obs_shape = get_shape_from_obs_space(self.buffer.obs_space)
+
+        # eval trajectory
+        HISTORY_LENGTH = self.all_args.diffusion_horizon
+        obs_traj = [deque(maxlen=HISTORY_LENGTH) for _ in range(self.num_agents)]
+        state_pred = torch.zeros((self.num_agents, *obs_shape), dtype=torch.float32)
+
         for i_episode in range(self.all_args.eval_episodes):
-            
+            for i in range(self.num_agents):
+                obs_traj[i].clear()
+            pred = []
+
+            # Reset the environment and get the initial observations.
+            obs, share_obs, available_actions = eval_env.reset()
             rnn_states = np.zeros((self.n_eval_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=np.float32)
             masks = np.ones((self.n_eval_rollout_threads, self.num_agents, 1), dtype=np.float32)
 
-            # Reset the environments.
-            obs, share_obs, available_actions = eval_env.reset()
+            # obs_traj.append(torch.from_numpy(share_obs[0]))
+            for i in range(self.num_agents):
+                obs_traj[i].append(torch.from_numpy(obs[0][i]))
 
             dones = False
-            for j in range(self.all_args.episode_length):
+            j = -1
+            while not np.all(dones):
+                j += 1
                 self.trainer.prep_rollout()
 
                 aa = np.concatenate(available_actions)
                 if np.any(aa == None):
                     aa = None
 
+                for agentIdx in range(self.num_agents):
+                    # evaluate the traj on the rendenered diffuser
+                    # how to make 2 traj into one model 
+                    if not self.all_args.diffusion_disable and len(obs_traj[agentIdx]) == HISTORY_LENGTH: # and eval_env.envs[0].env.step_count == HISTORY_LENGTH - 1:
+                        
+                        obs_tensor = torch.stack(list(obs_traj[agentIdx]), dim=0)
+                        
+                        # Condition randomly.
+                        condition = {}
+                        for i in range(len(obs_tensor)):
+                            if np.random.rand() > 0.8 or i == 0:
+                                # We must have the t=0 condition.
+                                condition[i] = obs_tensor[i]
+                        
+
+                        # Other conditioning methods.
+                        # condition = {0: obs_tensor[0], len(obs_traj)-1: obs_tensor[len(obs_traj)-1], 3: obs_tensor[3]}
+                        # condition = {0: obs_tensor[0], 1: obs_tensor[1]}
+                        # condition = {i: obs_tensor[i] for i in range(4)}
+                        # condition = {i: obs_tensor[i] for i in range(len(obs_tensor))}
+                        # condition = {i: obs_tensor[i] for i in range(len(obs_tensor) - 4)}
+                        
+                        # pred = self.trainer.policy.diffuser(condition).trajectories[0, :, self.trainer.policy.diffuser.action_dim:]
+
+                        pred_actions, pred_trajectories = self.trainer.policy.diffuser_policy(condition)
+                        pred = pred_trajectories.observations[0]
+
+                        # Pred is the series of denoised predictions over the denoising steps.
+                        # Pred[0] is then the most accurate prediction.
+                        # We currently only use the last timestep of that prediction.
+
+                        
+                        state_pred[agentIdx] = torch.from_numpy(pred[-1])
+                    else:
+                        state_pred[agentIdx] = torch.from_numpy(obs[0, agentIdx])
+
                 actions, rnn_states = self.trainer.policy.act(
-                    np.concatenate(obs),
+                    state_pred,
                     np.concatenate(rnn_states),
                     np.concatenate(masks),
                     deterministic=True,
@@ -300,9 +352,6 @@ class PettingzooRunner(Runner):
         # reset envs and init rnn and mask
         render_env = self.envs
         
-        # init goal
-        render_goals = np.zeros(self.all_args.render_episodes)
-        
         # Get shape of observation space.
         obs_shape = get_shape_from_obs_space(self.buffer.obs_space)
 
@@ -341,7 +390,7 @@ class PettingzooRunner(Runner):
                 for agentIdx in range(self.num_agents):
                     # evaluate the traj on the rendenered diffuser
                     # how to make 2 traj into one model 
-                    if len(obs_traj[agentIdx]) == HISTORY_LENGTH: # and render_env.envs[0].env.step_count == HISTORY_LENGTH - 1:
+                    if not self.all_args.diffusion_disable and len(obs_traj[agentIdx]) == HISTORY_LENGTH: # and render_env.envs[0].env.step_count == HISTORY_LENGTH - 1:
                         
                         obs_tensor = torch.stack(list(obs_traj[agentIdx]), dim=0)
                         
