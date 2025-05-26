@@ -13,10 +13,10 @@ from onpolicy.models.diffusion.sampling.guides import ValueGuide
 from onpolicy.models.diffusion.sampling.functions import n_step_guided_p_sample
 
 
-from cleandiffuser.diffusion import ContinuousDiffusionSDE
+from cleandiffuser.diffusion import ContinuousDiffusionSDE, DiscreteDiffusionSDE
 from cleandiffuser.classifier import OptimalityClassifier
 from cleandiffuser.nn_classifier import HalfDiT1d
-from cleandiffuser.nn_diffusion import DiT1d
+from cleandiffuser.nn_diffusion import DiT1d, JannerUNet1d
 
 
 class QmasPolicy(R_MAPPOPolicy):
@@ -71,13 +71,17 @@ class QmasPolicy(R_MAPPOPolicy):
         diffuser_base = DiT1d(
             x_dim=transition_dim,
             x_seq_len=self.prediction_horizon,
-            emb_dim=128,
+            emb_dim=transition_dim,
             d_model=256,
             n_heads=8,
             depth=4,
             timestep_emb_type="untrainable_fourier",
             timestep_emb_params={"scale": 0.02},
         )
+        # diffuser_base = JannerUNet1d(
+        #     transition_dim, model_dim=32, emb_dim=transition_dim, dim_mult=(1, 2, 4, 8),
+        #     timestep_emb_type="positional", attention=False, kernel_size=5
+        # )
         # self.diffuser = GaussianDiffusion(
         #     diffuser_base, horizon = self.prediction_horizon, observation_dim = share_obs_dim, 
         #     action_dim = action_dim , n_timesteps=args.diffusion_steps, loss_type='l2', 
@@ -114,7 +118,8 @@ class QmasPolicy(R_MAPPOPolicy):
         # ).to(device)
         self.guide = OptimalityClassifier(guide_base).to(device)
 
-        self.diffuser = ContinuousDiffusionSDE(diffuser_base, None, fix_mask, loss_weight, classifier=self.guide).to(device)
+        self.diffuser = DiscreteDiffusionSDE(diffuser_base, None, fix_mask, loss_weight, classifier=self.guide).to(device)
+        # self.diffuser = ContinuousDiffusionSDE(diffuser_base, None, fix_mask, loss_weight, classifier=self.guide).to(device)
         
         self.diffuser_optimizer = torch.optim.Adam(self.diffuser.parameters(), lr=2e-4)
         self.guide_optimizer = torch.optim.Adam(self.guide.parameters(), lr=2e-4)

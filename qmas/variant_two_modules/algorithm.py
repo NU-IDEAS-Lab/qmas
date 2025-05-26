@@ -44,14 +44,14 @@ class QmasAlgorithm(R_MAPPO):
         :return model_grad_norm: (torch.Tensor) gradient norm from model update.
         """
         if update_model:
-            gradient_accumulate_every = 2
+            gradient_accumulate_every = 1
             
             # Zero the gradients.
             optimizer.zero_grad()
             
             # Accumulate gradients.
             for _ in range(gradient_accumulate_every):
-                loss, info = diffusion_model.loss(*loss_args)
+                loss = diffusion_model.loss(*loss_args)
                 # loss, info = diffusion_model.loss(*loss_args, conditioning_fn=self.conditioning_fn)
                 loss = loss / gradient_accumulate_every
 
@@ -63,7 +63,7 @@ class QmasAlgorithm(R_MAPPO):
             # Take an optimization step.
             optimizer.step()
             
-            return loss.item(), model_grad_norm, info
+            return loss.item(), model_grad_norm
         else:
             return None
 
@@ -147,40 +147,53 @@ class QmasAlgorithm(R_MAPPO):
         discounts = torch.pow(discounts, torch.arange(1, rewards_batch.shape[1] + 1, dtype=torch.float32, device=self.device))
         returns_batch = torch.sum(rewards_batch * discounts, dim=1).reshape((-1, 1))
         
+        # Build trajectories.
+        trajectories = torch.cat([actions_batch, share_obs_batch], dim=-1)
+
         # Set up conditions based on the shared observations.
+        conditions = torch.zeros_like(trajectories)
         # conditions = {i: share_obs_batch[:, i] for i in range(share_obs_batch.shape[1])} # condition based on the entire trajectory
         # conditions = {i: share_obs_batch[:, i] for i in range(2)} # condition based on only the first two points
         # conditions = {i: share_obs_batch[:, i] for i in range(1)} # condition based on only the first point
         # conditions = {i: share_obs_batch[:, i] for i in range(share_obs_batch.shape[1] // 2)} # condition based on half of the trajectory
 
         # Condition randomly.
-        conditions = {}
-        for i in range(share_obs_batch.shape[1]):
-            # We must have the t=0 condition.
-            if np.random.rand() > 0.5 or i == 0:
-                conditions[i] = share_obs_batch[:, i]
+        # conditions = {}
+        # for i in range(share_obs_batch.shape[1]):
+        #     # We must have the t=0 condition.
+        #     if np.random.rand() > 0.5 or i == 0:
+        #         conditions[i] = share_obs_batch[:, i]
 
-        # Build trajectories.
-        trajectories = torch.cat([actions_batch, share_obs_batch], dim=-1)
+        # Get x0
+        x0 = trajectories[:, 0, :].unsqueeze(1)  # First point in the trajectory
+
+        # Get the conditions.
+        conditions_dict = {
+            'vec_condition': conditions[:, 0, :],
+            'seq_condition': conditions
+        }
+
+        # loss_args = (x0, conditions)
+        loss_args = (trajectories, conditions_dict)
 
         # Update diffuser model.
-        diffuser_loss, diffuser_grad_norm, diffuser_info = self.diffusion_update(
+        diffuser_loss, diffuser_grad_norm = self.diffusion_update(
             self.policy.diffuser,
             self.policy.diffuser_optimizer,
-            (trajectories, conditions),
+            loss_args,
             update_model=True
         )
 
         # Update guide model.
-        guide_loss, guide_grad_norm, guide_info = self.diffusion_update(
-            self.policy.guide,
-            self.policy.guide_optimizer,
-            (trajectories, conditions, returns_batch),
-            update_model=True
-        )
+        # guide_loss, guide_grad_norm, guide_info = self.diffusion_update(
+        #     self.policy.guide,
+        #     self.policy.guide_optimizer,
+        #     (trajectories, conditions, returns_batch),
+        #     update_model=True
+        # )
 
         train_info['diffuser_loss'] += diffuser_loss
-        train_info['guide_loss'] += guide_loss
+        # train_info['guide_loss'] += guide_loss
 
 
 
