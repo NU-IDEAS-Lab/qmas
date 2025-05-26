@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-	"--experiment_name", "simple-adversary-rwd0",
+	"--experiment_name", "simple-adversary",
 
     "--project_name", "qmas",
 	"--env_class", "toy_problem.env.simpler_adversary.parallel_env",
@@ -39,7 +39,7 @@ args = [
 
 	"--n_rollout_threads", "100",
 	"--cuda",
-	"--cuda_idx", "4",
+	"--cuda_idx", "2",
 
 	"--save_interval", "1000",
     "--results_dir", "/data/group/mas/qmas/results",

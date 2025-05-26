@@ -94,6 +94,12 @@ class parallel_env(ParallelEnv):
         
         # Create the observation space.
         obs_space_dict = {
+            "id": spaces.Box(
+                low=0,
+                high=np.inf,
+                shape=(1,),
+                dtype=np.int32
+            ),
             "adversary_states": spaces.Box(
                 low=-np.inf,
                 high=np.inf,
@@ -290,7 +296,14 @@ class parallel_env(ParallelEnv):
 
         def normalize_position(position):
             ''' Normalizes the position to be between -1 and 1. '''
-            return (position + self.world_dims / 2) / self.world_dims
+            
+            # Perform min-max normalization.
+            norm_position = (position - (-self.world_dims / 2)) / (self.world_dims)
+            norm_position = norm_position * 2 - 1
+            return norm_position
+
+        # ID
+        obs["id"] = np.array([agent.entity_id], dtype=np.int32)
 
         # Adversary states.
         obs["adversary_states"] = np.zeros((len(self.possible_adversaries), 2 + 2), dtype=np.float32)
@@ -350,14 +363,16 @@ class parallel_env(ParallelEnv):
             if agent in action_dict:
                 action = action_dict[agent]
 
+                if np.linalg.norm(action) > 1.0:
+                    unit_action = action / np.linalg.norm(action)
+                    action = unit_action * agent.speed_max
+
                 # Check if the action is valid.
                 # if not self.action_space(agent).contains([action]):
                 #     raise ValueError(f"Invalid action {action} of type {type(action)} provided.")
 
-                action = np.clip(action, -1.0, 1.0)
-
                 # Update the agent's state.
-                agent.velocity = action * agent.speed_max           
+                agent.velocity = action
                 agent.position += agent.velocity
 
                 # Check whether agent reached any goals.
@@ -429,17 +444,32 @@ class parallel_env(ParallelEnv):
 
         rwd = 0.0
 
+        WEIGHT_ADVERSARY_DIST_PENALTY = 1.0
+        WEIGHT_AGENT_DIST_REWARD = 0.1
+
         pos_prev = agent.position - agent.velocity
         pos_curr = agent.position
 
-        # Reward for moving towards adversary targets.
-        for adversary in self.adversaries:
-            if adversary.target is not None and adversary.target.state == GoalZone.GOAL_STATE.UNREACHED:
-                dist_prev = np.linalg.norm(adversary.target.position - pos_prev)
-                dist_curr = np.linalg.norm(adversary.target.position - pos_curr)
-                r = max(dist_prev - dist_curr, 0.0) / agent.speed_max
-                r /= dist_curr # Provide higher reward as we get closer. Disincentivize flip-flopping.
-                rwd += r
+        # # Reward for moving towards adversary targets.
+        # for adversary in self.adversaries:
+        #     target = adversary.target
+        #     if target.state == GoalZone.GOAL_STATE.UNREACHED:
+        #         dist_prev = np.linalg.norm(target.position - pos_prev)
+        #         dist_curr = np.linalg.norm(target.position - pos_curr)
+        #         rwd += WEIGHT_AGENT_DIST_REWARD * max(dist_prev - dist_curr, 0.0) / agent.speed_max
+
+        # # Provide penalty for adversary moving towards an unvisited target.
+        # for adversary in self.adversaries:
+        #     target = adversary.target
+        #     if target.state == GoalZone.GOAL_STATE.UNREACHED:
+        #         adversary_dist_prev = np.linalg.norm(target.position - adversary.position - adversary.velocity)
+        #         adversary_dist_curr = np.linalg.norm(target.position - adversary.position)
+        #         rwd += WEIGHT_ADVERSARY_DIST_PENALTY * min(adversary_dist_prev - adversary_dist_curr, 0.0) / adversary.speed_max
+        
+
+        # Provide reward based on shorter distance to (20.0, 20.0)
+        dist = np.linalg.norm(agent.position - np.array([20.0, 20.0]))
+        rwd += 1.0 / (dist + 1e-6) # Avoid division by zero
 
         return rwd
 

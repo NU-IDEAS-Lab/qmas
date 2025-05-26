@@ -272,7 +272,7 @@ class PettingzooRunner(Runner):
             eval_actions = np.array(np.split(_t2n(eval_actions), self.n_eval_rollout_threads))
             eval_rnn_states = np.array(np.split(_t2n(eval_rnn_states), self.n_eval_rollout_threads))
 
-            eval_actions_env = [eval_actions[idx, :, 0] for idx in range(self.n_eval_rollout_threads)]
+            eval_actions_env = [eval_actions[idx, :, :] for idx in range(self.n_eval_rollout_threads)]
 
             # step
             eval_obs, eval_rewards, eval_dones, eval_infos = self.eval_envs.step(eval_actions_env)
@@ -374,7 +374,7 @@ class PettingzooRunner(Runner):
                 
                 # evaluate the traj on the rendenered diffuser
                 # how to make 2 traj into one model 
-                if len(obs_traj) == HISTORY_LENGTH and render_env.envs[0].env.step_count == HISTORY_LENGTH - 1:
+                if False and len(obs_traj) == HISTORY_LENGTH and render_env.envs[0].env.step_count == HISTORY_LENGTH - 1:
                     
                     share_obs_tensor = torch.cat(list(obs_traj))
                     
@@ -406,7 +406,8 @@ class PettingzooRunner(Runner):
                 if not np.all(dones):
                     if ipython_clear_output:
                         clear_output(wait = True)
-                    render_env.envs[0].env.render(pred, history_length=HISTORY_LENGTH)
+                    render_env.envs[0].env.render()
+                    # render_env.envs[0].env.render(pred, history_length=HISTORY_LENGTH)
 
                 # append frame
                 if self.all_args.save_gifs:        
