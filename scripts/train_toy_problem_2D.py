@@ -11,7 +11,6 @@ args = [
 
 	"--num_agents", "1",
     "--state_per_agent",
-	"--polynomial_degree", "0",
 
 	"--num_env_steps", "1000000",
 	"--episode_length", "50",
@@ -36,7 +35,7 @@ args = [
 
 	"--n_rollout_threads", "100",
 	"--cuda",
-	"--cuda_idx", "1",
+	"--cuda_idx", "6",
 
 	"--save_interval", "1000",
     "--results_dir", "/data/group/mas/qmas/results",
