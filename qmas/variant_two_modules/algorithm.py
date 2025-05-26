@@ -173,27 +173,32 @@ class QmasAlgorithm(R_MAPPO):
             'seq_condition': conditions
         }
 
-        # loss_args = (x0, conditions)
-        loss_args = (trajectories, conditions_dict)
-
         # Update diffuser model.
-        diffuser_loss, diffuser_grad_norm = self.diffusion_update(
-            self.policy.diffuser,
-            self.policy.diffuser_optimizer,
-            loss_args,
-            update_model=True
-        )
+        # diffuser_loss, diffuser_grad_norm = self.diffusion_update(
+        #     self.policy.diffuser,
+        #     self.policy.diffuser_optimizer,
+        #     (trajectories, conditions_dict),
+        #     update_model=True
+        # )
+        diffuser_loss = self.policy.diffuser.update_diffusion(
+            x0=trajectories,
+            condition_cfg=conditions_dict
+        )['diffusion_loss']
 
         # Update guide model.
-        # guide_loss, guide_grad_norm, guide_info = self.diffusion_update(
+        # guide_loss, guide_grad_norm = self.diffusion_update(
         #     self.policy.guide,
         #     self.policy.guide_optimizer,
         #     (trajectories, conditions, returns_batch),
         #     update_model=True
         # )
+        guide_loss = self.policy.diffuser.update_classifier(
+            x0=trajectories,
+            condition_cg=returns_batch
+        )['classifier_loss']
 
         train_info['diffuser_loss'] += diffuser_loss
-        # train_info['guide_loss'] += guide_loss
+        train_info['guide_loss'] += guide_loss
 
 
 

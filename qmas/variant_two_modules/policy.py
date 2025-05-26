@@ -120,9 +120,13 @@ class QmasPolicy(R_MAPPOPolicy):
 
         self.diffuser = DiscreteDiffusionSDE(diffuser_base, None, fix_mask, loss_weight, classifier=self.guide).to(device)
         # self.diffuser = ContinuousDiffusionSDE(diffuser_base, None, fix_mask, loss_weight, classifier=self.guide).to(device)
+
+        # Update the diffuser optimizers.
+        self.diffuser.manual_optimizers = {}
+        self.diffuser.configure_manual_optimizers()
         
-        self.diffuser_optimizer = torch.optim.Adam(self.diffuser.parameters(), lr=2e-4)
-        self.guide_optimizer = torch.optim.Adam(self.guide.parameters(), lr=2e-4)
+        # self.diffuser_optimizer = torch.optim.Adam(self.diffuser.parameters(), lr=2e-4)
+        # self.guide_optimizer = torch.optim.Adam(self.guide.parameters(), lr=2e-4)
     
 
     def save(self, directory, episode):
