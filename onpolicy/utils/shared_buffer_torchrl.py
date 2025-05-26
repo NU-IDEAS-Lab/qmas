@@ -142,7 +142,7 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
             bad_masks = np.ones_like(masks)
         if active_masks is None:
             active_masks = np.ones_like(masks)
-        if available_actions is None:
+        if np.any(available_actions == None):
             available_actions = np.ones_like(actions)
         if delta_steps is None:
             delta_steps = np.ones_like(value_preds)
