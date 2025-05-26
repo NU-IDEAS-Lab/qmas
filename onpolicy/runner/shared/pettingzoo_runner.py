@@ -224,9 +224,10 @@ class PettingzooRunner(Runner):
 
     def log_env(self, env_infos, total_num_steps):
         for k, v in env_infos.items():
-            if type(v) == wandb.viz.CustomChart and self.use_wandb:
-                wandb.log({k: v}, step=total_num_steps)
-            elif len(v) > 0:
+            # if type(v) == wandb.viz.CustomChart and self.use_wandb:
+            #     wandb.log({k: v}, step=total_num_steps)
+            # elif len(v) > 0:
+            if len(v) > 0:
                 if self.use_wandb:
                     wandb.log({k: np.mean(v, axis=0)}, step=total_num_steps)
                 else:
