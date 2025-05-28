@@ -176,10 +176,12 @@ class parallel_env(ParallelEnv):
 
         # Convert the predicted state back into a dictionary (unflatten).
         pred_unflattened = []
-        pred_steps = len(pred)
+        pred_steps = pred.shape[0]
         for i in range(pred_steps):
-            p = spaces.unflatten(self.observation_spaces, pred[i])
+            p = spaces.unflatten(self.observation_spaces, pred[i].flatten())
             pred_unflattened.append(p)
+
+        print(f"Prediction: {pred}")
 
         # Plot as a line graph using matplotlib.
         plt.figure(figsize=figsize)

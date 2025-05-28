@@ -311,7 +311,7 @@ class PettingzooRunner(Runner):
             self.writter.add_scalars("eval_win_rate", {"eval_win_rate": eval_win_rate}, total_num_steps)
             self.writter.add_scalars("eval_step", {"expected_step": eval_step}, total_num_steps)
 
-    @torch.no_grad()
+    # @torch.no_grad()
     def render(self, ipython_clear_output=True):        
 
         if ipython_clear_output:
@@ -323,27 +323,31 @@ class PettingzooRunner(Runner):
         # init goal
         render_goals = np.zeros(self.all_args.render_episodes)
         
-        # Get shape of observation space.
+        # Get shape of observation and action spaces.
         obs_shape = get_shape_from_obs_space(self.buffer.obs_space)
+        act_shape = get_shape_from_act_space(self.buffer.act_space)
+        obs_size = np.prod(obs_shape)
+        act_size = np.prod(act_shape)
+        transition_size = obs_size + act_size
 
         # eval trajectory
         HISTORY_LENGTH = self.all_args.diffusion_horizon
-        obs_traj = [deque(maxlen=HISTORY_LENGTH) for _ in range(self.num_agents)]
+        trajectory = [deque(maxlen=HISTORY_LENGTH) for _ in range(self.num_agents)]
         state_pred = torch.zeros((self.num_agents, *obs_shape), dtype=torch.float32)
+        state_pred_full = torch.zeros((HISTORY_LENGTH, self.num_agents, *obs_shape), dtype=torch.float32)
         
         for i_episode in range(self.all_args.render_episodes):
             for i in range(self.num_agents):
-                obs_traj[i].clear()
-            pred = []
+                trajectory[i].clear()
 
             # Reset the environment and get the initial observations.
             obs, share_obs, available_actions = render_env.reset()
             rnn_states = np.zeros((self.n_render_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=np.float32)
             masks = np.ones((self.n_render_rollout_threads, self.num_agents, 1), dtype=np.float32)
 
-            # obs_traj.append(torch.from_numpy(share_obs[0]))
             for i in range(self.num_agents):
-                obs_traj[i].append(torch.from_numpy(obs[0][i]))
+                transition = np.concatenate((np.zeros(act_size), obs[0][i]), axis=0)
+                trajectory[i].append(torch.from_numpy(transition))
 
             if self.all_args.save_gifs:        
                 frames = []
@@ -361,18 +365,21 @@ class PettingzooRunner(Runner):
                 for agentIdx in range(self.num_agents):
                     # evaluate the traj on the rendenered diffuser
                     # how to make 2 traj into one model 
-                    if len(obs_traj[agentIdx]) == HISTORY_LENGTH: # and render_env.envs[0].env.step_count == HISTORY_LENGTH - 1:
+                    if len(trajectory[agentIdx]) == HISTORY_LENGTH: # and render_env.envs[0].env.step_count == HISTORY_LENGTH - 1:
                         
-                        obs_tensor = torch.stack(list(obs_traj[agentIdx]), dim=0)
+                        trajectory_tensor = torch.stack(list(trajectory[agentIdx]), dim=0)
                         
                         # Condition randomly.
-                        condition = {}
-                        for i in range(len(obs_tensor)):
-                            if np.random.rand() > 0.8 or i == 0:
+                        condition = np.zeros((HISTORY_LENGTH, transition_size), dtype=np.float32)
+                        condition_mask = np.zeros((HISTORY_LENGTH, transition_size), dtype=np.float32)
+                        for i in range(len(trajectory_tensor)):
+                            if np.random.rand() > 0.0 or i == 0:
                                 # We must have the t=0 condition.
-                                condition[i] = obs_tensor[i]
+                                condition[i] = trajectory_tensor[i]
+                                condition_mask[i, act_size:] = 1.0
+                        condition = torch.from_numpy(condition).to(self.device)
+                        condition_mask = torch.from_numpy(condition_mask).to(self.device)
                         
-
                         # Other conditioning methods.
                         # condition = {0: obs_tensor[0], len(obs_traj)-1: obs_tensor[len(obs_traj)-1], 3: obs_tensor[3]}
                         # condition = {0: obs_tensor[0], 1: obs_tensor[1]}
@@ -382,18 +389,37 @@ class PettingzooRunner(Runner):
                         
                         # pred = self.trainer.policy.diffuser(condition).trajectories[0, :, self.trainer.policy.diffuser.action_dim:]
 
-                        pred_actions, pred_trajectories = self.trainer.policy.diffuser_policy(condition)
-                        pred = pred_trajectories.observations[0]
+                        # pred_actions, pred_trajectories = self.trainer.policy.diffuser_policy(condition)
+                        # pred = pred_trajectories.observations[0]
 
                         # Pred is the series of denoised predictions over the denoising steps.
                         # Pred[0] is then the most accurate prediction.
                         # We currently only use the last timestep of that prediction.
 
+                        pred, log = self.policy.diffuser.sample(
+                            prior = torch.zeros((1, HISTORY_LENGTH, transition_size), dtype=torch.float32, device=self.device),
+                            # prior=condition,
+                            solver="ddpm",
+                            sample_steps=20,
+                            n_samples=1,
+                            w_cg=0.3,
+                            condition_cg=None,
+                            # condition_cfg={
+                            #     'vec_condition': condition[:, act_size:],
+                            #     'seq_condition': condition
+                            # },
+                            condition_cfg=condition,
+                            mask_cfg=condition_mask,
+                            # mask_cfg=None,
+                        )
                         
-                        state_pred[agentIdx] = torch.from_numpy(pred[-1])
+                        # Strip the action part of the prediction.
+                        state_pred[agentIdx] = pred[0, -1, act_size:]
+                        state_pred_full[:, agentIdx, :] = pred[0, :, act_size:]
                     else:
                         state_pred[agentIdx] = torch.from_numpy(obs[0, agentIdx])
-
+                        state_pred_full[:, agentIdx, :] = torch.from_numpy(obs[0, agentIdx])
+                    
                 actions, rnn_states = self.trainer.policy.act(
                     state_pred,
                     np.concatenate(rnn_states),
@@ -412,13 +438,14 @@ class PettingzooRunner(Runner):
                 obs, share_obs, render_rewards, dones, infos, available_actions = render_env.step(actions_env)
                 # obs_traj.append(torch.from_numpy(share_obs[0]))
                 for i in range(self.num_agents):
-                    obs_traj[i].append(torch.from_numpy(obs[0][i]))
+                    transition = np.concatenate((actions[0][i], obs[0][i]), axis=0)
+                    trajectory[i].append(torch.from_numpy(transition))
                                 
                 if not np.all(dones):
                     if ipython_clear_output:
                         clear_output(wait = True)
-                    # render_env.envs[0].env.render(pred, history_length=HISTORY_LENGTH)
-                    render_env.envs[0].env.render()
+                    render_env.envs[0].env.render(state_pred_full, history_length=HISTORY_LENGTH)
+                    # render_env.envs[0].env.render()
 
                 # append frame
                 if self.all_args.save_gifs:        

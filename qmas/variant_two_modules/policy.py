@@ -149,8 +149,8 @@ class QmasPolicy(R_MAPPOPolicy):
         guide_state_dict = torch.load(os.path.join(directory, 'guide.pt'))
         self.guide.load_state_dict(guide_state_dict)
 
-        self.diffuser_guide = ValueGuide(self.guide)
-        self.diffuser_policy = GuidedPolicy(self.diffuser_guide, self.diffuser, sample_fn=n_step_guided_p_sample, conditioning_fn=self._condition_sample)
+        # self.diffuser_guide = ValueGuide(self.guide)
+        # self.diffuser_policy = GuidedPolicy(self.diffuser_guide, self.diffuser, sample_fn=n_step_guided_p_sample, conditioning_fn=self._condition_sample)
 
 
     def _condition_sample(self, x, conditions, action_dim):
