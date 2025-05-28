@@ -346,7 +346,7 @@ class PettingzooRunner(Runner):
             masks = np.ones((self.n_render_rollout_threads, self.num_agents, 1), dtype=np.float32)
 
             for i in range(self.num_agents):
-                transition = np.concatenate((np.zeros(act_size), obs[0][i]), axis=0)
+                transition = np.concatenate((np.zeros(act_size, dtype=np.float32), obs[0][i]), axis=0)
                 trajectory[i].append(torch.from_numpy(transition))
 
             if self.all_args.save_gifs:        
@@ -397,10 +397,10 @@ class PettingzooRunner(Runner):
                         # We currently only use the last timestep of that prediction.
 
                         pred, log = self.policy.diffuser.sample(
-                            prior = torch.zeros((1, HISTORY_LENGTH, transition_size), dtype=torch.float32, device=self.device),
-                            # prior=condition,
+                            # prior = torch.zeros((1, HISTORY_LENGTH, transition_size), dtype=torch.float32, device=self.device),
+                            prior=trajectory_tensor.unsqueeze(0).to(self.device),
                             solver="ddpm",
-                            sample_steps=20,
+                            # sample_steps=20,
                             n_samples=1,
                             w_cg=0.3,
                             condition_cg=None,
@@ -408,8 +408,8 @@ class PettingzooRunner(Runner):
                             #     'vec_condition': condition[:, act_size:],
                             #     'seq_condition': condition
                             # },
-                            condition_cfg=condition,
-                            mask_cfg=condition_mask,
+                            # condition_cfg=condition,
+                            # mask_cfg=condition_mask,
                             # mask_cfg=None,
                         )
                         

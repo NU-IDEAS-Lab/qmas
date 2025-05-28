@@ -181,7 +181,7 @@ class parallel_env(ParallelEnv):
             p = spaces.unflatten(self.observation_spaces, pred[i].flatten())
             pred_unflattened.append(p)
 
-        print(f"Prediction: {pred}")
+        # print(f"Prediction: {pred}")
 
         # Plot as a line graph using matplotlib.
         plt.figure(figsize=figsize)
