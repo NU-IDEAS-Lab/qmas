@@ -151,7 +151,8 @@ class QmasAlgorithm(R_MAPPO):
         trajectories = torch.cat([actions_batch, share_obs_batch], dim=-1)
 
         # Set up conditions based on the shared observations.
-        conditions = torch.zeros_like(trajectories)
+        # conditions = torch.zeros_like(trajectories)
+        conditions = trajectories.clone()  # Use the entire trajectory as condition.
         # conditions = {i: share_obs_batch[:, i] for i in range(share_obs_batch.shape[1])} # condition based on the entire trajectory
         # conditions = {i: share_obs_batch[:, i] for i in range(2)} # condition based on only the first two points
         # conditions = {i: share_obs_batch[:, i] for i in range(1)} # condition based on only the first point
@@ -164,14 +165,11 @@ class QmasAlgorithm(R_MAPPO):
         #     if np.random.rand() > 0.5 or i == 0:
         #         conditions[i] = share_obs_batch[:, i]
 
-        # Get x0
-        x0 = trajectories[:, 0, :].unsqueeze(1)  # First point in the trajectory
-
         # Get the conditions.
-        conditions_dict = {
-            'vec_condition': conditions[:, 0, :],
-            'seq_condition': conditions
-        }
+        # conditions_dict = {
+        #     'vec_condition': conditions[:, 0, :],
+        #     'seq_condition': conditions
+        # }
 
         # Update diffuser model.
         # diffuser_loss, diffuser_grad_norm = self.diffusion_update(
@@ -182,7 +180,7 @@ class QmasAlgorithm(R_MAPPO):
         # )
         diffuser_loss = self.policy.diffuser.update_diffusion(
             x0=trajectories,
-            condition_cfg=conditions_dict
+            # condition_cfg=conditions,
         )['diffusion_loss']
 
         # Update guide model.
