@@ -369,14 +369,13 @@ class PettingzooRunner(Runner):
                         
                         trajectory_tensor = torch.stack(list(trajectory[agentIdx]), dim=0)
                         
-                        # Condition randomly.
+                        # Full conditioning using a random mask
                         condition = np.zeros((HISTORY_LENGTH, transition_size), dtype=np.float32)
                         condition_mask = np.zeros((HISTORY_LENGTH, transition_size), dtype=np.float32)
                         for i in range(len(trajectory_tensor)):
-                            if np.random.rand() > 0.0 or i == 0:
-                                # We must have the t=0 condition.
+                            if np.random.rand() > 0.1 or i == 0:  # Ensure at least t=0 is always conditioned
                                 condition[i] = trajectory_tensor[i]
-                                condition_mask[i, act_size:] = 1.0
+                                condition_mask[i] = 1.0
                         condition = torch.from_numpy(condition).to(self.device)
                         condition_mask = torch.from_numpy(condition_mask).to(self.device)
                         
@@ -396,21 +395,56 @@ class PettingzooRunner(Runner):
                         # Pred[0] is then the most accurate prediction.
                         # We currently only use the last timestep of that prediction.
 
+                        print("Calling diffuser.sample() with:")
+                        print("  prior shape:", trajectory_tensor.unsqueeze(0).shape)
+                        print("  solver:", "ddpm")
+                        print("  n_samples:", 1)
+                        print("  w_cg:", 0.3)
+                        print("  condition_cfg shape:", condition.shape)
+                        print("  mask_cfg sum:", condition_mask.sum().item())
+                        # pred, log = self.policy.diffuser.sample(
+                        #     prior = torch.zeros((1, HISTORY_LENGTH, transition_size), dtype=torch.float32, device=self.device),
+                        #     prior=trajectory_tensor.unsqueeze(0).to(self.device),
+                        #     solver="ddpm",
+                        #     # sample_steps=20,
+                        #     n_samples=1,
+                        #     w_cg=0.3,
+                        #     condition_cg=None,
+                        #     # condition_cfg={
+                        #     #     'vec_condition': condition[:, act_size:],
+                        #     #     'seq_condition': condition
+                        #     # },
+                        #     condition_cfg=condition,
+                        #     mask_cfg=condition_mask,
+                        #     # mask_cfg=None,
+                           
+                        #     solver="ddpm",
+                        #     n_samples=1,
+                        #     w_cg=0.3,
+                        #     condition_cfg=condition,
+                        #     mask_cfg=condition_mask
+                        # )
+
+                       
+                        # pred, log = self.policy.diffuser.sample(
+                            
+                        #     prior = torch.zeros((1, HISTORY_LENGTH, transition_size), dtype=torch.float32, device=self.device),
+                        #     solver="ddpm",
+                        #     n_samples=1,
+                        #     w_cg=0.3,
+                        #     condition_cfg=condition,
+                        #     mask_cfg=condition_mask
+                        # )
+
+                        fix_mask = condition_mask.unsqueeze(0)  
+                        prior = condition.unsqueeze(0)     
+
                         pred, log = self.policy.diffuser.sample(
-                            # prior = torch.zeros((1, HISTORY_LENGTH, transition_size), dtype=torch.float32, device=self.device),
-                            prior=trajectory_tensor.unsqueeze(0).to(self.device),
+                            prior=prior,
+                            fix_mask=fix_mask,
                             solver="ddpm",
-                            # sample_steps=20,
                             n_samples=1,
-                            w_cg=0.3,
-                            condition_cg=None,
-                            # condition_cfg={
-                            #     'vec_condition': condition[:, act_size:],
-                            #     'seq_condition': condition
-                            # },
-                            # condition_cfg=condition,
-                            # mask_cfg=condition_mask,
-                            # mask_cfg=None,
+                            w_cg=0.3
                         )
                         
                         # Strip the action part of the prediction.

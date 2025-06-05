@@ -13,7 +13,8 @@ from onpolicy.models.diffusion.sampling.guides import ValueGuide
 from onpolicy.models.diffusion.sampling.functions import n_step_guided_p_sample
 
 
-from cleandiffuser.diffusion import ContinuousDiffusionSDE, DiscreteDiffusionSDE
+# from cleandiffuser.diffusion import ContinuousDiffusionSDE, DiscreteDiffusionSDE
+from onpolicy.models.diffusion.diffusionsde import DiscreteDiffusionSDE
 from cleandiffuser.classifier import OptimalityClassifier
 from cleandiffuser.nn_classifier import HalfDiT1d
 from cleandiffuser.nn_diffusion import DiT1d, JannerUNet1d
