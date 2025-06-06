@@ -126,7 +126,7 @@ class DiscreteDiffusionSDE(OrigDiffuser):
             sampling_schedule_params["t_max"] = warm_start_forward_level
         else:
             xt = torch.randn_like(prior) * temperature
-        xt = xt * (1.0 - self.fix_mask) + prior * self.fix_mask
+        xt = xt * (1.0 - fix_mask) + prior * fix_mask
 
         if preserve_history:
             log["sample_history"].append(xt.cpu().numpy())
@@ -289,4 +289,4 @@ class DiscreteDiffusionSDE(OrigDiffuser):
         else:
             loss = (self.model["diffusion"](xt, t, condition) - x0) ** 2
 
-        return (loss * self.loss_weight * (1 - self.fix_mask)).mean()
+        return (loss * self.loss_weight * (1 - fix_mask)).mean()
