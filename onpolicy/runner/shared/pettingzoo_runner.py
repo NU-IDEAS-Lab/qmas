@@ -373,7 +373,9 @@ class PettingzooRunner(Runner):
                         condition = np.zeros((HISTORY_LENGTH, transition_size), dtype=np.float32)
                         condition_mask = np.zeros((HISTORY_LENGTH, transition_size), dtype=np.float32)
                         for i in range(len(trajectory_tensor)):
-                            if np.random.rand() > 0.1 or i == 0:  # Ensure at least t=0 is always conditioned
+                            if (np.random.rand() > 0.5 and i<7) or i == 0: 
+                            #  # Ensure at least t=0 is always conditioned
+                            # if i<4: 
                                 condition[i] = trajectory_tensor[i]
                                 condition_mask[i] = 1.0
                         condition = torch.from_numpy(condition).to(self.device)
@@ -444,6 +446,7 @@ class PettingzooRunner(Runner):
                             fix_mask=fix_mask,
                             solver="ddpm",
                             n_samples=1,
+                            sample_steps = 20,
                             w_cg=0.3
                         )
                         

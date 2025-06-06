@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Union
 import torch
 from cleandiffuser.diffusion.diffusionsde import DiscreteDiffusionSDE as OrigDiffuser, xtheta_to_epstheta, epstheta_to_xtheta
 from cleandiffuser.utils import (
@@ -22,7 +22,7 @@ SUPPORTED_SOLVERS = [
 ]
 
 class DiscreteDiffusionSDE(OrigDiffuser):
-   def sample(
+    def sample(
         self,
         # ---------- the known fixed portion ---------- #
         prior: torch.Tensor,
@@ -254,8 +254,8 @@ class DiscreteDiffusionSDE(OrigDiffuser):
                     )
 
             # fix the known portion, and preserve the sampling history
-            if self.fix_mask is not None:
-                xt = xt * (1.0 - self.fix_mask) + prior * self.fix_mask
+            if fix_mask is not None:
+                xt = xt * (1.0 - fix_mask) + prior * fix_mask
             if preserve_history:
                 log["sample_history"].append(xt.cpu().numpy())
 
@@ -275,3 +275,18 @@ class DiscreteDiffusionSDE(OrigDiffuser):
         log["logSNR"] = logSNRs
 
         return xt, log
+
+    def loss(self, x0: torch.Tensor, condition: Optional[Union[torch.Tensor, TensorDict]] = None, fix_mask: Optional[torch.Tensor] = None):
+        xt, t, eps = self.add_noise(x0)
+
+        if fix_mask == None:
+            fix_mask = self.fix_mask
+
+        condition = self.model["condition"](condition) if condition is not None else None
+
+        if self.predict_noise:
+            loss = (self.model["diffusion"](xt, t, condition) - eps) ** 2
+        else:
+            loss = (self.model["diffusion"](xt, t, condition) - x0) ** 2
+
+        return (loss * self.loss_weight * (1 - self.fix_mask)).mean()
