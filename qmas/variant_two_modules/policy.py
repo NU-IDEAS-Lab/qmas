@@ -69,20 +69,20 @@ class QmasPolicy(R_MAPPOPolicy):
         #     dim=32,
         #     dim_mults=(8, 4, 2, 1),
         # ).to(device)
-        diffuser_base = DiT1d(
-            x_dim=transition_dim,
-            x_seq_len=self.prediction_horizon,
-            emb_dim=transition_dim,
-            d_model=256,
-            n_heads=8,
-            depth=4,
-            timestep_emb_type="untrainable_fourier",
-            timestep_emb_params={"scale": 0.02},
-        )
-        # diffuser_base = JannerUNet1d(
-        #     transition_dim, model_dim=32, emb_dim=transition_dim, dim_mult=(1, 2, 4, 8),
-        #     timestep_emb_type="positional", attention=False, kernel_size=5
+        # diffuser_base = DiT1d(
+        #     x_dim=transition_dim,
+        #     x_seq_len=self.prediction_horizon,
+        #     emb_dim=transition_dim,
+        #     d_model=256,
+        #     n_heads=8,
+        #     depth=4,
+        #     timestep_emb_type="untrainable_fourier",
+        #     timestep_emb_params={"scale": 0.02},
         # )
+        diffuser_base = JannerUNet1d(
+            transition_dim, model_dim=32, emb_dim=transition_dim, dim_mult=(1, 2, 4, 8),
+            timestep_emb_type="positional", attention=False, kernel_size=5
+        )
         # self.diffuser = GaussianDiffusion(
         #     diffuser_base, horizon = self.prediction_horizon, observation_dim = share_obs_dim, 
         #     action_dim = action_dim , n_timesteps=args.diffusion_steps, loss_type='l2', 
