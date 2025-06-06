@@ -376,7 +376,7 @@ class PettingzooRunner(Runner):
                             if np.random.rand() > 0.0 or i == 0:
                                 # We must have the t=0 condition.
                                 condition[i] = trajectory_tensor[i]
-                                condition_mask[i, act_size:] = 1.0
+                                condition_mask[i] = 1.0
                         condition = torch.from_numpy(condition).to(self.device)
                         condition_mask = torch.from_numpy(condition_mask).to(self.device)
                         
@@ -397,20 +397,16 @@ class PettingzooRunner(Runner):
                         # We currently only use the last timestep of that prediction.
 
                         pred, log = self.policy.diffuser.sample(
-                            # prior = torch.zeros((1, HISTORY_LENGTH, transition_size), dtype=torch.float32, device=self.device),
-                            prior=trajectory_tensor.unsqueeze(0).to(self.device),
+                            prior = torch.zeros((1, HISTORY_LENGTH, transition_size), dtype=torch.float32, device=self.device),
+                            # prior=trajectory_tensor.unsqueeze(0).to(self.device),
                             solver="ddpm",
-                            # sample_steps=20,
+                            sample_steps=20,
                             n_samples=1,
-                            w_cg=0.3,
+                            w_cg=0.0,
+                            w_cfg=1.0,
                             condition_cg=None,
-                            # condition_cfg={
-                            #     'vec_condition': condition[:, act_size:],
-                            #     'seq_condition': condition
-                            # },
-                            # condition_cfg=condition,
-                            # mask_cfg=condition_mask,
-                            # mask_cfg=None,
+                            condition_cfg=condition,
+                            mask_cfg=condition_mask,
                         )
                         
                         # Strip the action part of the prediction.
