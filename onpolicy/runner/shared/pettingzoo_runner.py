@@ -369,12 +369,13 @@ class PettingzooRunner(Runner):
                         
                         trajectory_tensor = torch.stack(list(trajectory[agentIdx]), dim=0)
                         
-                        # Condition randomly.
+                        # Full conditioning using a random mask
                         condition = np.zeros((HISTORY_LENGTH, transition_size), dtype=np.float32)
                         condition_mask = np.zeros((HISTORY_LENGTH, transition_size), dtype=np.float32)
                         for i in range(len(trajectory_tensor)):
-                            if np.random.rand() > 0.0 or i == 0:
-                                # We must have the t=0 condition.
+                            if (np.random.rand() > 0.5 and i<7) or i == 0: 
+                            #  # Ensure at least t=0 is always conditioned
+                            # if i<4: 
                                 condition[i] = trajectory_tensor[i]
                                 condition_mask[i] = 1.0
                         condition = torch.from_numpy(condition).to(self.device)
@@ -396,17 +397,17 @@ class PettingzooRunner(Runner):
                         # Pred[0] is then the most accurate prediction.
                         # We currently only use the last timestep of that prediction.
 
+                        fix_mask = condition_mask.unsqueeze(0)  
+                        prior = condition.unsqueeze(0)     
+
                         pred, log = self.policy.diffuser.sample(
-                            prior = torch.zeros((1, HISTORY_LENGTH, transition_size), dtype=torch.float32, device=self.device),
-                            # prior=trajectory_tensor.unsqueeze(0).to(self.device),
+                            prior=prior,
+                            fix_mask=fix_mask,
                             solver="ddpm",
-                            sample_steps=20,
                             n_samples=1,
+                            sample_steps = 20,
                             w_cg=0.0,
-                            w_cfg=1.0,
-                            condition_cg=None,
-                            condition_cfg=condition,
-                            mask_cfg=condition_mask,
+                            w_cfg=1.0
                         )
                         
                         # Strip the action part of the prediction.
