@@ -133,6 +133,20 @@ class parallel_env(ParallelEnv):
                 None
         '''
 
+        # Convert the predicted state back into a dictionary (unflatten).
+        pred_unflattened = []
+        leader_state = []
+        agent_state = {}
+        for agent in self.agents:
+            agent_state[agent] = []
+        pred_steps = pred.shape[0]
+        for i in range(pred_steps):
+            p = spaces.unflatten(self.observation_spaces, pred[i].flatten())
+            pred_unflattened.append(p)
+            leader_state.append(p[0]["reference"])
+            for agent in self.agents:
+                agent_state[agent].append(p[0]["agent_states"][agent])
+
         # Plot as a line graph using matplotlib.
         plt.figure(figsize=figsize)
         for agent in self.agents:
@@ -146,14 +160,11 @@ class parallel_env(ParallelEnv):
         if (len(pred) != 0):
             colors = ["orange", "green", "red", "yellow", "blue", "purple", "black", "grey"]
             labels = [f"Leader (Predicted at t={history_length-1})", "Leader Speed (Predicted)", f"Follower 0 (Predicted at t={history_length-1})"]
-            for i in range(0, pred.shape[1]):
-                if labels[i] == None:
-                    continue
-                plt.plot(pred[:, i], 
-                        color=colors[i],
-                        alpha=1.0,
-                        linestyle="dashed",
-                        label=labels[i])
+
+            plt.plot(leader_state, label=labels[0], color=colors[0], alpha=0.7, linestyle='--')
+
+            for i, agent in enumerate(self.agents):
+                plt.plot(agent_state[agent], label=f"Follower {agent}", color=colors[i+1], alpha=0.7, linestyle='--')
 
         plt.xlabel("Time (s)")
         plt.ylabel("State")
