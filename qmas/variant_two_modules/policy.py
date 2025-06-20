@@ -60,7 +60,7 @@ class QmasPolicy(R_MAPPOPolicy):
         # fix_mask[0, :obs_dim] = 1.
         # Weight actions more heavily in the loss.
         loss_weight = torch.ones((self.prediction_horizon, transition_dim))
-        loss_weight[:, :action_dim] = 10.0
+        loss_weight[:, :action_dim] = 1.0
         
         # Create Diffuser model.
         # diffuser_base = TemporalUnet(
@@ -82,7 +82,9 @@ class QmasPolicy(R_MAPPOPolicy):
         # )
         diffuser_base = JannerUNet1d(
             transition_dim, model_dim=32, emb_dim=transition_dim, dim_mult=(1, 2, 4, 8),
-            timestep_emb_type="positional", attention=False, kernel_size=5
+            timestep_emb_type="untrainable_fourier",
+            timestep_emb_params={"scale": 0.02},
+            attention=False, kernel_size=5
         )
         # self.diffuser = GaussianDiffusion(
         #     diffuser_base, horizon = self.prediction_horizon, observation_dim = share_obs_dim, 
@@ -120,7 +122,14 @@ class QmasPolicy(R_MAPPOPolicy):
         # ).to(device)
         self.guide = OptimalityClassifier(guide_base).to(device)
 
-        self.diffuser = DiscreteDiffusionSDE(diffuser_base, None, fix_mask, loss_weight, classifier=self.guide).to(device)
+        self.diffuser = DiscreteDiffusionSDE(
+            diffuser_base,
+            None,
+            fix_mask,
+            loss_weight,
+            classifier=self.guide,
+            predict_noise=False
+        ).to(device)
         # self.diffuser = ContinuousDiffusionSDE(diffuser_base, None, fix_mask, loss_weight, classifier=self.guide).to(device)
 
         # Update the diffuser optimizers.
@@ -154,6 +163,31 @@ class QmasPolicy(R_MAPPOPolicy):
         # self.diffuser_guide = ValueGuide(self.guide)
         # self.diffuser_policy = GuidedPolicy(self.diffuser_guide, self.diffuser, sample_fn=n_step_guided_p_sample, conditioning_fn=self._condition_sample)
 
+
+    # def _get_loss_weights(self, action_weight, discount):
+    #     '''
+    #         This function is taken from the original MAPPO implementation by Janner et al. (2022): 10.48550/arXiv.2205.09991
+
+    #         ---
+    #         sets loss coefficients for trajectory
+
+    #         action_weight   : float
+    #             coefficient on first action loss
+    #         discount   : float
+    #             multiplies t^th timestep of trajectory loss by discount**t
+    #     '''
+    #     self.action_weight = action_weight
+
+    #     dim_weights = torch.ones(self.transition_dim, dtype=torch.float32)
+
+    #     ## decay loss with trajectory timestep: discount**t
+    #     discounts = discount ** torch.arange(self.horizon, dtype=torch.float)
+    #     discounts = discounts / discounts.mean()
+    #     loss_weights = torch.einsum('h,t->ht', discounts, dim_weights)
+
+    #     ## manually set a0 weight
+    #     loss_weights[0, :self.action_dim] = action_weight
+    #     return loss_weights
 
     def _condition_sample(self, x, conditions, action_dim):
         ''' Applies conditions to the sample. '''
