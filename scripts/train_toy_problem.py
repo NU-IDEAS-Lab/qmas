@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-	"--experiment_name", "toy-problem-n20",
+	"--experiment_name", "toy-problem-cleandiffusion-lossweight1-jannerunet",
     "--project_name", "qmas",
 	"--env_class", "toy_problem.toy_problem_v0.parallel_env",
 	"--user_name", "ideas-mas",
@@ -19,9 +19,6 @@ args = [
 	"--algorithm_class", "qmas.variant_two_modules.algorithm.QmasAlgorithm",
 	"--policy_class", "qmas.variant_two_modules.policy.QmasPolicy",
 	"--algorithm_name", "mappo",
-	"--use_recurrent_policy",
-    "--recurrent_N", "1",
-    "--data_chunk_length", "2",
 	"--use_centralized_V",
 	"--use_gae",
 	"--use_gae_amadm",
@@ -29,13 +26,13 @@ args = [
 	"--share_policy",
 	"--no-share_reward",
 	"--use_ReLU",
-	"--hidden_size", "128",
-	"--layer_N", "2",
+	"--hidden_size", "512",
+	"--layer_N", "4",
 	"--seed", "0",
 
-	"--n_rollout_threads", "10",
+	"--n_rollout_threads", "100",
 	"--cuda",
-	"--cuda_idx", "1",
+	"--cuda_idx", "2",
 
 	"--save_interval", "1000",
     "--results_dir", "/data/group/mas/qmas/results",
