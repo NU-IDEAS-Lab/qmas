@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-	"--experiment_name", "toy-problem-cleandiffusion-lossweight1-jannerunet",
+	"--experiment_name", "toy-problem-cleandiffusion-lossweight1",
     "--project_name", "qmas",
 	"--env_class", "toy_problem.toy_problem_v0.parallel_env",
 	"--user_name", "ideas-mas",
