@@ -373,9 +373,10 @@ class PettingzooRunner(Runner):
                         condition = np.zeros((HISTORY_LENGTH, transition_size), dtype=np.float32)
                         condition_mask = np.zeros((HISTORY_LENGTH, transition_size), dtype=np.float32)
                         for i in range(len(trajectory_tensor)):
-                            if (np.random.rand() > 0.5 and i<7) or i == 0: 
+                            # if (np.random.rand() > 0.5 and i<7) or i == 0: 
                             #  # Ensure at least t=0 is always conditioned
-                            # if i<4: 
+                            if i<4:
+                            # if True:
                                 condition[i] = trajectory_tensor[i]
                                 condition_mask[i] = 1.0
                         condition = torch.from_numpy(condition).to(self.device)
@@ -407,12 +408,14 @@ class PettingzooRunner(Runner):
                             n_samples=1,
                             sample_steps = 20,
                             w_cg=0.0,
-                            w_cfg=1.0
+                            w_cfg=0.0
                         )
                         
                         # Strip the action part of the prediction.
                         state_pred[agentIdx] = pred[0, -1, act_size:]
                         state_pred_full[:, agentIdx, :] = pred[0, :, act_size:]
+
+                        print(f"Got prediction for agent {agentIdx} at step {render_env.envs[0].env.step_count} with shape {state_pred[agentIdx].shape}")
                     else:
                         state_pred[agentIdx] = torch.from_numpy(obs[0, agentIdx])
                         state_pred_full[:, agentIdx, :] = torch.from_numpy(obs[0, agentIdx])
