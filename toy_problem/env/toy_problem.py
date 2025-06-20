@@ -123,7 +123,7 @@ class parallel_env(ParallelEnv):
         return observation, info
 
 
-    def render(self, pred, figsize=(9, 6), history_length=2):
+    def render(self, pred=None, figsize=(9, 6), history_length=2):
         ''' Renders the environment.
             
             Args:
@@ -135,18 +135,19 @@ class parallel_env(ParallelEnv):
 
 
         # Convert the predicted state back into a dictionary (unflatten).
-        pred_unflattened = []
-        leader_state = []
-        agent_state = {}
-        for agent in self.agents:
-            agent_state[agent] = []
-        pred_steps = pred.shape[0]
-        for i in range(pred_steps):
-            p = spaces.unflatten(self.observation_spaces, pred[i].flatten())
-            pred_unflattened.append(p)
-            leader_state.append(p[0]["reference"])
+        if pred != None:
+            pred_unflattened = []
+            leader_state = []
+            agent_state = {}
             for agent in self.agents:
-                agent_state[agent].append(p[0]["agent_states"][agent])
+                agent_state[agent] = []
+            pred_steps = pred.shape[0]
+            for i in range(pred_steps):
+                p = spaces.unflatten(self.observation_spaces, pred[i].flatten())
+                pred_unflattened.append(p)
+                leader_state.append(p[0]["reference"])
+                for agent in self.agents:
+                    agent_state[agent].append(p[0]["agent_states"][agent])
 
         # Plot as a line graph using matplotlib.
         plt.figure(figsize=figsize)
@@ -158,13 +159,13 @@ class parallel_env(ParallelEnv):
         plt.plot([0, len(self.reference_state_history)-1], [self.alpha, self.alpha], color='g', alpha=0.7, label="Leader Speed (Actual)")
         
         # Plot predictions.     
-        # if (len(pred) != 0):
-        #     labels = [f"Leader (Predicted at t={history_length-1})", "Leader Speed (Predicted)", f"Follower 0 (Predicted at t={history_length-1})"]
+        if pred != None:
+            timesteps = np.arange(self.step_count - history_length, self.step_count)
 
-        #     plt.plot(leader_state, label=f"Leader (Predicted at t={history_length-1})", color="orange", alpha=0.7, linestyle='--')
+            plt.plot(timesteps, leader_state, label=f"Leader (Predicted at t={history_length-1})", color="orange", alpha=0.7, linestyle='--')
 
-        #     for i, agent in enumerate(self.agents):
-        #         plt.plot(agent_state[agent], label=f"Follower {agent}", color="red", alpha=0.7, linestyle='--')
+            for i, agent in enumerate(self.agents):
+                plt.plot(timesteps, agent_state[agent], label=f"Follower {agent}", color="red", alpha=0.7, linestyle='--')
 
         plt.xlabel("Time (s)")
         plt.ylabel("State")
