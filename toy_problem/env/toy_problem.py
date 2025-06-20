@@ -133,6 +133,7 @@ class parallel_env(ParallelEnv):
                 None
         '''
 
+
         # Convert the predicted state back into a dictionary (unflatten).
         pred_unflattened = []
         leader_state = []
@@ -157,23 +158,18 @@ class parallel_env(ParallelEnv):
         plt.plot([0, len(self.reference_state_history)-1], [self.alpha, self.alpha], color='g', alpha=0.7, label="Leader Speed (Actual)")
         
         # Plot predictions.     
-        if (len(pred) != 0):
-            colors = ["orange", "green", "red", "yellow", "blue", "purple", "black", "grey"]
-            labels = [f"Leader (Predicted at t={history_length-1})", "Leader Speed (Predicted)", f"Follower 0 (Predicted at t={history_length-1})"]
+        # if (len(pred) != 0):
+        #     labels = [f"Leader (Predicted at t={history_length-1})", "Leader Speed (Predicted)", f"Follower 0 (Predicted at t={history_length-1})"]
 
-            plt.plot(leader_state, label=labels[0], color=colors[0], alpha=0.7, linestyle='--')
+        #     plt.plot(leader_state, label=f"Leader (Predicted at t={history_length-1})", color="orange", alpha=0.7, linestyle='--')
 
-            for i, agent in enumerate(self.agents):
-                plt.plot(agent_state[agent], label=f"Follower {agent}", color=colors[i+1], alpha=0.7, linestyle='--')
+        #     for i, agent in enumerate(self.agents):
+        #         plt.plot(agent_state[agent], label=f"Follower {agent}", color="red", alpha=0.7, linestyle='--')
 
         plt.xlabel("Time (s)")
         plt.ylabel("State")
         plt.legend()
         plt.show()
-
-        print(f"Leader Actual: {self.reference_state_history}")
-        print(f"Leader Predicted: {pred[:, 1]}")
-
 
     def observation_space(self, agent):
         ''' Returns the observation space for the given agent. '''
@@ -285,11 +281,11 @@ class parallel_env(ParallelEnv):
                 # Increment the agent state.
                 self.agent_states[agent] += action
 
-                self.state_history[agent].append(self.agent_states[agent])
+                self.state_history[agent].append(copy(self.agent_states[agent]))
 
         # Increment the reference state.
         self.reference_state += self.alpha
-        self.reference_state_history.append(self.reference_state)
+        self.reference_state_history.append(copy(self.reference_state))
 
         # Provide reward.
         for agent in self.agents:
