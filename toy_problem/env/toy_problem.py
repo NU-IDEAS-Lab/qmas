@@ -159,7 +159,7 @@ class parallel_env(ParallelEnv):
         plt.plot([0, len(self.reference_state_history)-1], [self.alpha, self.alpha], color='g', alpha=0.7, label="Leader Speed (Actual)")
         
         # Plot predictions.     
-        if pred != None:
+        if pred != None and pred.sum() != 0.0:
             timesteps = np.arange(self.step_count - history_length, self.step_count)
 
             plt.plot(timesteps, leader_state, label=f"Leader (Predicted at t={history_length-1})", color="orange", alpha=0.7, linestyle='--')

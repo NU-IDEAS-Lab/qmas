@@ -418,7 +418,8 @@ class PettingzooRunner(Runner):
                         print(f"Got prediction for agent {agentIdx} at step {render_env.envs[0].env.step_count} with shape {state_pred[agentIdx].shape}")
                     else:
                         state_pred[agentIdx] = torch.from_numpy(obs[0, agentIdx])
-                        state_pred_full[:, agentIdx, :] = torch.from_numpy(obs[0, agentIdx])
+                        # state_pred_full[:, agentIdx, :] = torch.from_numpy(obs[0, agentIdx])
+                        state_pred_full[:, agentIdx, :] = torch.zeros((HISTORY_LENGTH, *obs_shape), dtype=torch.float32)
                     
                 actions, rnn_states = self.trainer.policy.act(
                     state_pred,
