@@ -160,12 +160,13 @@ class QmasAlgorithm(R_MAPPO):
 
         # Condition randomly.
         fix_mask = torch.zeros_like(trajectories)
-        x0 = torch.zeros_like(trajectories)
-        for i in range(trajectories.shape[1]):
-            # We must have the t=0 condition.
-            if np.random.rand() > 0.5 or i == 0:
-                fix_mask[:, i] = 1.0
-                x0[:, i] = trajectories[:,i]
+        # x0 = torch.zeros_like(trajectories)
+        for i in range(trajectories.shape[0]):
+            for j in range(trajectories.shape[1]):
+                # We must have the t=0 condition.
+                if np.random.rand() > 0.5 or i == 0:
+                    fix_mask[i, j] = 1.0
+                    # x0[i, j] = trajectories[i, j]
                 
 
 
