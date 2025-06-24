@@ -16,7 +16,7 @@ from onpolicy.models.diffusion.sampling.functions import n_step_guided_p_sample
 # from cleandiffuser.diffusion import ContinuousDiffusionSDE, DiscreteDiffusionSDE
 from onpolicy.models.diffusion.diffusionsde import DiscreteDiffusionSDE
 from cleandiffuser.classifier import OptimalityClassifier
-from cleandiffuser.nn_classifier import HalfDiT1d
+from cleandiffuser.nn_classifier import HalfDiT1d, HalfJannerUNet1d
 from cleandiffuser.nn_diffusion import DiT1d, JannerUNet1d
 
 
@@ -60,7 +60,7 @@ class QmasPolicy(R_MAPPOPolicy):
         # fix_mask[0, :obs_dim] = 1.
         # Weight actions more heavily in the loss.
         loss_weight = torch.ones((self.prediction_horizon, transition_dim))
-        loss_weight[:, :action_dim] = 1.0
+        loss_weight[:, :action_dim] = 10.0
         
         # Create Diffuser model.
         # diffuser_base = TemporalUnet(
@@ -103,16 +103,25 @@ class QmasPolicy(R_MAPPOPolicy):
         #     # dim_mults=(8, 4, 2, 1),
         #     out_dim=1
         # ).to(device)
-        guide_base = HalfDiT1d(
-            x_dim=transition_dim,
+        # guide_base = HalfDiT1d(
+        #     x_dim=transition_dim,
+        #     out_dim=1,
+        #     x_seq_len=self.prediction_horizon,
+        #     emb_dim=128,
+        #     d_model=256,
+        #     n_heads=8,
+        #     depth=4,
+        #     timestep_emb_type="untrainable_fourier",
+        #     timestep_emb_params={"scale": 0.02},
+        # )
+        guide_base = HalfJannerUNet1d(
+            horizon=self.prediction_horizon,
+            in_dim=transition_dim,
             out_dim=1,
-            x_seq_len=self.prediction_horizon,
-            emb_dim=128,
-            d_model=256,
-            n_heads=8,
-            depth=4,
-            timestep_emb_type="untrainable_fourier",
-            timestep_emb_params={"scale": 0.02},
+            model_dim=32,
+            emb_dim=transition_dim,
+            dim_mult=(1, 2, 4, 8),
+            timestep_emb_type="untrainable_fourier"
         )
         # self.guide = ValueDiffusion(
         #     guide_base, horizon = self.prediction_horizon, observation_dim = share_obs_dim, 
