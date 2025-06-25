@@ -185,7 +185,6 @@ class QmasAlgorithm(R_MAPPO):
         # )
         diffuser_loss = self.policy.diffuser.update_diffusion(
             x0=trajectories,
-            # condition_cfg=conditions,
             fix_mask=fix_mask 
         )['diffusion_loss']
 
