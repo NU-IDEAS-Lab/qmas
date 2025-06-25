@@ -105,7 +105,7 @@ class parallel_env(ParallelEnv):
         self.step_count = 0
         self.dones = dict.fromkeys(self.agents, False)
         self.reference_state = 0.0
-        self.alpha = np.random.uniform(-10.0, 10.0)
+        self.alpha = np.random.uniform(-1.0, 1.0)
         self.state_history = {agent: [0.0] for agent in self.agents}
         self.reference_state_history = [0.0]
 
