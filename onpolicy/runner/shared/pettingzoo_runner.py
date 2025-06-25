@@ -363,51 +363,38 @@ class PettingzooRunner(Runner):
                     aa = None
 
                 for agentIdx in range(self.num_agents):
-                    # evaluate the traj on the rendenered diffuser
-                    # how to make 2 traj into one model 
                     if len(trajectory[agentIdx]) == HISTORY_LENGTH: # and render_env.envs[0].env.step_count == HISTORY_LENGTH - 1:
                         
                         trajectory_tensor = torch.stack(list(trajectory[agentIdx]), dim=0)
                         
-                        # Full conditioning using a random mask
-                        condition = np.zeros((HISTORY_LENGTH, transition_size), dtype=np.float32)
-                        condition_mask = np.zeros((HISTORY_LENGTH, transition_size), dtype=np.float32)
+                        # Set up conditions (prior knowledge).
+                        condition = np.zeros((1, HISTORY_LENGTH, transition_size), dtype=np.float32)
+                        condition_mask = np.zeros((1, HISTORY_LENGTH, transition_size), dtype=np.float32)
                         for i in range(len(trajectory_tensor)):
                             # if (np.random.rand() > 0.5 and i<7) or i == 0: 
                             #  # Ensure at least t=0 is always conditioned
-                            if i<4:
+                            if i < 4:
                             # if True:
-                                condition[i] = trajectory_tensor[i]
-                                condition_mask[i] = 1.0
+                            # if i == 0 or np.random.rand() > 0.5:
+                            # if i % 2 == 0:
+                                condition[0, i] = trajectory_tensor[i]
+                                condition_mask[0, i] = 1.0
                         condition = torch.from_numpy(condition).to(self.device)
                         condition_mask = torch.from_numpy(condition_mask).to(self.device)
-                        
-                        # Other conditioning methods.
-                        # condition = {0: obs_tensor[0], len(obs_traj)-1: obs_tensor[len(obs_traj)-1], 3: obs_tensor[3]}
-                        # condition = {0: obs_tensor[0], 1: obs_tensor[1]}
-                        # condition = {i: obs_tensor[i] for i in range(4)}
-                        # condition = {i: obs_tensor[i] for i in range(len(obs_tensor))}
-                        # condition = {i: obs_tensor[i] for i in range(len(obs_tensor) - 4)}
-                        
-                        # pred = self.trainer.policy.diffuser(condition).trajectories[0, :, self.trainer.policy.diffuser.action_dim:]
-
-                        # pred_actions, pred_trajectories = self.trainer.policy.diffuser_policy(condition)
-                        # pred = pred_trajectories.observations[0]
-
-                        # Pred is the series of denoised predictions over the denoising steps.
-                        # Pred[0] is then the most accurate prediction.
-                        # We currently only use the last timestep of that prediction.
-
-                        fix_mask = condition_mask.unsqueeze(0)  
-                        prior = condition.unsqueeze(0)     
 
                         pred, log = self.policy.diffuser.sample(
-                            prior=prior,
-                            fix_mask=fix_mask,
+                            # The prior and fix_mask represent the known data and are applied as described by Janner et al.
+                            prior=condition,
+                            fix_mask=condition_mask,
+
                             solver="ddpm",
                             n_samples=1,
-                            sample_steps = 20,
-                            w_cg=0.0,
+                            sample_steps = 5,
+
+                            # The condition_cg and condition_cg_mask represent the known data and are used for the guide function.
+                            condition_cg=condition,
+                            condition_cg_mask=condition_mask,
+                            w_cg=1.0,
                             w_cfg=0.0
                         )
                         
