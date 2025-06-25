@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-	"--experiment_name", "toy-problem-cleandiffusion-lossweight1",
+	"--experiment_name", "toy-problem-cleandiffusion-predmean",
     "--project_name", "qmas",
 	"--env_class", "toy_problem.toy_problem_v0.parallel_env",
 	"--user_name", "ideas-mas",
@@ -35,7 +35,7 @@ args = [
 
 	"--n_rollout_threads", "100",
 	"--cuda",
-	"--cuda_idx", "2",
+	"--cuda_idx", "3",
 
 	"--save_interval", "1000",
     "--results_dir", "/data/group/mas/qmas/results",

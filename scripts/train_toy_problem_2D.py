@@ -35,7 +35,7 @@ args = [
 
 	"--n_rollout_threads", "100",
 	"--cuda",
-	"--cuda_idx", "6",
+	"--cuda_idx", "4",
 
 	"--save_interval", "1000",
     "--results_dir", "/data/group/mas/qmas/results",
