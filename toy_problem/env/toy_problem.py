@@ -166,6 +166,8 @@ class parallel_env(ParallelEnv):
 
             for i, agent in enumerate(self.agents):
                 plt.plot(timesteps, agent_state[agent], label=f"Follower {agent}", color="red", alpha=0.7, linestyle='--')
+            
+            plt.plot(timesteps, [self.alpha] * len(timesteps), color='g', alpha=0.7, linestyle='--', label="Leader Speed (Predicted)")
 
         plt.xlabel("Time (s)")
         plt.ylabel("State")
