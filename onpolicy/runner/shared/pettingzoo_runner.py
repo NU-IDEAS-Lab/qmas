@@ -371,9 +371,9 @@ class PettingzooRunner(Runner):
                         condition = np.zeros((1, HISTORY_LENGTH, transition_size), dtype=np.float32)
                         condition_mask = np.zeros((1, HISTORY_LENGTH, transition_size), dtype=np.float32)
                         for i in range(len(trajectory_tensor)):
-                            if (np.random.rand() > 0.1) or i == 0: 
+                            # if (np.random.rand() > 0.5 and i<7) or i == 0: 
                             #  # Ensure at least t=0 is always conditioned
-                            # if i < 4:
+                            if i < 4:
                             # if True:
                             # if i == 0 or np.random.rand() > 0.5:
                             # if i % 2 == 0:

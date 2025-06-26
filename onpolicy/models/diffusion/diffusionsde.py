@@ -253,7 +253,6 @@ class DiscreteDiffusionSDE(OrigDiffuser):
                         + sigmas[i - 1] * (-torch.expm1(-2 * hs[i])).sqrt() * torch.randn_like(xt)
                     )
 
-           
             # fix the known portion, and preserve the sampling history
             if fix_mask is not None:
                 xt = xt * (1.0 - fix_mask) + prior * fix_mask
