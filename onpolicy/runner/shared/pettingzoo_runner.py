@@ -373,10 +373,10 @@ class PettingzooRunner(Runner):
                         for i in range(len(trajectory_tensor)):
                             # if (np.random.rand() > 0.5 and i<7) or i == 0: 
                             #  # Ensure at least t=0 is always conditioned
-                            if i < 4:
+                            # if i < 4:
                             # if True:
                             # if i == 0 or np.random.rand() > 0.5:
-                            # if i % 2 == 0:
+                            if i % 2 == 0 or i == 1:
                                 condition[0, i] = trajectory_tensor[i]
                                 condition_mask[0, i] = 1.0
                         condition = torch.from_numpy(condition).to(self.device)
@@ -394,7 +394,7 @@ class PettingzooRunner(Runner):
                             # The condition_cg and condition_cg_mask represent the known data and are used for the guide function.
                             condition_cg=condition,
                             condition_cg_mask=condition_mask,
-                            w_cg=1.0,
+                            w_cg=0.1,
                             w_cfg=0.0
                         )
                         
