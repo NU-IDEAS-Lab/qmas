@@ -158,6 +158,12 @@ class DiscreteDiffusionSDE(OrigDiffuser):
         # ===================== Denoising Loop ========================
         loop_steps = [1] * diffusion_x_sampling_steps + list(range(1, sample_steps + 1))
         for i in reversed(loop_steps):
+            # Autoregressive conditioning using prev_prediction
+            if i == loop_steps[-1] and "prev_prediction" in kwargs and kwargs["prev_prediction"] is not None:
+                prev_prediction = kwargs["prev_prediction"]
+                autoregressive_steps = kwargs.get("autoregressive_steps", None)
+                k = autoregressive_steps if autoregressive_steps is not None else min(prev_prediction.shape[1], xt.shape[1])
+                xt[:, :k] = xt[:, :k] * fix_mask[:, :k] + prev_prediction[:, -k:] * (1.0 - fix_mask[:, :k])
             t = torch.full((n_samples,), t_schedule[i], dtype=prior.dtype, device=prior.device)
 
             # guided sampling

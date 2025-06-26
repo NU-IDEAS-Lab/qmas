@@ -335,6 +335,8 @@ class PettingzooRunner(Runner):
         trajectory = [deque(maxlen=HISTORY_LENGTH) for _ in range(self.num_agents)]
         state_pred = torch.zeros((self.num_agents, *obs_shape), dtype=torch.float32)
         state_pred_full = torch.zeros((HISTORY_LENGTH, self.num_agents, *obs_shape), dtype=torch.float32)
+
+        prev_prediction = None  # For autoregressive conditioning
         
         for i_episode in range(self.all_args.render_episodes):
             for i in range(self.num_agents):
@@ -363,20 +365,14 @@ class PettingzooRunner(Runner):
                     aa = None
 
                 for agentIdx in range(self.num_agents):
-                    if len(trajectory[agentIdx]) == HISTORY_LENGTH: # and render_env.envs[0].env.step_count == HISTORY_LENGTH - 1:
-                        
+                    if len(trajectory[agentIdx]) == HISTORY_LENGTH:
                         trajectory_tensor = torch.stack(list(trajectory[agentIdx]), dim=0)
-                        
+
                         # Set up conditions (prior knowledge).
                         condition = np.zeros((1, HISTORY_LENGTH, transition_size), dtype=np.float32)
                         condition_mask = np.zeros((1, HISTORY_LENGTH, transition_size), dtype=np.float32)
                         for i in range(len(trajectory_tensor)):
-                            if (np.random.rand() > 0.1) or i == 0: 
-                            #  # Ensure at least t=0 is always conditioned
-                            # if i < 4:
-                            # if True:
-                            # if i == 0 or np.random.rand() > 0.5:
-                            # if i % 2 == 0:
+                            if (np.random.rand() > 0.2) or i==0 or i==4 or i==5 or i==6 or i==7:
                                 condition[0, i] = trajectory_tensor[i]
                                 condition_mask[0, i] = 1.0
                         condition = torch.from_numpy(condition).to(self.device)
@@ -389,15 +385,20 @@ class PettingzooRunner(Runner):
 
                             solver="ddpm",
                             n_samples=1,
-                            sample_steps = 5,
+                            sample_steps=5,
 
                             # The condition_cg and condition_cg_mask represent the known data and are used for the guide function.
                             condition_cg=condition,
                             condition_cg_mask=condition_mask,
                             w_cg=1.0,
-                            w_cfg=0.0
+                            w_cfg=0.0,
+                            prev_prediction=prev_prediction,
+                            autoregressive_steps=4,
                         )
-                        
+
+                        # Store the prediction for autoregressive conditioning
+                        prev_prediction = pred.detach()
+
                         # Strip the action part of the prediction.
                         state_pred[agentIdx] = pred[0, -1, act_size:]
                         state_pred_full[:, agentIdx, :] = pred[0, :, act_size:]
@@ -405,9 +406,8 @@ class PettingzooRunner(Runner):
                         print(f"Got prediction for agent {agentIdx} at step {render_env.envs[0].env.step_count} with shape {state_pred[agentIdx].shape}")
                     else:
                         state_pred[agentIdx] = torch.from_numpy(obs[0, agentIdx])
-                        # state_pred_full[:, agentIdx, :] = torch.from_numpy(obs[0, agentIdx])
                         state_pred_full[:, agentIdx, :] = torch.zeros((HISTORY_LENGTH, *obs_shape), dtype=torch.float32)
-                    
+                
                 actions, rnn_states = self.trainer.policy.act(
                     state_pred,
                     np.concatenate(rnn_states),
@@ -424,7 +424,6 @@ class PettingzooRunner(Runner):
 
                 # Take a step in the environment and get the results.
                 obs, share_obs, render_rewards, dones, infos, available_actions = render_env.step(actions_env)
-                # obs_traj.append(torch.from_numpy(share_obs[0]))
                 for i in range(self.num_agents):
                     transition = np.concatenate((actions[0][i], obs[0][i]), axis=0)
                     trajectory[i].append(torch.from_numpy(transition))
@@ -433,7 +432,6 @@ class PettingzooRunner(Runner):
                     if ipython_clear_output:
                         clear_output(wait = True)
                     render_env.envs[0].env.render(state_pred_full, history_length=HISTORY_LENGTH)
-                    # render_env.envs[0].env.render()
 
                 # append frame
                 if self.all_args.save_gifs:        
@@ -448,5 +446,3 @@ class PettingzooRunner(Runner):
                     format="GIF",
                     duration=self.all_args.ifi,
                 )
-            
-            # time.sleep(3.0)
