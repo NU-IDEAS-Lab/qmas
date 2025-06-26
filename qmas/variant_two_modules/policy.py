@@ -60,7 +60,7 @@ class QmasPolicy(R_MAPPOPolicy):
         # fix_mask[0, :obs_dim] = 1.
         # Weight actions more heavily in the loss.
         loss_weight = torch.ones((self.prediction_horizon, transition_dim))
-        loss_weight[:, :action_dim] = 10.0
+        loss_weight[:, :action_dim] = 1.0
         
         # Create Diffuser model.
         # diffuser_base = TemporalUnet(
