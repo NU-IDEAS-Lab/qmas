@@ -150,14 +150,6 @@ class QmasAlgorithm(R_MAPPO):
         # Build trajectories.
         trajectories = torch.cat([actions_batch, share_obs_batch], dim=-1)
 
-        # Set up conditions based on the shared observations.
-        # conditions = torch.zeros_like(trajectories)
-        # conditions = trajectories.clone()  # Use the entire trajectory as condition.
-        # conditions = {i: share_obs_batch[:, i] for i in range(share_obs_batch.shape[1])} # condition based on the entire trajectory
-        # conditions = {i: share_obs_batch[:, i] for i in range(2)} # condition based on only the first two points
-        # conditions = {i: share_obs_batch[:, i] for i in range(1)} # condition based on only the first point
-        # conditions = {i: share_obs_batch[:, i] for i in range(share_obs_batch.shape[1] // 2)} # condition based on half of the trajectory
-
         # Condition randomly.
         fix_mask = torch.zeros_like(trajectories)
         # x0 = torch.zeros_like(trajectories)
@@ -167,34 +159,14 @@ class QmasAlgorithm(R_MAPPO):
                 if np.random.rand() > 0.5 or i == 0:
                     fix_mask[i, j] = 1.0
                     # x0[i, j] = trajectories[i, j]
-                
-
-
-        # Get the conditions.
-        # conditions_dict = {
-        #     'vec_condition': conditions[:, 0, :],
-        #     'seq_condition': conditions
-        # }
 
         # Update diffuser model.
-        # diffuser_loss, diffuser_grad_norm = self.diffusion_update(
-        #     self.policy.diffuser,
-        #     self.policy.diffuser_optimizer,
-        #     (trajectories, conditions_dict),
-        #     update_model=True
-        # )
         diffuser_loss = self.policy.diffuser.update_diffusion(
             x0=trajectories,
             fix_mask=fix_mask 
         )['diffusion_loss']
 
         # Update guide model.
-        # guide_loss, guide_grad_norm = self.diffusion_update(
-        #     self.policy.guide,
-        #     self.policy.guide_optimizer,
-        #     (trajectories, conditions, returns_batch),
-        #     update_model=True
-        # )
         guide_loss = self.policy.diffuser.update_classifier(
             x0=trajectories,
             condition_cg=returns_batch
