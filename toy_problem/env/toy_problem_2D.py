@@ -19,7 +19,9 @@ from toy_problem.env.entity import ENTITY_TYPE, Agent, Adversary
 
 def add_args(parser):
     ''' Adds environment arguments. '''
-    pass
+    
+    import argparse
+    parser.add_argument("--no_ego_obs", action=argparse.BooleanOptionalAction, default=False)
 
 def parse_args(args):
     ''' Parses environment arguments. '''
@@ -55,6 +57,7 @@ class parallel_env(ParallelEnv):
                  num_agents = 3,
                  max_cycles: int = -1,
                  world_size: float = 20.0,
+                 no_ego_obs: bool = False
                 ):
         """
         Initialize the environment.
@@ -65,6 +68,7 @@ class parallel_env(ParallelEnv):
         self.max_cycles = max_cycles
         self.world_dims = np.array([world_size, world_size], dtype=np.float32)
         num_adversaries = 1 #just 1 leader for now
+        self.no_ego_obs = no_ego_obs
 
         # Set up entities.
         self.possible_agents = [
@@ -84,15 +88,22 @@ class parallel_env(ParallelEnv):
         
         # Create the observation space.
         # obs_space = spaces.Box(low=-np.inf, high=np.inf, shape=(4 + num_agents*2, ), dtype=np.float32)
-        obs_space = spaces.Dict({
+        obs_space = {
             "adversaries": spaces.Dict({
-                adversary: spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32) for adversary in self.possible_adversaries
+                adversary: spaces.Dict({
+                    "position": spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32),
+                    "velocity": spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32),
+                }) for adversary in self.possible_adversaries
             }),
-            "agents": spaces.Dict({
-                agent: spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32) for agent in self.possible_agents
-            }),
-            "alpha": spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32),
-        })
+        }
+        if not self.no_ego_obs:
+            obs_space["agents"] = spaces.Dict({
+                adversary: spaces.Dict({
+                    "position": spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32),
+                    "velocity": spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32),
+                }) for adversary in self.possible_agents
+            })
+        obs_space = spaces.Dict(obs_space)
         self.observation_spaces = spaces.Dict({agent: obs_space for agent in self.possible_agents}) # type: ignore
 
         # The state space is a complete observation of the environment.
@@ -236,12 +247,13 @@ class parallel_env(ParallelEnv):
 
         # Plot history of predictions from the perspective of agent 0.
         if len(pred_unflattened) > 0:
-            agent_preds = [pred_unflattened[i][self.possible_agents[0]]["agents"] for i in range(len(pred_unflattened))]
-            for i, agent in enumerate(self.possible_agents):
-                # Get the history of predictions for this agent.
-                history = [p[agent] for p in agent_preds]
-                plt.plot([h[0] for h in history], [h[1] for h in history], 'b--', alpha=0.5, linewidth=1.5)            
-                plt.annotate(f"Pred {agent}", (history[-1][0] + 1, history[-1][1]), fontsize=8, color='blue')
+            if not self.no_ego_obs:
+                agent_preds = [pred_unflattened[i][self.possible_agents[0]]["agents"] for i in range(len(pred_unflattened))]
+                for i, agent in enumerate(self.possible_agents):
+                    # Get the history of predictions for this agent.
+                    history = [p[agent] for p in agent_preds]
+                    plt.plot([h[0] for h in history], [h[1] for h in history], 'b--', alpha=0.5, linewidth=1.5)            
+                    plt.annotate(f"Pred {agent}", (history[-1][0] + 1, history[-1][1]), fontsize=8, color='blue')
             
             adversary_preds = [pred_unflattened[i][self.possible_agents[0]]["adversaries"] for i in range(len(pred_unflattened))]
             for i, adversary in enumerate(self.possible_adversaries):
@@ -319,10 +331,20 @@ class parallel_env(ParallelEnv):
         # obs = obs.flatten()
 
         obs = {
-            "adversaries": {a: a.position for a in self.possible_adversaries},
-            "agents": {a: a.position for a in self.possible_agents},
-            "alpha": self.alpha,
+            "adversaries": {
+                a: {
+                    "position": a.position,
+                    "velocity": self.alpha,
+                } for a in self.possible_adversaries
+            }
         }
+        if not self.no_ego_obs:
+            obs["agents"] = {
+                a: {
+                    "position": a.position,
+                    "velocity": a.position - self.state_history[a][-1] if len(self.state_history[a]) > 0 else np.array([0.0, 0.0], dtype=np.float32),
+                } for a in self.possible_agents
+            }
 
         return obs
     
