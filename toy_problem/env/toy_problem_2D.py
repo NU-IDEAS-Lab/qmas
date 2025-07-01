@@ -23,10 +23,6 @@ def add_args(parser):
     import argparse
     parser.add_argument("--no_ego_obs", action=argparse.BooleanOptionalAction, default=False)
 
-def parse_args(args):
-    ''' Parses environment arguments. '''
-    pass
-
 
 def validate_args(parsed_args):
     ''' Validates the arguments. '''
