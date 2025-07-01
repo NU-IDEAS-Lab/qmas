@@ -22,6 +22,8 @@ def add_args(parser):
     
     import argparse
     parser.add_argument("--no_ego_obs", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--random_start_positions", action=argparse.BooleanOptionalAction, default=False,
+                        help="If true, agents will start at random positions in the world. If false, they will start at [0,0].")
 
 
 def validate_args(parsed_args):
@@ -53,7 +55,8 @@ class parallel_env(ParallelEnv):
                  num_agents = 3,
                  max_cycles: int = -1,
                  world_size: float = 20.0,
-                 no_ego_obs: bool = False
+                 no_ego_obs: bool = False,
+                 random_start_positions: bool = False
                 ):
         """
         Initialize the environment.
@@ -65,6 +68,7 @@ class parallel_env(ParallelEnv):
         self.world_dims = np.array([world_size, world_size], dtype=np.float32)
         num_adversaries = 1 #just 1 leader for now
         self.no_ego_obs = no_ego_obs
+        self.random_start_positions = random_start_positions
 
         # Set up entities.
         self.possible_agents = [
@@ -166,9 +170,9 @@ class parallel_env(ParallelEnv):
 
         # Just return [0,0] for now. Compatible with the existing trained policy.
         # Remove when we are ready to train a new policy.
-        return np.array([0.0, 0.0], dtype=np.float32)
+        # return np.array([0.0, 0.0], dtype=np.float32)
 
-        # return np.random.uniform(-self.world_dims / 2, self.world_dims / 2)
+        return np.random.uniform(-self.world_dims / 2, self.world_dims / 2)
 
 
     def render(self, pred=[], figsize=(9, 6), history_length=2):
