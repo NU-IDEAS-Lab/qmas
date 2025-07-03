@@ -54,7 +54,7 @@ class parallel_env(ParallelEnv):
     def __init__(self,
                  num_agents = 3,
                  max_cycles: int = -1,
-                 world_size: float = 20.0,
+                 world_size: float = 50.0,
                  no_ego_obs: bool = False,
                  random_start_positions: bool = False
                 ):
@@ -143,12 +143,12 @@ class parallel_env(ParallelEnv):
         self.dones = dict.fromkeys(self.agents, False)
         
         # Initialize alpha (velocity) and save base value for variations
-        self.alpha = np.array([random.random(), random.random()], dtype=np.float32)
+        self.alpha = np.random.uniform(-1.0, 1.0, size=2)
         self.base_alpha = self.alpha.copy()  # Store the initial alpha for reference
         self.alpha_history = [self.alpha.copy()]
         
         self.state_history = {
-            a: [np.array([0.0, 0.0], dtype=np.float32)] for a in self.agents + self.adversaries
+            a: [copy(a.position)] for a in self.agents + self.adversaries
         }
 
         # Set available actions.
@@ -354,16 +354,21 @@ class parallel_env(ParallelEnv):
         This function creates a time-varying alpha that follows different patterns.
         """
         # Base frequency for oscillation
-        freq = 0.1
-        angle = freq * self.step_count
-        
-        # Create a more interesting pattern with multiple frequencies
-        self.alpha[0] = self.base_alpha[0] * (math.sin(angle) + 0.5 * math.sin(2.5 * angle))
-        self.alpha[1] = self.base_alpha[1] * (math.cos(angle) + 0.5 * math.cos(3.0 * angle))
-        
-        # Add some random noise to make the trajectory more natural
+        # freq = 0.1
+        # angle = freq * self.step_count
+
+        if random.random() < 0.3:
+            # Randomly change alpha to create a new pattern
+            self.alpha += np.random.normal(0, 0.3, size=2)
+                
+        # # Add some random noise to make the trajectory more natural
         noise_magnitude = 0.05 * min(1.0, self.step_count / 50.0)  # Gradually increase noise
         self.alpha += np.random.normal(0, noise_magnitude, size=2)
+
+        # Normalize alpha to keep it within a reasonable range.
+        norm = np.linalg.norm(self.alpha)
+        if norm > 1.0:
+            self.alpha = self.alpha / norm
         
         # Record alpha history
         self.alpha_history.append(self.alpha.copy())
