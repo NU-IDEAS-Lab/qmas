@@ -154,13 +154,18 @@ class parallel_env(ParallelEnv):
         # Set available actions.
         self.available_actions_dict = {agent: self._getAvailableActions(agent) for agent in self.agents}
 
-        # Return the initial observation.
-        observation = {agent: self.observe(agent) for agent in self.agents}
         info = {
             agent: {
                 "ready": True
             } for agent in self.agents
         }
+
+        # Return the initial observation.
+        observation = {}
+        for agent in self.agents:
+            obs, obs_mask = self.observe(agent)
+            observation[agent] = obs
+            info[agent]["visibility_mask"] = obs_mask
 
         return observation, info
 
@@ -345,8 +350,25 @@ class parallel_env(ParallelEnv):
                     "velocity": a.position - self.state_history[a][-1] if len(self.state_history[a]) > 0 else np.array([0.0, 0.0], dtype=np.float32),
                 } for a in self.possible_agents
             }
+        
+        # Create a visibility mask for the agents.
+        obs_mask = {
+            "adversaries": {
+                a: {
+                    "position": True,
+                    "velocity": True,
+                } for a in self.possible_adversaries
+            }
+        }
+        if not self.no_ego_obs:
+            obs_mask["agents"] = {
+                a: {
+                    "position": True,
+                    "velocity": True,
+                } for a in self.possible_agents
+            }
 
-        return obs
+        return obs, obs_mask
     
     def _update_alpha(self):
         """

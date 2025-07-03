@@ -174,6 +174,11 @@ class PettingzooRunner(Runner):
         # update env_infos if done
         dones_env = np.all(dones, axis=-1)
 
+        # Get visibility mask from infos.
+        if "visibility_mask" in infos[0]:
+            visibility_mask = np.array([info["visibility_mask"] for info in infos])
+            visibility_mask = np.array(np.split(visibility_mask, self.n_rollout_threads))
+
         # Add information to the logger.
         keys = infos[0].keys()
         for key in keys:
@@ -199,7 +204,8 @@ class PettingzooRunner(Runner):
             rewards=rewards,
             masks=masks,
             delta_steps=delta_steps,
-            available_actions=available_actions
+            available_actions=available_actions,
+            visibility_mask=visibility_mask if "visibility_mask" in locals() else None
         )
 
 
@@ -407,7 +413,7 @@ class PettingzooRunner(Runner):
                         state_pred[agentIdx] = torch.from_numpy(obs[0, agentIdx])
                         # state_pred_full[:, agentIdx, :] = torch.from_numpy(obs[0, agentIdx])
                         state_pred_full[:, agentIdx, :] = torch.zeros((HISTORY_LENGTH, *obs_shape), dtype=torch.float32)
-                    
+                
                 actions, rnn_states = self.trainer.policy.act(
                     state_pred,
                     np.concatenate(rnn_states),
