@@ -246,6 +246,7 @@ class parallel_env(ParallelEnv):
         # Ensure the order of the keys is consistent.
         obs_sorted = {k: obs[k] for k in sorted(obs.keys())}
 
+
         return obs_sorted
     
 

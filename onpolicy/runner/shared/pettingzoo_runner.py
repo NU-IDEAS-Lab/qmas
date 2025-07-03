@@ -371,16 +371,29 @@ class PettingzooRunner(Runner):
                         # Set up conditions (prior knowledge).
                         condition = np.zeros((1, HISTORY_LENGTH, transition_size), dtype=np.float32)
                         condition_mask = np.zeros((1, HISTORY_LENGTH, transition_size), dtype=np.float32)
+                        # Always condition on the last 4 steps of each window
                         for i in range(len(trajectory_tensor)):
-                            if (np.random.rand() > 0.2) or i==0 or i==4 or i==5 or i==6 or i==7:
+                            if i >= HISTORY_LENGTH - 4:
                                 condition[0, i] = trajectory_tensor[i]
                                 condition_mask[0, i] = 1.0
+                            else:
+                                condition_mask[0, i] = 0.0
                         condition = torch.from_numpy(condition).to(self.device)
                         condition_mask = torch.from_numpy(condition_mask).to(self.device)
 
+                        # Modify prior for autoregression by injecting last k predicted steps
+                        prior = condition.clone()
+                        if prev_prediction is not None:
+                            k = 4  # autoregressive steps
+                            prior[:, :k] = torch.where(
+                                condition_mask[:, :k] == 0,
+                                prev_prediction[:, -k:],
+                                prior[:, :k]
+                            )
+
                         pred, log = self.policy.diffuser.sample(
                             # The prior and fix_mask represent the known data and are applied as described by Janner et al.
-                            prior=condition,
+                            prior=prior,
                             fix_mask=condition_mask,
 
                             solver="ddpm",
@@ -392,8 +405,6 @@ class PettingzooRunner(Runner):
                             condition_cg_mask=condition_mask,
                             w_cg=1.0,
                             w_cfg=0.0,
-                            prev_prediction=prev_prediction,
-                            autoregressive_steps=4,
                         )
 
                         # Store the prediction for autoregressive conditioning
