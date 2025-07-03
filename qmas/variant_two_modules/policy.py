@@ -63,46 +63,49 @@ class QmasPolicy(R_MAPPOPolicy):
         loss_weight[:, :action_dim] = 1.0
         
         # Create Diffuser model.
-        diffuser_base = DiT1d(
-            x_dim=transition_dim,
-            x_seq_len=self.prediction_horizon,
-            emb_dim=transition_dim,
-            d_model=256,
-            n_heads=8,
-            depth=4,
-            timestep_emb_type="untrainable_fourier",
-            timestep_emb_params={"scale": 0.02},
-        )
-        # diffuser_base = JannerUNet1d(
-        #     transition_dim, model_dim=32, emb_dim=transition_dim, dim_mult=(1, 2, 4, 8),
-        #     timestep_emb_type="untrainable_fourier",
-        #     timestep_emb_params={"scale": 0.02},
-        #     attention=False, kernel_size=5
-        # )
+        print(f"QmasPolicy: Using diffusion model type {args.diffusion_model_type} with prediction horizon {self.prediction_horizon} and transition dimension {transition_dim}.")
+        if args.diffusion_model_type == "jannerunet":
+            diffuser_base = JannerUNet1d(
+                transition_dim, model_dim=32, emb_dim=32, dim_mult=(1, 2, 4, 8),
+                timestep_emb_type="positional",
+                attention=False, kernel_size=5
+            )
+            guide_base = HalfJannerUNet1d(
+                horizon=self.prediction_horizon,
+                in_dim=transition_dim,
+                out_dim=1,
+                model_dim=32,
+                emb_dim=32,
+                dim_mult=(1, 2, 4, 8),
+                timestep_emb_type="positional"
+            )
+        elif args.diffusion_model_type == "dit1d":
+            diffuser_base = DiT1d(
+                x_dim=transition_dim,
+                x_seq_len=self.prediction_horizon,
+                emb_dim=128,
+                d_model=256,
+                n_heads=8,
+                depth=4,
+                timestep_emb_type="untrainable_fourier",
+                timestep_emb_params={"scale": 0.02},
+            )
+            guide_base = HalfDiT1d(
+                x_dim=transition_dim,
+                out_dim=1,
+                x_seq_len=self.prediction_horizon,
+                emb_dim=128,
+                d_model=256,
+                n_heads=8,
+                depth=4,
+                timestep_emb_type="untrainable_fourier",
+                timestep_emb_params={"scale": 0.02},
+            )
+        else:
+            raise ValueError(f"Unknown diffusion model type: {args.diffusion_model_type}")
         
-        # Create Guide model.
-        guide_base = HalfDiT1d(
-            x_dim=transition_dim,
-            out_dim=1,
-            x_seq_len=self.prediction_horizon,
-            emb_dim=128,
-            d_model=256,
-            n_heads=8,
-            depth=4,
-            timestep_emb_type="untrainable_fourier",
-            timestep_emb_params={"scale": 0.02},
-        )
-        # guide_base = HalfJannerUNet1d(
-        #     horizon=self.prediction_horizon,
-        #     in_dim=transition_dim,
-        #     out_dim=1,
-        #     model_dim=32,
-        #     emb_dim=transition_dim,
-        #     dim_mult=(1, 2, 4, 8),
-        #     timestep_emb_type="untrainable_fourier"
-        # )
+        # Create the guide and diffuser.
         self.guide = OptimalityClassifier(guide_base).to(device)
-
         self.diffuser = DiscreteDiffusionSDE(
             diffuser_base,
             None,
