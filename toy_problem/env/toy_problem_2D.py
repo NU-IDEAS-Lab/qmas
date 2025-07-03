@@ -24,6 +24,8 @@ def add_args(parser):
     parser.add_argument("--no_ego_obs", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--random_start_positions", action=argparse.BooleanOptionalAction, default=False,
                         help="If true, agents will start at random positions in the world. If false, they will start at [0,0].")
+    parser.add_argument("--observation_probability_adversary", type=float, default=1.0,
+                        help="The probability with which the adversary's position is observed at each step.")
 
 
 def validate_args(parsed_args):
@@ -56,7 +58,8 @@ class parallel_env(ParallelEnv):
                  max_cycles: int = -1,
                  world_size: float = 50.0,
                  no_ego_obs: bool = False,
-                 random_start_positions: bool = False
+                 random_start_positions: bool = False,
+                 observation_probability_adversary: float = 1.0
                 ):
         """
         Initialize the environment.
@@ -69,6 +72,7 @@ class parallel_env(ParallelEnv):
         num_adversaries = 1 #just 1 leader for now
         self.no_ego_obs = no_ego_obs
         self.random_start_positions = random_start_positions
+        self.observation_probability_adversary = observation_probability_adversary
 
         # Set up entities.
         self.possible_agents = [
@@ -333,15 +337,15 @@ class parallel_env(ParallelEnv):
         obs = {
             "adversaries": {
                 a: {
-                    "position": a.position,
-                    "velocity": self.alpha,
+                    "position": a.position / self.world_dims,
+                    "velocity": a.position - self.state_history[a][-1] if len(self.state_history[a]) > 0 else np.array([0.0, 0.0], dtype=np.float32),
                 } for a in self.possible_adversaries
             }
         }
         if not self.no_ego_obs:
             obs["agents"] = {
                 a: {
-                    "position": a.position,
+                    "position": a.position / self.world_dims,
                     "velocity": a.position - self.state_history[a][-1] if len(self.state_history[a]) > 0 else np.array([0.0, 0.0], dtype=np.float32),
                 } for a in self.possible_agents
             }
