@@ -445,12 +445,13 @@ class parallel_env(ParallelEnv):
 
         # Perform observations.
         for agent in self.possible_agents:
-            agent_observation = self.observe(agent)
+            agent_observation, obs_mask = self.observe(agent)
             obs_dict[agent] = agent_observation
+            info_dict[agent]["visibility_mask"] = obs_mask
             info_dict[f"distance/{agent}"] = np.linalg.norm(agent.position - meanAdversary)
             info_dict[f"position/{agent}"] = agent.position.tolist()
         
-        # Record miscellaneous information.
+        # Add reference position and velocity to the info dictionary.
         info_dict["reference_position"] = meanAdversary.tolist()
         info_dict["reference_velocity"] = self.alpha.tolist()
 
