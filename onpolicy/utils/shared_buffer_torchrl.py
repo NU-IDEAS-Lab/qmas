@@ -119,7 +119,7 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
 
     def insert(self, share_obs, obs, rnn_states_actor, rnn_states_critic, actions, action_log_probs,
                value_preds, rewards, masks, bad_masks=None, active_masks=None, delta_steps=None, available_actions=None,
-               legacy_mode=True):
+               legacy_mode=True, visibility_mask=None):
         """
         Insert data into the buffer.
         :param share_obs: (argparse.Namespace) arguments containing relevant model, policy, and env information.
@@ -182,6 +182,8 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
             'delta_steps': delta_steps,
             'available_actions': available_actions #+1
         })
+        if visibility_mask is not None:
+            data["visibility_mask"] = visibility_mask
 
         # In legacy mode, some data is added for timestep t, others for timestep t+1.
         if legacy_mode:
@@ -518,7 +520,7 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
     def compatibility_get_policy_input(self, step):
         ''' Gets the necessary policy input for a particular step, in the format expected by existing onpolicy code. '''
         sample = self[step]
-
+        
         if self.share_obs_object:
             sample_share_obs = np.array(sample["share_obs"])
             share_obs = sample_share_obs.reshape(-1, *sample_share_obs.shape[4:])
@@ -537,7 +539,10 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
         else:
             available_actions = np.concatenate(sample["available_actions"].numpy())
 
-        return share_obs, obs, rnn_states_actor, rnn_states_critic, masks, available_actions
+        # Extract visibility_mask if present
+        visibility_mask = np.concatenate(sample["visibility_mask"].numpy()) if "visibility_mask" in sample.keys() else None
+
+        return share_obs, obs, rnn_states_actor, rnn_states_critic, masks, available_actions, visibility_mask
 
 
     @property
@@ -599,3 +604,7 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
     @property
     def available_actions(self):
         return self["available_actions"]
+    
+    @property
+    def visibility_masks(self):
+        return self["visibility_mask"] if "visibility_mask" in self.keys() else None

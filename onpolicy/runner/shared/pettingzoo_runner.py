@@ -116,6 +116,8 @@ class PettingzooRunner(Runner):
         # Reset environment.
         obs, share_obs, available_actions = self.envs.reset()
 
+        
+
         # Get the shape of the action space.
         act_shape = get_shape_from_act_space(self.buffer.act_space)
         if isinstance(act_shape, Iterable):
@@ -139,11 +141,18 @@ class PettingzooRunner(Runner):
         )
 
 
+
     @torch.no_grad()
     def collect(self, step):
         self.trainer.prep_rollout()
 
-        share_obs, obs, rnn_states, rnn_states_critic, masks, available_actions = self.buffer.compatibility_get_policy_input(step)
+        # Unpack visibility_mask from compatibility_get_policy_input
+        share_obs, obs, rnn_states, rnn_states_critic, masks, available_actions, visibility_mask = self.buffer.compatibility_get_policy_input(step)
+
+        # Optionally log the first visibility mask for debugging
+        if step == 0 and hasattr(self, "debug_visibility_logged") is False:
+            print("First visibility_mask:", visibility_mask if isinstance(visibility_mask, np.ndarray) else "None")
+            self.debug_visibility_logged = True
 
         value, action, action_log_prob, rnn_states, rnn_states_critic = self.trainer.policy.get_actions(
             share_obs,
@@ -151,7 +160,8 @@ class PettingzooRunner(Runner):
             rnn_states,
             rnn_states_critic,
             masks,
-            available_actions=available_actions
+            available_actions=available_actions,
+            # visibility_mask=visibility_mask  # Uncomment if model supports it
         )
 
         values = np.array(np.split(_t2n(value), self.n_rollout_threads))
