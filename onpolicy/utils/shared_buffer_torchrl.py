@@ -527,7 +527,7 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
             sample_share_obs = np.array(sample["share_obs"])
             share_obs = sample_share_obs.reshape(-1, *sample_share_obs.shape[4:])
         else:
-            share_obs = np.concatenate(sample["share_obs"].numpy())
+            share_obs = sample["share_obs"].numpy()
         if self.obs_object:
             sample_obs = np.array(sample["obs"])
             obs = sample_obs.reshape(-1, *sample_obs.shape[4:], 1)
