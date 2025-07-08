@@ -14,7 +14,8 @@ from onpolicy.models.diffusion.sampling.functions import n_step_guided_p_sample
 
 
 # from cleandiffuser.diffusion import ContinuousDiffusionSDE, DiscreteDiffusionSDE
-from onpolicy.models.diffusion.diffusionsde import DiscreteDiffusionSDE
+# from onpolicy.models.diffusion.diffusionsde import DiscreteDiffusionSDE
+from cleandiffuser.diffusion import DiscreteDiffusionSDE
 from cleandiffuser.classifier import OptimalityClassifier
 from cleandiffuser.nn_classifier import HalfDiT1d, HalfJannerUNet1d
 from cleandiffuser.nn_diffusion import DiT1d, JannerUNet1d
@@ -47,9 +48,9 @@ class QmasPolicy(R_MAPPOPolicy):
                                                  eps=self.opti_eps,
                                                  weight_decay=self.weight_decay)
         
-        share_obs_dim = get_shape_from_obs_space(cent_obs_space, flatten_dicts=False)[0] # state space for all agents
+        obs_dim = get_shape_from_obs_space(self.obs_space, flatten_dicts=False)[0] # state space for all agents
         action_dim = get_shape_from_act_space(act_space) * args.num_agents # action space for all agents
-        transition_dim = share_obs_dim + action_dim
+        transition_dim = obs_dim + action_dim
 
         # TODO: Need to get this null_value from the environment metadata.
         self.null_value = -1.0

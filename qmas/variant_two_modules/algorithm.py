@@ -160,10 +160,13 @@ class QmasAlgorithm(R_MAPPO):
                     fix_mask[i, j] = 1.0
                     # x0[i, j] = trajectories[i, j]
 
+        # Update the fix_mask. This determines which parts of the trajectory are fixed and which are predicted.
+        # This applies to both update_diffusion and update_classifier.
+        self.policy.diffuser.fix_mask = torch.nn.Parameter(fix_mask)
+
         # Update diffuser model.
         diffuser_loss = self.policy.diffuser.update_diffusion(
             x0=trajectories,
-            fix_mask=fix_mask 
         )['diffusion_loss']
 
         # Update guide model.
