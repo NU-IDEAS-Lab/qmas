@@ -494,7 +494,7 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
             sample_share_obs = np.array(sample["share_obs"])
             share_obs_batch = sample_share_obs.reshape(*index_shape, *sample_share_obs.shape[data_start_dim+1:])
         else:
-            share_obs_batch = sample["share_obs"].reshape(*index_shape, *sample["share_obs"].shape[data_start_dim:])
+            share_obs_batch = sample["share_obs"].reshape(*index_shape, *sample["share_obs"].shape[2:])
         if self.obs_object:
             sample_obs = np.array(sample["obs"])
             obs_batch = sample_obs.reshape(*index_shape, *sample_obs.shape[data_start_dim+1:])
