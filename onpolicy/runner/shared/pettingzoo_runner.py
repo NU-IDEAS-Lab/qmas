@@ -146,13 +146,7 @@ class PettingzooRunner(Runner):
     def collect(self, step):
         self.trainer.prep_rollout()
 
-        # Unpack visibility_mask from compatibility_get_policy_input
-        share_obs, obs, rnn_states, rnn_states_critic, masks, available_actions, visibility_mask = self.buffer.compatibility_get_policy_input(step)
-
-        # Optionally log the first visibility mask for debugging
-        if step == 0 and hasattr(self, "debug_visibility_logged") is False:
-            print("First visibility_mask:", visibility_mask if isinstance(visibility_mask, np.ndarray) else "None")
-            self.debug_visibility_logged = True
+        share_obs, obs, rnn_states, rnn_states_critic, masks, available_actions = self.buffer.compatibility_get_policy_input(step)
 
         value, action, action_log_prob, rnn_states, rnn_states_critic = self.trainer.policy.get_actions(
             share_obs,
@@ -160,8 +154,7 @@ class PettingzooRunner(Runner):
             rnn_states,
             rnn_states_critic,
             masks,
-            available_actions=available_actions,
-            # visibility_mask=visibility_mask  # Uncomment if model supports it
+            available_actions=available_actions
         )
 
         values = np.array(np.split(_t2n(value), self.n_rollout_threads))
@@ -185,6 +178,7 @@ class PettingzooRunner(Runner):
         dones_env = np.all(dones, axis=-1)
 
         # Get visibility mask from infos.
+        visibility_mask = None
         if "visibility_mask" in infos[0]:
             visibility_mask = np.array([info["visibility_mask"] for info in infos])
             visibility_mask = np.array(np.split(visibility_mask, self.n_rollout_threads))
@@ -215,7 +209,7 @@ class PettingzooRunner(Runner):
             masks=masks,
             delta_steps=delta_steps,
             available_actions=available_actions,
-            visibility_mask=visibility_mask if "visibility_mask" in locals() else None
+            visibility_mask=visibility_mask
         )
 
 

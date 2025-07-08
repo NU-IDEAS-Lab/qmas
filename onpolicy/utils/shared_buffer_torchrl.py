@@ -119,7 +119,7 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
 
     def insert(self, share_obs, obs, rnn_states_actor, rnn_states_critic, actions, action_log_probs,
                value_preds, rewards, masks, bad_masks=None, active_masks=None, delta_steps=None, available_actions=None,
-               legacy_mode=True, visibility_mask=None):
+               visibility_mask=None, legacy_mode=True):
         """
         Insert data into the buffer.
         :param share_obs: (argparse.Namespace) arguments containing relevant model, policy, and env information.
@@ -135,6 +135,7 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
         :param active_masks: (np.ndarray) denotes whether an agent is active or dead in the env.
         :param available_actions: (np.ndarray) actions available to each agent. If None, all actions are available.
         :param delta_steps: (np.ndarray) number of steps since last update.
+        :param visibility_mask: (np.ndarray) visibility mask for agent observations, if applicable.
         :param legacy_mode: (bool) whether to use legacy mode for inserting data. Will use timesteps t and t+1.
         """
 
@@ -146,6 +147,8 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
             available_actions = np.ones_like(actions)
         if delta_steps is None:
             delta_steps = np.ones_like(value_preds)
+        if visibility_mask is None:
+            visibility_mask = np.ones_like(obs)
         
         # Convert any np.object arrays to tensors of NonTensorData.
         if isinstance(obs, np.ndarray) and obs.dtype == object:
@@ -180,10 +183,9 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
             'bad_masks': bad_masks, #+1
             'active_masks': active_masks, #+1
             'delta_steps': delta_steps,
-            'available_actions': available_actions #+1
+            'available_actions': available_actions, #+1
+            'visibility_mask': visibility_mask, #+1
         })
-        if visibility_mask is not None:
-            data["visibility_mask"] = visibility_mask
 
         # In legacy mode, some data is added for timestep t, others for timestep t+1.
         if legacy_mode:
@@ -539,10 +541,7 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
         else:
             available_actions = np.concatenate(sample["available_actions"].numpy())
 
-        # Extract visibility_mask if present
-        visibility_mask = np.concatenate(sample["visibility_mask"].numpy()) if "visibility_mask" in sample.keys() else None
-
-        return share_obs, obs, rnn_states_actor, rnn_states_critic, masks, available_actions, visibility_mask
+        return share_obs, obs, rnn_states_actor, rnn_states_critic, masks, available_actions
 
 
     @property
@@ -604,7 +603,3 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
     @property
     def available_actions(self):
         return self["available_actions"]
-    
-    @property
-    def visibility_masks(self):
-        return self["visibility_mask"] if "visibility_mask" in self.keys() else None
