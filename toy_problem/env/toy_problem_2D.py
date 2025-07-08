@@ -24,6 +24,10 @@ def add_args(parser):
     parser.add_argument("--no_ego_obs", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--random_start_positions", action=argparse.BooleanOptionalAction, default=False,
                         help="If true, agents will start at random positions in the world. If false, they will start at [0,0].")
+    parser.add_argument("--state_per_agent", action=argparse.BooleanOptionalAction, default=False,
+                        help="If true, the state function will return a separate copy of the state for each agent. "
+                             "This is useful for centralized training, decentralized execution. "
+                             "If false, the state function will return a single copy of the state that is shared among all agents.")
 
 
 def validate_args(parsed_args):
@@ -56,7 +60,8 @@ class parallel_env(ParallelEnv):
                  max_cycles: int = -1,
                  world_size: float = 50.0,
                  no_ego_obs: bool = False,
-                 random_start_positions: bool = False
+                 random_start_positions: bool = False,
+                 state_per_agent: bool = False,
                 ):
         """
         Initialize the environment.
@@ -69,6 +74,7 @@ class parallel_env(ParallelEnv):
         num_adversaries = 1 #just 1 leader for now
         self.no_ego_obs = no_ego_obs
         self.random_start_positions = random_start_positions
+        self.state_per_agent = state_per_agent
 
         # Set up entities.
         self.possible_agents = [
@@ -90,25 +96,28 @@ class parallel_env(ParallelEnv):
         # obs_space = spaces.Box(low=-np.inf, high=np.inf, shape=(4 + num_agents*2, ), dtype=np.float32)
         obs_space = {
             "adversaries": spaces.Dict({
-                adversary: spaces.Dict({
+                a: spaces.Dict({
                     "position": spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32),
                     "velocity": spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32),
-                }) for adversary in self.possible_adversaries
+                }) for a in self.possible_adversaries
             }),
         }
         if not self.no_ego_obs:
             obs_space["agents"] = spaces.Dict({
-                adversary: spaces.Dict({
+                a: spaces.Dict({
                     "position": spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32),
                     "velocity": spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32),
-                }) for adversary in self.possible_agents
+                }) for a in self.possible_agents
             })
         obs_space = spaces.Dict(obs_space)
         self.observation_spaces = spaces.Dict({agent: obs_space for agent in self.possible_agents}) # type: ignore
 
         # The state space is a complete observation of the environment.
         # This is not part of the standard PettingZoo API, but is useful for centralized training.
-        self.state_space = obs_space
+        if self.state_per_agent:
+            self.state_space = self.observation_spaces
+        else:
+            self.state_space = obs_space
 
         self.reset_count = 0
         self.reset()
@@ -301,20 +310,15 @@ class parallel_env(ParallelEnv):
         return get_available_action_space(action_space)
 
 
-    def state_old(self):
+    def state(self):
         ''' Returns the global state of the environment.
             This is useful for centralized training, decentralized execution. '''
         
-        return self._populateStateSpace(self.possible_agents[0])
-
-    def state(self):
-        ''' Similar to the state_old() method, but this returns a customized copy of the state space for each agent.
-            This is useful for centralized training, decentralized execution. '''
-        
-        state = {}
-        for agent in self.possible_agents:
-            state[agent] = self._populateStateSpace(agent)
-        return state
+        if self.state_per_agent:
+            # Return the state for each agent.
+            return {a: self._populateStateSpace(a, force_visible=True)[0] for a in self.possible_agents}
+        else:
+            return self._populateStateSpace(self.possible_agents[0], force_visible=True)[0]
 
 
     def observe(self, agent, radius=None, allow_done_agents=False):
@@ -329,7 +333,7 @@ class parallel_env(ParallelEnv):
         return self.available_actions_dict[agent]
 
 
-    def _populateStateSpace(self, agent):
+    def _populateStateSpace(self, agent, force_visible=False):
         ''' Returns a populated state/observation space.'''
 
         # obs = np.array([a.position for a in self.possible_adversaries] + [self.alpha] + [a.position for a in self.possible_agents], dtype=np.float32)
