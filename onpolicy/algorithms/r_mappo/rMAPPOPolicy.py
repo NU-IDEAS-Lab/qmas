@@ -154,9 +154,9 @@ class R_MAPPOPolicy:
         Restore actor and critic networks from a saved model.
         :param directory: (str) directory to restore networks from.
         """
-        actor_state_dict = torch.load(os.path.join(directory, 'actor.pt'))
+        actor_state_dict = torch.load(os.path.join(directory, 'actor.pt'), map_location=self.device)
         self.actor.load_state_dict(actor_state_dict)
 
         if not self.args.use_render:
-            critic_state_dict = torch.load(os.path.join(directory, 'critic.pt'))
+            critic_state_dict = torch.load(os.path.join(directory, 'critic.pt'), map_location=self.device)
             self.critic.load_state_dict(critic_state_dict)
