@@ -136,6 +136,11 @@ class QmasPolicy(R_MAPPOPolicy):
         super().restore(directory)
 
         diffuser_state_dict = torch.load(os.path.join(directory, 'diffuser.pt'), map_location=self.device)
+
+        # This is hacky - reset the fix_mask here.
+        if 'fix_mask' in diffuser_state_dict:
+            diffuser_state_dict['fix_mask'] = self.diffuser.fix_mask
+
         self.diffuser.load_state_dict(diffuser_state_dict)
 
         guide_state_dict = torch.load(os.path.join(directory, 'guide.pt'), map_location=self.device)
