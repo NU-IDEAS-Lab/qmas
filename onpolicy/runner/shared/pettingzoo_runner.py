@@ -430,6 +430,10 @@ class PettingzooRunner(Runner):
 
                 # Take a step in the environment and get the results.
                 obs, share_obs, render_rewards, dones, infos, available_actions = render_env.step(actions_env)
+                if "visibility_mask" in infos[0]:
+                    print("Visibility Mask:")
+                    for i, info in enumerate(infos):
+                        print(f"Agent {i}: {info['visibility_mask']}")
                 # obs_traj.append(torch.from_numpy(share_obs[0]))
                 for i in range(self.num_agents):
                     transition = np.concatenate((actions[0][i], obs[0][i]), axis=0)

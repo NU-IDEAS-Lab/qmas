@@ -361,12 +361,24 @@ class parallel_env(ParallelEnv):
             }
         }
         if not self.no_ego_obs:
-            obs_mask["agents"] = {
-                a: {
-                    "position": True,
-                    "velocity": True,
-                } for a in self.possible_agents
-            }
+            # Set probability of observing another agent
+            visibility_prob = 0.7
+
+            obs_mask["agents"] = {}
+            for a in self.possible_agents:
+                if a == agent:
+                    # Ego agent always sees itself
+                    obs_mask["agents"][a] = {
+                        "position": True,
+                        "velocity": True,
+                    }
+                else:
+                    # Other agents are seen probabilistically
+                    visible = np.random.rand() < visibility_prob
+                    obs_mask["agents"][a] = {
+                        "position": visible,
+                        "velocity": visible,
+                    }
 
         return obs, obs_mask
     
