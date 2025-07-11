@@ -17,8 +17,6 @@ from onpolicy.runner.shared.base_runner import Runner
 
 from onpolicy.utils.shared_buffer_torchrl import SharedReplayBuffer
 
-from onpolicy.models.diffusion.sampling.functions import n_step_guided_p_sample
-
 
 def _t2n(x):
     return x.detach().cpu().numpy()
@@ -116,6 +114,8 @@ class PettingzooRunner(Runner):
         # Reset environment.
         obs, share_obs, available_actions = self.envs.reset()
 
+        
+
         # Get the shape of the action space.
         act_shape = get_shape_from_act_space(self.buffer.act_space)
         if isinstance(act_shape, Iterable):
@@ -137,6 +137,7 @@ class PettingzooRunner(Runner):
             delta_steps=np.ones((self.n_rollout_threads, self.num_agents, 1), dtype=np.int32),
             available_actions=available_actions
         )
+
 
 
     @torch.no_grad()
@@ -174,6 +175,12 @@ class PettingzooRunner(Runner):
         # update env_infos if done
         dones_env = np.all(dones, axis=-1)
 
+        # Get visibility mask from infos.
+        visibility_mask = None
+        if "visibility_mask" in infos[0]:
+            visibility_mask = np.array([info["visibility_mask"] for info in infos])
+            visibility_mask = np.array(np.split(visibility_mask, self.n_rollout_threads))
+
         # Add information to the logger.
         keys = infos[0].keys()
         for key in keys:
@@ -199,7 +206,8 @@ class PettingzooRunner(Runner):
             rewards=rewards,
             masks=masks,
             delta_steps=delta_steps,
-            available_actions=available_actions
+            available_actions=available_actions,
+            visibility_mask=visibility_mask
         )
 
 
@@ -224,9 +232,10 @@ class PettingzooRunner(Runner):
 
     def log_env(self, env_infos, total_num_steps):
         for k, v in env_infos.items():
-            if type(v) == wandb.viz.CustomChart and self.use_wandb:
-                wandb.log({k: v}, step=total_num_steps)
-            elif len(v) > 0:
+            # if type(v) == wandb.viz.CustomChart and self.use_wandb:
+            #     wandb.log({k: v}, step=total_num_steps)
+            # elif len(v) > 0:
+            if len(v) > 0:
                 if self.use_wandb:
                     wandb.log({k: np.mean(v, axis=0)}, step=total_num_steps)
                 else:
@@ -310,7 +319,7 @@ class PettingzooRunner(Runner):
             self.writter.add_scalars("eval_win_rate", {"eval_win_rate": eval_win_rate}, total_num_steps)
             self.writter.add_scalars("eval_step", {"expected_step": eval_step}, total_num_steps)
 
-    @torch.no_grad()
+    # @torch.no_grad()
     def render(self, ipython_clear_output=True):        
 
         if ipython_clear_output:
@@ -318,31 +327,32 @@ class PettingzooRunner(Runner):
 
         # reset envs and init rnn and mask
         render_env = self.envs
-        
-        # init goal
-        render_goals = np.zeros(self.all_args.render_episodes)
-        
-        # Get shape of observation space.
+                
+        # Get shape of observation and action spaces.
         obs_shape = get_shape_from_obs_space(self.buffer.obs_space)
+        act_shape = get_shape_from_act_space(self.buffer.act_space)
+        obs_size = np.prod(obs_shape)
+        act_size = np.prod(act_shape)
+        transition_size = obs_size + act_size
 
         # eval trajectory
         HISTORY_LENGTH = self.all_args.diffusion_horizon
-        obs_traj = [deque(maxlen=HISTORY_LENGTH) for _ in range(self.num_agents)]
+        trajectory = [deque(maxlen=HISTORY_LENGTH) for _ in range(self.num_agents)]
         state_pred = torch.zeros((self.num_agents, *obs_shape), dtype=torch.float32)
+        state_pred_full = torch.zeros((HISTORY_LENGTH, self.num_agents, *obs_shape), dtype=torch.float32)
         
         for i_episode in range(self.all_args.render_episodes):
             for i in range(self.num_agents):
-                obs_traj[i].clear()
-            pred = []
+                trajectory[i].clear()
 
             # Reset the environment and get the initial observations.
             obs, share_obs, available_actions = render_env.reset()
             rnn_states = np.zeros((self.n_render_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=np.float32)
             masks = np.ones((self.n_render_rollout_threads, self.num_agents, 1), dtype=np.float32)
 
-            # obs_traj.append(torch.from_numpy(share_obs[0]))
             for i in range(self.num_agents):
-                obs_traj[i].append(torch.from_numpy(obs[0][i]))
+                transition = np.concatenate((np.zeros(act_size, dtype=np.float32), obs[0][i]), axis=0)
+                trajectory[i].append(torch.from_numpy(transition))
 
             if self.all_args.save_gifs:        
                 frames = []
@@ -358,41 +368,49 @@ class PettingzooRunner(Runner):
                     aa = None
 
                 for agentIdx in range(self.num_agents):
-                    # evaluate the traj on the rendenered diffuser
-                    # how to make 2 traj into one model 
-                    if len(obs_traj[agentIdx]) == HISTORY_LENGTH: # and render_env.envs[0].env.step_count == HISTORY_LENGTH - 1:
+                    if len(trajectory[agentIdx]) == HISTORY_LENGTH: # and render_env.envs[0].env.step_count == HISTORY_LENGTH - 1:
                         
-                        obs_tensor = torch.stack(list(obs_traj[agentIdx]), dim=0)
+                        trajectory_tensor = torch.stack(list(trajectory[agentIdx]), dim=0)
                         
-                        # Condition randomly.
-                        condition = {}
-                        for i in range(len(obs_tensor)):
-                            if np.random.rand() > 0.8 or i == 0:
-                                # We must have the t=0 condition.
-                                condition[i] = obs_tensor[i]
-                        
+                        # Set up conditions (prior knowledge).
+                        condition = np.zeros((1, HISTORY_LENGTH, transition_size), dtype=np.float32)
+                        condition_mask = np.zeros((1, HISTORY_LENGTH, transition_size), dtype=np.float32)
+                        for i in range(len(trajectory_tensor)):
+                            # if (np.random.rand() > 0.5 and i<7) or i == 0: 
+                            #  # Ensure at least t=0 is always conditioned
+                            # if i < 4:
+                            # if True:
+                            if i == 0 or np.random.rand() > 0.8:
+                            # if i % 2 == 0 or i == 1:
+                                condition[0, i] = trajectory_tensor[i]
+                                condition_mask[0, i] = 1.0
+                        condition = torch.from_numpy(condition).to(self.device)
+                        condition_mask = torch.from_numpy(condition_mask).to(self.device)
 
-                        # Other conditioning methods.
-                        # condition = {0: obs_tensor[0], len(obs_traj)-1: obs_tensor[len(obs_traj)-1], 3: obs_tensor[3]}
-                        # condition = {0: obs_tensor[0], 1: obs_tensor[1]}
-                        # condition = {i: obs_tensor[i] for i in range(4)}
-                        # condition = {i: obs_tensor[i] for i in range(len(obs_tensor))}
-                        # condition = {i: obs_tensor[i] for i in range(len(obs_tensor) - 4)}
+                        # The prior and fix_mask represent the known data and are applied as described by Janner et al.
+                        # We set the fix_mask manually here as a workaround for CleanDiffuser not taking it as an input.
+                        self.policy.diffuser.fix_mask = torch.nn.Parameter(condition_mask, requires_grad=False)
+                        pred, log = self.policy.diffuser.sample(
+                            prior=condition,
+
+                            solver="ddpm",
+                            n_samples=1,
+                            sample_steps = 5,
+
+                            # The condition_cg and condition_cg_mask represent the known data and are used for the guide function.
+                            condition_cg=condition,
+                            condition_cg_mask=condition_mask,
+                            w_cg=0.1,
+                            w_cfg=0.0
+                        )
                         
-                        # pred = self.trainer.policy.diffuser(condition).trajectories[0, :, self.trainer.policy.diffuser.action_dim:]
-
-                        pred_actions, pred_trajectories = self.trainer.policy.diffuser_policy(condition)
-                        pred = pred_trajectories.observations[0]
-
-                        # Pred is the series of denoised predictions over the denoising steps.
-                        # Pred[0] is then the most accurate prediction.
-                        # We currently only use the last timestep of that prediction.
-
-                        
-                        state_pred[agentIdx] = torch.from_numpy(pred[-1])
+                        # Strip the action part of the prediction.
+                        state_pred[agentIdx] = pred[0, -1, act_size:]
+                        state_pred_full[:, agentIdx, :] = pred[0, :, act_size:]
                     else:
                         state_pred[agentIdx] = torch.from_numpy(obs[0, agentIdx])
-
+                        state_pred_full[:, agentIdx, :] = torch.zeros((HISTORY_LENGTH, *obs_shape), dtype=torch.float32)
+                
                 actions, rnn_states = self.trainer.policy.act(
                     state_pred,
                     np.concatenate(rnn_states),
@@ -409,15 +427,20 @@ class PettingzooRunner(Runner):
 
                 # Take a step in the environment and get the results.
                 obs, share_obs, render_rewards, dones, infos, available_actions = render_env.step(actions_env)
+                if "visibility_mask" in infos[0]:
+                    print("Visibility Mask:")
+                    for i, info in enumerate(infos):
+                        print(f"Agent {i}: {info['visibility_mask']}")
                 # obs_traj.append(torch.from_numpy(share_obs[0]))
                 for i in range(self.num_agents):
-                    obs_traj[i].append(torch.from_numpy(obs[0][i]))
+                    transition = np.concatenate((actions[0][i], obs[0][i]), axis=0)
+                    trajectory[i].append(torch.from_numpy(transition))
                                 
                 if not np.all(dones):
                     if ipython_clear_output:
                         clear_output(wait = True)
-                    # render_env.envs[0].env.render(pred, history_length=HISTORY_LENGTH)
-                    render_env.envs[0].env.render()
+                    render_env.envs[0].env.render(state_pred_full, history_length=HISTORY_LENGTH)
+                    # render_env.envs[0].env.render()
 
                 # append frame
                 if self.all_args.save_gifs:        

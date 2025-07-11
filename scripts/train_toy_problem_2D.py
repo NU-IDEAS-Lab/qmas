@@ -4,14 +4,13 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-	"--experiment_name", "toy-problem-2D",
+	"--experiment_name", "toy-problem-2D-cleandiffusion-dit1d",
     "--project_name", "qmas",
 	"--env_class", "toy_problem.toy_problem_2D_v0.parallel_env",
 	"--user_name", "ideas-mas",
 
 	"--num_agents", "1",
     "--state_per_agent",
-	"--polynomial_degree", "0",
 
 	"--num_env_steps", "1000000",
 	"--episode_length", "50",
@@ -32,11 +31,14 @@ args = [
 	"--use_ReLU",
 	"--hidden_size", "512",
 	"--layer_N", "4",
+    
+	"--diffusion_model_type", "dit1d",
+
 	"--seed", "0",
 
 	"--n_rollout_threads", "100",
 	"--cuda",
-	"--cuda_idx", "1",
+	"--cuda_idx", "4",
 
 	"--save_interval", "1000",
     "--results_dir", "/data/group/mas/qmas/results",

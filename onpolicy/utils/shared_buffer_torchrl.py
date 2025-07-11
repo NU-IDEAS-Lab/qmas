@@ -119,7 +119,7 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
 
     def insert(self, share_obs, obs, rnn_states_actor, rnn_states_critic, actions, action_log_probs,
                value_preds, rewards, masks, bad_masks=None, active_masks=None, delta_steps=None, available_actions=None,
-               legacy_mode=True):
+               visibility_mask=None, legacy_mode=True):
         """
         Insert data into the buffer.
         :param share_obs: (argparse.Namespace) arguments containing relevant model, policy, and env information.
@@ -135,6 +135,7 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
         :param active_masks: (np.ndarray) denotes whether an agent is active or dead in the env.
         :param available_actions: (np.ndarray) actions available to each agent. If None, all actions are available.
         :param delta_steps: (np.ndarray) number of steps since last update.
+        :param visibility_mask: (np.ndarray) visibility mask for agent observations, if applicable.
         :param legacy_mode: (bool) whether to use legacy mode for inserting data. Will use timesteps t and t+1.
         """
 
@@ -142,10 +143,12 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
             bad_masks = np.ones_like(masks)
         if active_masks is None:
             active_masks = np.ones_like(masks)
-        if available_actions is None:
+        if np.any(available_actions == None):
             available_actions = np.ones_like(actions)
         if delta_steps is None:
             delta_steps = np.ones_like(value_preds)
+        if visibility_mask is None:
+            visibility_mask = np.ones_like(obs)
         
         # Convert any np.object arrays to tensors of NonTensorData.
         if isinstance(obs, np.ndarray) and obs.dtype == object:
@@ -180,7 +183,8 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
             'bad_masks': bad_masks, #+1
             'active_masks': active_masks, #+1
             'delta_steps': delta_steps,
-            'available_actions': available_actions #+1
+            'available_actions': available_actions, #+1
+            'visibility_mask': visibility_mask, #+1
         })
 
         # In legacy mode, some data is added for timestep t, others for timestep t+1.
@@ -490,7 +494,7 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
             sample_share_obs = np.array(sample["share_obs"])
             share_obs_batch = sample_share_obs.reshape(*index_shape, *sample_share_obs.shape[data_start_dim+1:])
         else:
-            share_obs_batch = sample["share_obs"].reshape(*index_shape, *sample["share_obs"].shape[data_start_dim:])
+            share_obs_batch = sample["share_obs"].reshape(*index_shape, *sample["share_obs"].shape[2:])
         if self.obs_object:
             sample_obs = np.array(sample["obs"])
             obs_batch = sample_obs.reshape(*index_shape, *sample_obs.shape[data_start_dim+1:])
@@ -505,7 +509,10 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
         active_masks_batch = sample["active_masks"].reshape(*index_shape, 1)
         old_action_log_probs_batch = sample["action_log_probs"].reshape(*index_shape, sample["action_log_probs"].shape[-1])
         adv_targ = sample["advantages"].reshape(*index_shape, 1)
-        available_actions_batch = sample["available_actions"].reshape(*index_shape, sample["available_actions"].shape[-1])
+        if np.any(sample["available_actions"] == None):
+            available_actions_batch = None
+        else:
+            available_actions_batch = sample["available_actions"].reshape(*index_shape, sample["available_actions"].shape[-1])
 
         return share_obs_batch, obs_batch, rnn_states_batch, rnn_states_critic_batch, actions_batch, \
         value_preds_batch, return_batch, masks_batch, active_masks_batch, old_action_log_probs_batch, \
@@ -515,12 +522,12 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
     def compatibility_get_policy_input(self, step):
         ''' Gets the necessary policy input for a particular step, in the format expected by existing onpolicy code. '''
         sample = self[step]
-
+        
         if self.share_obs_object:
             sample_share_obs = np.array(sample["share_obs"])
             share_obs = sample_share_obs.reshape(-1, *sample_share_obs.shape[4:])
         else:
-            share_obs = np.concatenate(sample["share_obs"].numpy())
+            share_obs = sample["share_obs"].numpy()
         if self.obs_object:
             sample_obs = np.array(sample["obs"])
             obs = sample_obs.reshape(-1, *sample_obs.shape[4:], 1)
@@ -529,7 +536,10 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
         rnn_states_actor = np.concatenate(sample["rnn_states_actor"].numpy())
         rnn_states_critic = np.concatenate(sample["rnn_states_critic"].numpy())
         masks = np.concatenate(sample["masks"].numpy())
-        available_actions = np.concatenate(sample["available_actions"].numpy())
+        if np.any(sample["available_actions"] == None):
+            available_actions = None
+        else:
+            available_actions = np.concatenate(sample["available_actions"].numpy())
 
         return share_obs, obs, rnn_states_actor, rnn_states_critic, masks, available_actions
 
