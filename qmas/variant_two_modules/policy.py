@@ -4,17 +4,7 @@ from onpolicy.algorithms.r_mappo.rMAPPOPolicy import R_MAPPOPolicy
 from .actor_critic import QmasActor, QmasCritic
 
 from onpolicy.utils.util import get_shape_from_obs_space, get_shape_from_act_space
-# from onpolicy.models.diffusion.diffusion import GaussianDiffusion
-# from onpolicy.models.diffusion.diffusion import ValueDiffusion
-# from onpolicy.models.diffusion.temporal import TemporalUnet, ValueFunction
 
-from onpolicy.models.diffusion.sampling.policies import GuidedPolicy
-from onpolicy.models.diffusion.sampling.guides import ValueGuide
-from onpolicy.models.diffusion.sampling.functions import n_step_guided_p_sample
-
-
-# from cleandiffuser.diffusion import ContinuousDiffusionSDE, DiscreteDiffusionSDE
-# from onpolicy.models.diffusion.diffusionsde import DiscreteDiffusionSDE
 from cleandiffuser.diffusion import DiscreteDiffusionSDE
 from cleandiffuser.classifier import OptimalityClassifier
 from cleandiffuser.nn_classifier import HalfDiT1d, HalfJannerUNet1d
@@ -51,9 +41,6 @@ class QmasPolicy(R_MAPPOPolicy):
         obs_dim = get_shape_from_obs_space(self.obs_space, flatten_dicts=False)[0] # state space for all agents
         action_dim = get_shape_from_act_space(act_space) * args.num_agents # action space for all agents
         transition_dim = obs_dim + action_dim
-
-        # TODO: Need to get this null_value from the environment metadata.
-        self.null_value = -1.0
 
         self.prediction_horizon = args.diffusion_horizon
 
@@ -145,52 +132,3 @@ class QmasPolicy(R_MAPPOPolicy):
 
         guide_state_dict = torch.load(os.path.join(directory, 'guide.pt'), map_location=self.device)
         self.guide.load_state_dict(guide_state_dict)
-
-        # self.diffuser_guide = ValueGuide(self.guide)
-        # self.diffuser_policy = GuidedPolicy(self.diffuser_guide, self.diffuser, sample_fn=n_step_guided_p_sample, conditioning_fn=self._condition_sample)
-
-
-    # def _get_loss_weights(self, action_weight, discount):
-    #     '''
-    #         This function is taken from the original MAPPO implementation by Janner et al. (2022): 10.48550/arXiv.2205.09991
-
-    #         ---
-    #         sets loss coefficients for trajectory
-
-    #         action_weight   : float
-    #             coefficient on first action loss
-    #         discount   : float
-    #             multiplies t^th timestep of trajectory loss by discount**t
-    #     '''
-    #     self.action_weight = action_weight
-
-    #     dim_weights = torch.ones(self.transition_dim, dtype=torch.float32)
-
-    #     ## decay loss with trajectory timestep: discount**t
-    #     discounts = discount ** torch.arange(self.horizon, dtype=torch.float)
-    #     discounts = discounts / discounts.mean()
-    #     loss_weights = torch.einsum('h,t->ht', discounts, dim_weights)
-
-    #     ## manually set a0 weight
-    #     loss_weights[0, :self.action_dim] = action_weight
-    #     return loss_weights
-
-    def _condition_sample(self, x, conditions, action_dim):
-        ''' Applies conditions to the sample. '''
-
-        for t, val in conditions.items():
-            # TODO: Does this need to use val.clone()? The original does, so we do as well.
-            x[:, t, action_dim:] = self._overlay_tensor(x[:, t, action_dim:], val.clone(), self.null_value)
-        return x
-    
-
-    def _overlay_tensor(self, a, b, null_value):
-        ''' Overlays one tensor on another, based on the null value. '''
-
-        # Determine which elements are null.
-        b_data = b != null_value
-
-        # Overlay the tensors.
-        a[b_data] = b[b_data]
-
-        return a

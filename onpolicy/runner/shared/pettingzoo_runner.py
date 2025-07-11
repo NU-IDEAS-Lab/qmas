@@ -17,8 +17,6 @@ from onpolicy.runner.shared.base_runner import Runner
 
 from onpolicy.utils.shared_buffer_torchrl import SharedReplayBuffer
 
-from onpolicy.models.diffusion.sampling.functions import n_step_guided_p_sample
-
 
 def _t2n(x):
     return x.detach().cpu().numpy()
@@ -329,10 +327,7 @@ class PettingzooRunner(Runner):
 
         # reset envs and init rnn and mask
         render_env = self.envs
-        
-        # init goal
-        render_goals = np.zeros(self.all_args.render_episodes)
-        
+                
         # Get shape of observation and action spaces.
         obs_shape = get_shape_from_obs_space(self.buffer.obs_space)
         act_shape = get_shape_from_act_space(self.buffer.act_space)

@@ -45,7 +45,6 @@ class parallel_env(ParallelEnv):
     metadata = {
         "name": "toy_problem_v0",
         "render_modes": ["human", "rgb_array"],
-        "null_value": -1.0
     }
 
 

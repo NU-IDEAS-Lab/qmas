@@ -3,9 +3,6 @@ import numpy as np
 
 from onpolicy.algorithms.r_mappo.r_mappo import R_MAPPO
 from onpolicy.utils.util import get_grad_norm, get_shape_from_obs_space, get_shape_from_act_space
-from onpolicy.models.diffusion.diffusion import GaussianDiffusion
-from onpolicy.models.diffusion.diffusion import ValueDiffusion
-from onpolicy.models.diffusion.temporal import TemporalUnet, ValueFunction
 
 
 class QmasAlgorithm(R_MAPPO):
@@ -21,18 +18,6 @@ class QmasAlgorithm(R_MAPPO):
         super().__init__(args, policy, env, device)
 
         self.prediction_horizon = policy.prediction_horizon
-
-        # Get the "null" value for the environment and determine conditioning function.
-        # self.null_value = env.envs[0].null_value
-        # if self.null_value is None:
-        #     from onpolicy.models.diffusion.helpers import apply_conditioning
-        #     self.conditioning_fn = apply_conditioning
-        # else:
-        #     self.conditioning_fn = self.policy._condition_sample
-        # TODO: Temporarily hardcode these values.
-        self.null_value = -1.0
-        self.conditioning_fn = self.policy._condition_sample
-        print(f"QmasAlgorithm: Null value for environment is {self.null_value}.")
 
 
     def diffusion_update(self, diffusion_model, optimizer, loss_args, update_model):
