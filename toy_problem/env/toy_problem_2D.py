@@ -134,17 +134,19 @@ class parallel_env(ParallelEnv):
         # Reset the agents.
         self.agents = copy(self.possible_agents)
         for agent in self.agents:
+            start_position = self.get_random_position() if self.random_start_positions else np.array([0.0, 0.0], dtype=np.float32)
             agent.reset(
                 reset_start_position=True,
-                position=self.get_random_position()
+                position=start_position
             )
         
         # Reset the adversaries.
         self.adversaries = copy(self.possible_adversaries)
         for adversary in self.adversaries:
+            start_position = self.get_random_position() if self.random_start_positions else np.array([0.0, 0.0], dtype=np.float32)
             adversary.reset(
                 reset_start_position=True,
-                position=self.get_random_position(),
+                position=start_position,
             )
         
         # Reset other state.
