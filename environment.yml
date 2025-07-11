@@ -151,4 +151,3 @@ dependencies:
       - wrapt==1.17.2
       - zarr==2.16.1
       - zipp==3.21.0
-prefix: /home/anthony/miniconda3/envs/qmas_test
