@@ -385,17 +385,18 @@ class PettingzooRunner(Runner):
                             #  # Ensure at least t=0 is always conditioned
                             # if i < 4:
                             # if True:
-                            # if i == 0 or np.random.rand() > 0.5:
-                            if i % 2 == 0 or i == 1:
+                            if i == 0 or np.random.rand() > 0.8:
+                            # if i % 2 == 0 or i == 1:
                                 condition[0, i] = trajectory_tensor[i]
                                 condition_mask[0, i] = 1.0
                         condition = torch.from_numpy(condition).to(self.device)
                         condition_mask = torch.from_numpy(condition_mask).to(self.device)
 
+                        # The prior and fix_mask represent the known data and are applied as described by Janner et al.
+                        # We set the fix_mask manually here as a workaround for CleanDiffuser not taking it as an input.
+                        self.policy.diffuser.fix_mask = torch.nn.Parameter(condition_mask, requires_grad=False)
                         pred, log = self.policy.diffuser.sample(
-                            # The prior and fix_mask represent the known data and are applied as described by Janner et al.
                             prior=condition,
-                            fix_mask=condition_mask,
 
                             solver="ddpm",
                             n_samples=1,
@@ -411,11 +412,8 @@ class PettingzooRunner(Runner):
                         # Strip the action part of the prediction.
                         state_pred[agentIdx] = pred[0, -1, act_size:]
                         state_pred_full[:, agentIdx, :] = pred[0, :, act_size:]
-
-                        print(f"Got prediction for agent {agentIdx} at step {render_env.envs[0].env.step_count} with shape {state_pred[agentIdx].shape}")
                     else:
                         state_pred[agentIdx] = torch.from_numpy(obs[0, agentIdx])
-                        # state_pred_full[:, agentIdx, :] = torch.from_numpy(obs[0, agentIdx])
                         state_pred_full[:, agentIdx, :] = torch.zeros((HISTORY_LENGTH, *obs_shape), dtype=torch.float32)
                 
                 actions, rnn_states = self.trainer.policy.act(
