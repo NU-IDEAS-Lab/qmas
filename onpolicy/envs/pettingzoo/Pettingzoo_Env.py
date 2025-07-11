@@ -31,7 +31,6 @@ class PettingzooEnv(object):
         self.observation_space = []
         self.share_observation_space = []
         self.use_obs_instead_of_state = args.use_obs_instead_of_state
-        self.state_per_agent = args.state_per_agent
 
         # Determine which values in observations are treated as "null".
         if hasattr(self.env, "metadata") and "null_value" in self.env.metadata:
@@ -81,8 +80,6 @@ class PettingzooEnv(object):
         ret_obs = self._obs_wrapper(obs)
         if self.use_obs_instead_of_state:
             ret_share_obs = self._share_obs_wrapper(obs)
-        elif self.state_per_agent:
-            ret_share_obs = self._share_obs_wrapper(self.env.state())
         else:
             ret_share_obs = self._share_state_wrapper(self.env.state())
         available_actions = {a: self.env.available_actions(a) for a in self.env.possible_agents}
@@ -122,8 +119,6 @@ class PettingzooEnv(object):
             ret_obs = self._obs_wrapper(obs)
             if self.use_obs_instead_of_state:
                 ret_share_obs = self._share_obs_wrapper(obs)
-            elif self.state_per_agent:
-                ret_share_obs = self._share_obs_wrapper(self.env.state())
             else:
                 ret_share_obs = self._share_state_wrapper(self.env.state())
             available_actions = {a: self.env.available_actions(a) for a in self.env.possible_agents}

@@ -118,14 +118,14 @@ class QmasAlgorithm(R_MAPPO):
     def train_sample_diffuser(self, sample, train_info, update_actor=True, update_critic=True):
         ''' Performs update for a single sample. '''
         
-        # Process shared observations.
-        share_obs_batch = sample["share_obs"][:, :, :, 0] # Get the shared observation from only one agent, since they should all be the same...
-
         # Permute, flatten, and then permute back to get rid of the thread dimension.
-        share_obs_batch = share_obs_batch.permute(1, 0, *range(2, share_obs_batch.ndim))
-        share_obs_batch = share_obs_batch.flatten(start_dim=1, end_dim=2)
-        share_obs_batch = share_obs_batch.permute(1, 0, *range(2, share_obs_batch.ndim))
-        share_obs_batch = share_obs_batch.reshape(*share_obs_batch.shape[:2], -1)
+
+        # Process observations.
+        obs_batch = sample["obs"] #[:, :, :, 0]
+        obs_batch = obs_batch.permute(1, 0, *range(2, obs_batch.ndim))
+        obs_batch = obs_batch.flatten(start_dim=1, end_dim=2)
+        obs_batch = obs_batch.permute(1, 0, *range(2, obs_batch.ndim))
+        obs_batch = obs_batch.reshape(*obs_batch.shape[:2], -1)
 
         # Process actions.
         actions_batch = sample["actions"]
@@ -148,7 +148,7 @@ class QmasAlgorithm(R_MAPPO):
         returns_batch = torch.sum(rewards_batch * discounts, dim=1).reshape((-1, 1))
         
         # Build trajectories.
-        trajectories = torch.cat([actions_batch, share_obs_batch], dim=-1)
+        trajectories = torch.cat([actions_batch, obs_batch], dim=-1)
 
         # Condition randomly.
         fix_mask = torch.zeros_like(trajectories)
@@ -160,10 +160,13 @@ class QmasAlgorithm(R_MAPPO):
                     fix_mask[i, j] = 1.0
                     # x0[i, j] = trajectories[i, j]
 
+        # Update the fix_mask. This determines which parts of the trajectory are fixed and which are predicted.
+        # This applies to both update_diffusion and update_classifier.
+        self.policy.diffuser.fix_mask = torch.nn.Parameter(fix_mask, requires_grad=False)
+
         # Update diffuser model.
         diffuser_loss = self.policy.diffuser.update_diffusion(
             x0=trajectories,
-            fix_mask=fix_mask 
         )['diffusion_loss']
 
         # Update guide model.

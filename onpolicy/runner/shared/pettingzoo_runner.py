@@ -116,6 +116,8 @@ class PettingzooRunner(Runner):
         # Reset environment.
         obs, share_obs, available_actions = self.envs.reset()
 
+        
+
         # Get the shape of the action space.
         act_shape = get_shape_from_act_space(self.buffer.act_space)
         if isinstance(act_shape, Iterable):
@@ -137,6 +139,7 @@ class PettingzooRunner(Runner):
             delta_steps=np.ones((self.n_rollout_threads, self.num_agents, 1), dtype=np.int32),
             available_actions=available_actions
         )
+
 
 
     @torch.no_grad()
@@ -175,6 +178,7 @@ class PettingzooRunner(Runner):
         dones_env = np.all(dones, axis=-1)
 
         # Get visibility mask from infos.
+        visibility_mask = None
         if "visibility_mask" in infos[0]:
             visibility_mask = np.array([info["visibility_mask"] for info in infos])
             visibility_mask = np.array(np.split(visibility_mask, self.n_rollout_threads))
@@ -205,7 +209,7 @@ class PettingzooRunner(Runner):
             masks=masks,
             delta_steps=delta_steps,
             available_actions=available_actions,
-            visibility_mask=visibility_mask if "visibility_mask" in locals() else None
+            visibility_mask=visibility_mask
         )
 
 
