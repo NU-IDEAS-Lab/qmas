@@ -38,8 +38,8 @@ class QmasPolicy(R_MAPPOPolicy):
                                                  eps=self.opti_eps,
                                                  weight_decay=self.weight_decay)
         
-        obs_dim = get_shape_from_obs_space(self.obs_space, flatten_dicts=False)[0] # state space for all agents
-        action_dim = get_shape_from_act_space(act_space) * args.num_agents # action space for all agents
+        obs_dim = get_shape_from_obs_space(self.obs_space, flatten_dicts=False)[0] # observation space for one agent
+        action_dim = get_shape_from_act_space(act_space) # action space for one agent
         transition_dim = obs_dim + action_dim
 
         self.prediction_horizon = args.diffusion_horizon
