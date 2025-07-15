@@ -1,0 +1,5 @@
+[default]
+entity = ideas-mas
+project = qmas
+base_url = https://api.wandb.ai
+

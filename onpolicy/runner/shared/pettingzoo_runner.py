@@ -340,9 +340,8 @@ class PettingzooRunner(Runner):
         trajectory = [deque(maxlen=HISTORY_LENGTH) for _ in range(self.num_agents)]
         state_pred = torch.zeros((self.num_agents, *obs_shape), dtype=torch.float32)
         state_pred_full = torch.zeros((HISTORY_LENGTH, self.num_agents, *obs_shape), dtype=torch.float32)
-
-        prev_prediction = None  # For autoregressive conditioning
         
+        prev_prediction = None  # For autoregression
         for i_episode in range(self.all_args.render_episodes):
             for i in range(self.num_agents):
                 trajectory[i].clear()
@@ -376,22 +375,14 @@ class PettingzooRunner(Runner):
                         # Set up conditions (prior knowledge).
                         condition = np.zeros((1, HISTORY_LENGTH, transition_size), dtype=np.float32)
                         condition_mask = np.zeros((1, HISTORY_LENGTH, transition_size), dtype=np.float32)
-                        # Always condition on the last 4 steps of each window
                         for i in range(len(trajectory_tensor)):
-                            # if (np.random.rand() > 0.5 and i<7) or i == 0: 
-                            #  # Ensure at least t=0 is always conditioned
-                            # if i < 4:
-                            # if True:
                             if i == 0 or np.random.rand() > 0.8:
-                            # if i % 2 == 0 or i == 1:
                                 condition[0, i] = trajectory_tensor[i]
                                 condition_mask[0, i] = 1.0
-                            else:
-                                condition_mask[0, i] = 0.0
                         condition = torch.from_numpy(condition).to(self.device)
                         condition_mask = torch.from_numpy(condition_mask).to(self.device)
 
-                        # Modify prior for autoregression by injecting last k predicted steps
+                        # Inject last predictions (autoregression)
                         prior = condition.clone()
                         if prev_prediction is not None:
                             k = 4  # autoregressive steps
@@ -401,23 +392,18 @@ class PettingzooRunner(Runner):
                                 prior[:, :k]
                             )
 
+                        self.policy.diffuser.fix_mask = torch.nn.Parameter(condition_mask, requires_grad=False)
                         pred, log = self.policy.diffuser.sample(
-                            # The prior and fix_mask represent the known data and are applied as described by Janner et al.
                             prior=prior,
-                            fix_mask=condition_mask,
-
                             solver="ddpm",
                             n_samples=1,
                             sample_steps=5,
-
-                            # The condition_cg and condition_cg_mask represent the known data and are used for the guide function.
                             condition_cg=condition,
                             condition_cg_mask=condition_mask,
                             w_cg=0.1,
                             w_cfg=0.0
                         )
 
-                        # Store the prediction for autoregressive conditioning
                         prev_prediction = pred.detach()
 
                         # Strip the action part of the prediction.
@@ -456,6 +442,7 @@ class PettingzooRunner(Runner):
                     if ipython_clear_output:
                         clear_output(wait = True)
                     render_env.envs[0].env.render(state_pred_full, history_length=HISTORY_LENGTH)
+                    # render_env.envs[0].env.render()
 
                 # append frame
                 if self.all_args.save_gifs:        
@@ -470,3 +457,5 @@ class PettingzooRunner(Runner):
                     format="GIF",
                     duration=self.all_args.ifi,
                 )
+            
+            # time.sleep(3.0)s
