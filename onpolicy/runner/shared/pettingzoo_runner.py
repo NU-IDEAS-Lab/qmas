@@ -382,7 +382,7 @@ class PettingzooRunner(Runner):
                         condition = torch.from_numpy(condition).to(self.device)
                         condition_mask = torch.from_numpy(condition_mask).to(self.device)
 
-                        # Inject last predictions (autoregression)
+                        # Autoregression
                         prior = condition.clone()
                         if prev_prediction is not None:
                             k = 4  # autoregressive steps
