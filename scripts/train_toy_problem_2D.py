@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-	"--experiment_name", "toy-problem-2D-cleandiffusion",
+	"--experiment_name", "toy-problem-2D-cleandiffusion-dit1d",
     "--project_name", "qmas",
 	"--env_class", "toy_problem.toy_problem_2D_v0.parallel_env",
 	"--user_name", "ideas-mas",
@@ -31,6 +31,9 @@ args = [
 	"--use_ReLU",
 	"--hidden_size", "512",
 	"--layer_N", "4",
+    
+	"--diffusion_model_type", "dit1d",
+
 	"--seed", "0",
 
 	"--n_rollout_threads", "100",

@@ -51,7 +51,6 @@ class parallel_env(ParallelEnv):
     metadata = {
         "name": "toy_problem_v0",
         "render_modes": ["human", "rgb_array"],
-        "null_value": -1.0
     }
 
 
@@ -93,7 +92,6 @@ class parallel_env(ParallelEnv):
         self.action_spaces = spaces.Dict({agent: action_space for agent in self.possible_agents}) # type: ignore
         
         # Create the observation space.
-        # obs_space = spaces.Box(low=-np.inf, high=np.inf, shape=(4 + num_agents*2, ), dtype=np.float32)
         obs_space = {
             "adversaries": spaces.Dict({
                 a: spaces.Dict({
@@ -184,10 +182,6 @@ class parallel_env(ParallelEnv):
     def get_random_position(self):
         ''' Returns a random position in the world. '''
 
-        # Just return [0,0] for now. Compatible with the existing trained policy.
-        # Remove when we are ready to train a new policy.
-        # return np.array([0.0, 0.0], dtype=np.float32)
-
         return np.random.uniform(-self.world_dims / 2, self.world_dims / 2)
 
 
@@ -214,10 +208,6 @@ class parallel_env(ParallelEnv):
         plt.figure(figsize=figsize)
 
         # Set the axis limits.
-        # plt.xlim(-self.world_dims[0] / 2, self.world_dims[0] / 2)
-        # plt.ylim(-self.world_dims[1] / 2, self.world_dims[1] / 2)
-        # plt.xlim(0, self.world_dims[0])
-        # plt.ylim(0, self.world_dims[1])
         plt.xlim(-self.world_dims[0], self.world_dims[0])
         plt.ylim(-self.world_dims[1], self.world_dims[1])
         plt.gca().set_aspect('equal', adjustable='box')
@@ -226,20 +216,6 @@ class parallel_env(ParallelEnv):
         plt.title("2D Leader-Follower Environment")
         plt.grid()
         
-        # Plot the goal positions.
-        # for goal in self.goals:
-        #     if goal.state == GoalZone.GOAL_STATE.UNREACHED:
-        #         color = 'grey'
-        #     elif goal.state == GoalZone.GOAL_STATE.REACHED_AGENT:
-        #         color = 'green'
-        #     elif goal.state == GoalZone.GOAL_STATE.REACHED_ADVERSARY:
-        #         color = 'red'
-        #     label = f"Goal {goal.entity_id}"
-        #     marker = plt.Circle(goal.position, goal.radius, color=color, alpha=0.5, label=label)
-        #     plt.gca().add_artist(marker)
-        # positions = [g.position for g in self.goals]
-        # plt.plot([p[0] for p in positions], [p[1] for p in positions], 'go', label='Goals', markersize=self.goals[0].radius*10)
-
         # Plot the agent positions.
         positions = [a.position for a in self.possible_agents]
         plt.plot([p[0] for p in positions], [p[1] for p in positions], 'bo', label='Followers')
@@ -338,9 +314,6 @@ class parallel_env(ParallelEnv):
     def _populateStateSpace(self, agent, force_visible=False):
         ''' Returns a populated state/observation space.'''
 
-        # obs = np.array([a.position for a in self.possible_adversaries] + [self.alpha] + [a.position for a in self.possible_agents], dtype=np.float32)
-        # obs = obs.flatten()
-
         obs = {
             "adversaries": {
                 a: {
@@ -393,10 +366,6 @@ class parallel_env(ParallelEnv):
         Update alpha based on the step count to create a more complex pattern.
         This function creates a time-varying alpha that follows different patterns.
         """
-        # Base frequency for oscillation
-        # freq = 0.1
-        # angle = freq * self.step_count
-
         if random.random() < 0.3:
             # Randomly change alpha to create a new pattern
             self.alpha += np.random.normal(0, 0.3, size=2)
