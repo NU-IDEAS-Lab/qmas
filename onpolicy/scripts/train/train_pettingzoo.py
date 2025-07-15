@@ -138,8 +138,6 @@ def parse_args(args, parser):
                         help="directory to save videos.")
     parser.add_argument("--cuda_idx", type=int, default=0, 
                         help="Index of the GPU to use")
-    parser.add_argument("--state_per_agent", action=argparse.BooleanOptionalAction, default=False,
-                        help="Whether the environment `state` function returns a separate copy of the state per agent.")
     
     # Parse once to get the environment name.
     parsed_args, unknown_args = parser.parse_known_args(args)

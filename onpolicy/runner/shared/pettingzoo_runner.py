@@ -17,8 +17,6 @@ from onpolicy.runner.shared.base_runner import Runner
 
 from onpolicy.utils.shared_buffer_torchrl import SharedReplayBuffer
 
-from onpolicy.models.diffusion.sampling.functions import n_step_guided_p_sample
-
 
 def _t2n(x):
     return x.detach().cpu().numpy()
@@ -116,6 +114,8 @@ class PettingzooRunner(Runner):
         # Reset environment.
         obs, share_obs, available_actions = self.envs.reset()
 
+        
+
         # Get the shape of the action space.
         act_shape = get_shape_from_act_space(self.buffer.act_space)
         if isinstance(act_shape, Iterable):
@@ -137,6 +137,7 @@ class PettingzooRunner(Runner):
             delta_steps=np.ones((self.n_rollout_threads, self.num_agents, 1), dtype=np.int32),
             available_actions=available_actions
         )
+
 
 
     @torch.no_grad()
@@ -174,6 +175,12 @@ class PettingzooRunner(Runner):
         # update env_infos if done
         dones_env = np.all(dones, axis=-1)
 
+        # Get visibility mask from infos.
+        visibility_mask = None
+        if "visibility_mask" in infos[0]:
+            visibility_mask = np.array([info["visibility_mask"] for info in infos])
+            visibility_mask = np.array(np.split(visibility_mask, self.n_rollout_threads))
+
         # Add information to the logger.
         keys = infos[0].keys()
         for key in keys:
@@ -199,7 +206,8 @@ class PettingzooRunner(Runner):
             rewards=rewards,
             masks=masks,
             delta_steps=delta_steps,
-            available_actions=available_actions
+            available_actions=available_actions,
+            visibility_mask=visibility_mask
         )
 
 
@@ -319,10 +327,7 @@ class PettingzooRunner(Runner):
 
         # reset envs and init rnn and mask
         render_env = self.envs
-        
-        # init goal
-        render_goals = np.zeros(self.all_args.render_episodes)
-        
+                
         # Get shape of observation and action spaces.
         obs_shape = get_shape_from_obs_space(self.buffer.obs_space)
         act_shape = get_shape_from_act_space(self.buffer.act_space)
@@ -373,7 +378,12 @@ class PettingzooRunner(Runner):
                         condition_mask = np.zeros((1, HISTORY_LENGTH, transition_size), dtype=np.float32)
                         # Always condition on the last 4 steps of each window
                         for i in range(len(trajectory_tensor)):
-                            if i >= HISTORY_LENGTH - 4:
+                            # if (np.random.rand() > 0.5 and i<7) or i == 0: 
+                            #  # Ensure at least t=0 is always conditioned
+                            # if i < 4:
+                            # if True:
+                            if i == 0 or np.random.rand() > 0.8:
+                            # if i % 2 == 0 or i == 1:
                                 condition[0, i] = trajectory_tensor[i]
                                 condition_mask[0, i] = 1.0
                             else:
@@ -403,8 +413,8 @@ class PettingzooRunner(Runner):
                             # The condition_cg and condition_cg_mask represent the known data and are used for the guide function.
                             condition_cg=condition,
                             condition_cg_mask=condition_mask,
-                            w_cg=1.0,
-                            w_cfg=0.0,
+                            w_cg=0.1,
+                            w_cfg=0.0
                         )
 
                         # Store the prediction for autoregressive conditioning
@@ -413,8 +423,6 @@ class PettingzooRunner(Runner):
                         # Strip the action part of the prediction.
                         state_pred[agentIdx] = pred[0, -1, act_size:]
                         state_pred_full[:, agentIdx, :] = pred[0, :, act_size:]
-
-                        print(f"Got prediction for agent {agentIdx} at step {render_env.envs[0].env.step_count} with shape {state_pred[agentIdx].shape}")
                     else:
                         state_pred[agentIdx] = torch.from_numpy(obs[0, agentIdx])
                         state_pred_full[:, agentIdx, :] = torch.zeros((HISTORY_LENGTH, *obs_shape), dtype=torch.float32)
@@ -435,6 +443,11 @@ class PettingzooRunner(Runner):
 
                 # Take a step in the environment and get the results.
                 obs, share_obs, render_rewards, dones, infos, available_actions = render_env.step(actions_env)
+                if "visibility_mask" in infos[0]:
+                    print("Visibility Mask:")
+                    for i, info in enumerate(infos):
+                        print(f"Agent {i}: {info['visibility_mask']}")
+                # obs_traj.append(torch.from_numpy(share_obs[0]))
                 for i in range(self.num_agents):
                     transition = np.concatenate((actions[0][i], obs[0][i]), axis=0)
                     trajectory[i].append(torch.from_numpy(transition))

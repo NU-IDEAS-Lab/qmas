@@ -3,9 +3,6 @@ import numpy as np
 
 from onpolicy.algorithms.r_mappo.r_mappo import R_MAPPO
 from onpolicy.utils.util import get_grad_norm, get_shape_from_obs_space, get_shape_from_act_space
-from onpolicy.models.diffusion.diffusion import GaussianDiffusion
-from onpolicy.models.diffusion.diffusion import ValueDiffusion
-from onpolicy.models.diffusion.temporal import TemporalUnet, ValueFunction
 
 
 class QmasAlgorithm(R_MAPPO):
@@ -21,18 +18,6 @@ class QmasAlgorithm(R_MAPPO):
         super().__init__(args, policy, env, device)
 
         self.prediction_horizon = policy.prediction_horizon
-
-        # Get the "null" value for the environment and determine conditioning function.
-        # self.null_value = env.envs[0].null_value
-        # if self.null_value is None:
-        #     from onpolicy.models.diffusion.helpers import apply_conditioning
-        #     self.conditioning_fn = apply_conditioning
-        # else:
-        #     self.conditioning_fn = self.policy._condition_sample
-        # TODO: Temporarily hardcode these values.
-        self.null_value = -1.0
-        self.conditioning_fn = self.policy._condition_sample
-        print(f"QmasAlgorithm: Null value for environment is {self.null_value}.")
 
 
     def diffusion_update(self, diffusion_model, optimizer, loss_args, update_model):
@@ -118,14 +103,14 @@ class QmasAlgorithm(R_MAPPO):
     def train_sample_diffuser(self, sample, train_info, update_actor=True, update_critic=True):
         ''' Performs update for a single sample. '''
         
-        # Process shared observations.
-        share_obs_batch = sample["share_obs"][:, :, :, 0] # Get the shared observation from only one agent, since they should all be the same...
-
         # Permute, flatten, and then permute back to get rid of the thread dimension.
-        share_obs_batch = share_obs_batch.permute(1, 0, *range(2, share_obs_batch.ndim))
-        share_obs_batch = share_obs_batch.flatten(start_dim=1, end_dim=2)
-        share_obs_batch = share_obs_batch.permute(1, 0, *range(2, share_obs_batch.ndim))
-        share_obs_batch = share_obs_batch.reshape(*share_obs_batch.shape[:2], -1)
+
+        # Process observations.
+        obs_batch = sample["obs"] #[:, :, :, 0]
+        obs_batch = obs_batch.permute(1, 0, *range(2, obs_batch.ndim))
+        obs_batch = obs_batch.flatten(start_dim=1, end_dim=2)
+        obs_batch = obs_batch.permute(1, 0, *range(2, obs_batch.ndim))
+        obs_batch = obs_batch.reshape(*obs_batch.shape[:2], -1)
 
         # Process actions.
         actions_batch = sample["actions"]
@@ -148,15 +133,7 @@ class QmasAlgorithm(R_MAPPO):
         returns_batch = torch.sum(rewards_batch * discounts, dim=1).reshape((-1, 1))
         
         # Build trajectories.
-        trajectories = torch.cat([actions_batch, share_obs_batch], dim=-1)
-
-        # Set up conditions based on the shared observations.
-        # conditions = torch.zeros_like(trajectories)
-        # conditions = trajectories.clone()  # Use the entire trajectory as condition.
-        # conditions = {i: share_obs_batch[:, i] for i in range(share_obs_batch.shape[1])} # condition based on the entire trajectory
-        # conditions = {i: share_obs_batch[:, i] for i in range(2)} # condition based on only the first two points
-        # conditions = {i: share_obs_batch[:, i] for i in range(1)} # condition based on only the first point
-        # conditions = {i: share_obs_batch[:, i] for i in range(share_obs_batch.shape[1] // 2)} # condition based on half of the trajectory
+        trajectories = torch.cat([actions_batch, obs_batch], dim=-1)
 
         # Condition randomly.
         fix_mask = torch.zeros_like(trajectories)
@@ -167,34 +144,17 @@ class QmasAlgorithm(R_MAPPO):
                 if np.random.rand() > 0.5 or i == 0:
                     fix_mask[i, j] = 1.0
                     # x0[i, j] = trajectories[i, j]
-                
 
-
-        # Get the conditions.
-        # conditions_dict = {
-        #     'vec_condition': conditions[:, 0, :],
-        #     'seq_condition': conditions
-        # }
+        # Update the fix_mask. This determines which parts of the trajectory are fixed and which are predicted.
+        # This applies to both update_diffusion and update_classifier.
+        self.policy.diffuser.fix_mask = torch.nn.Parameter(fix_mask, requires_grad=False)
 
         # Update diffuser model.
-        # diffuser_loss, diffuser_grad_norm = self.diffusion_update(
-        #     self.policy.diffuser,
-        #     self.policy.diffuser_optimizer,
-        #     (trajectories, conditions_dict),
-        #     update_model=True
-        # )
         diffuser_loss = self.policy.diffuser.update_diffusion(
             x0=trajectories,
-            fix_mask=fix_mask 
         )['diffusion_loss']
 
         # Update guide model.
-        # guide_loss, guide_grad_norm = self.diffusion_update(
-        #     self.policy.guide,
-        #     self.policy.guide_optimizer,
-        #     (trajectories, conditions, returns_batch),
-        #     update_model=True
-        # )
         guide_loss = self.policy.diffuser.update_classifier(
             x0=trajectories,
             condition_cg=returns_batch

@@ -338,5 +338,8 @@ def get_config():
     # diffuser parameters
     parser.add_argument("--diffusion_steps", type=int, default=20)
     parser.add_argument("--diffusion_horizon", type=int, default=8)
+    parser.add_argument("--diffusion_model_type", type=str, default="dit1d",
+                        choices=["jannerunet", "dit1d"],
+                        help="Type of diffusion model to use")
     
     return parser
