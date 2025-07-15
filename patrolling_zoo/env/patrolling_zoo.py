@@ -232,7 +232,9 @@ class parallel_env(ParallelEnv):
 
         # The state space is a complete observation of the environment.
         # This is not part of the standard PettingZoo API, but is useful for centralized training.
-        self.state_space = self._buildStateSpace(self.observe_method_global)
+
+        state_space = self._buildStateSpace(self.observe_method_global)
+        self.state_space = spaces.Dict({agent: state_space for agent in self.possible_agents})
         
         # Create the observation space.
         obs_space = self._buildStateSpace(self.observe_method)
@@ -955,7 +957,7 @@ class parallel_env(ParallelEnv):
         # Perform actions.
         for agent in self.agents:
             if agent in action_dict:
-                action = action_dict[agent][0]
+                action = action_dict[agent]
 
                 # Check if the action is valid.
                 if not self.action_space(agent).contains(action):
