@@ -158,6 +158,12 @@ class R_MAPPO():
         if update_actor:
             self.policy.actor_optimizer.step()
 
+        # The value function predictions are made once over the entire share_obs.
+        # However, we need to compare them with per-agent returns.
+        # This is done by repeating the value predictions for each agent.
+        values = values.repeat(1, self.policy.args.num_agents).view(-1, 1)
+        value_preds_batch = value_preds_batch.repeat(1, self.policy.args.num_agents).view(-1, 1)
+
         # critic update
         value_loss = self.cal_value_loss(values, value_preds_batch, return_batch, active_masks_batch, update_value_normalizer=update_critic)
 
@@ -187,10 +193,16 @@ class R_MAPPO():
 
         :return train_info: (dict) contains information regarding training update (e.g. loss, grad norms, etc).
         """
+
+        # Value predictions are made once over the entire share_obs. However, we need to compare them with per-agent returns.
+        # This is done by repeating the value predictions for each agent.
+        value_preds = buffer.value_preds[:last_step]
+        value_preds = value_preds.repeat(1, 1, buffer.returns.shape[2]).reshape(*value_preds.shape[:2], buffer.returns.shape[2], 1)
+
         if self._use_popart or self._use_valuenorm:
-            advantages = buffer.returns[:last_step] - self.value_normalizer.denormalize(buffer.value_preds[:last_step])
+            advantages = buffer.returns[:last_step] - self.value_normalizer.denormalize(value_preds)
         else:
-            advantages = buffer.returns[:last_step] - buffer.value_preds[:last_step]
+            advantages = buffer.returns[:last_step] - value_preds
         advantages_copy = deepcopy(advantages)
         advantages_copy[buffer.active_masks[:last_step] == 0.0] = np.nan
         mean_advantages = np.nanmean(advantages_copy)

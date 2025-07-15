@@ -131,7 +131,7 @@ class PettingzooRunner(Runner):
             rnn_states_critic=np.zeros((self.n_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=np.float32),
             actions=np.zeros(actions_shape, dtype=np.float32),
             action_log_probs=np.zeros(actions_shape, dtype=np.float32),
-            value_preds=np.zeros((self.n_rollout_threads, self.num_agents, 1), dtype=np.float32),
+            value_preds=np.zeros((self.n_rollout_threads, 1), dtype=np.float32),
             rewards=np.zeros((self.n_rollout_threads, self.num_agents, 1), dtype=np.float32),
             masks=np.ones((self.n_rollout_threads, self.num_agents, 1), dtype=np.float32),
             delta_steps=np.ones((self.n_rollout_threads, self.num_agents, 1), dtype=np.int32),
@@ -226,7 +226,7 @@ class PettingzooRunner(Runner):
             next_values = self.trainer.policy.get_values(share_obs,
                                                         rnn_states_critic,
                                                         masks)
-        next_values = next_values.detach().cpu().view(self.n_rollout_threads, self.num_agents, 1)
+        next_values = next_values.detach().cpu().view(self.n_rollout_threads, 1)
         self.buffer.compute_returns(next_values, self.trainer.value_normalizer)
 
 
