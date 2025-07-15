@@ -368,7 +368,7 @@ class parallel_env(ParallelEnv):
         }
         if not self.no_ego_obs:
             # Set probability of observing another agent
-            visibility_prob = 0.7
+            visibility_prob = 1.0
 
             obs_mask["agents"] = {}
             for a in self.possible_agents:
