@@ -384,8 +384,8 @@ class PettingzooRunner(Runner):
 
                         # Autoregression
                         prior = condition.clone()
-                        if prev_prediction is not None:
-                            k = 4  # autoregressive steps
+                        if prev_prediction is not None and self.all_args.diffusion_autoregression_steps > 0:
+                            k = self.all_args.diffusion_autoregression_steps
                             prior[:, :k] = torch.where(
                                 condition_mask[:, :k] == 0,
                                 prev_prediction[:, -k:],
