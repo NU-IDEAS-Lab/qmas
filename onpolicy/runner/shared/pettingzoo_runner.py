@@ -419,7 +419,8 @@ class PettingzooRunner(Runner):
                 
                 actions, rnn_states = self.trainer.policy.act(
                     state_pred,
-                    np.concatenate(rnn_states),
+                    # np.concatenate(rnn_states)
+                    np.concatenate(rnn_states if isinstance(rnn_states, (list, tuple)) else [rnn_states]),
                     np.concatenate(masks),
                     deterministic=True,
                     available_actions=aa
@@ -427,7 +428,8 @@ class PettingzooRunner(Runner):
 
                 # [n_envs*n_agents, ...] -> [n_envs, n_agents, ...]
                 actions = actions.detach().cpu().reshape((self.n_render_rollout_threads, self.num_agents, *actions.shape[1:]))
-                rnn_states = rnn_states.detach().cpu().reshape((self.n_render_rollout_threads, self.num_agents, *rnn_states.shape[1:]))
+                # rnn_states = rnn_states.detach().cpu().reshape((self.n_render_rollout_threads, self.num_agents, *rnn_states.shape[1:]))
+                rnn_states = rnn_states.detach().cpu().reshape((self.n_render_rollout_threads, *rnn_states.shape[1:]))
 
                 actions_env = [actions[idx, :, :] for idx in range(self.n_render_rollout_threads)]
 
@@ -445,7 +447,8 @@ class PettingzooRunner(Runner):
                 if not np.all(dones):
                     if ipython_clear_output:
                         clear_output(wait = True)
-                    render_env.envs[0].env.render(state_pred_full, history_length=HISTORY_LENGTH)
+                    # render_env.envs[0].env.render(state_pred_full, history_length=HISTORY_LENGTH)
+                    render_env.envs[0].env.render()
                     # render_env.envs[0].env.render()
 
                 # append frame

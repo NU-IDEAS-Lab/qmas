@@ -958,7 +958,8 @@ class parallel_env(ParallelEnv):
         for agent in self.agents:
             if agent in action_dict:
                 action = action_dict[agent]
-
+                action = int(action)
+                
                 # Check if the action is valid.
                 if not self.action_space(agent).contains(action):
                     raise ValueError(f"Invalid action {action} of type {type(action)} provided.")
