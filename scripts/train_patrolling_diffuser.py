@@ -52,7 +52,7 @@ args = [
 
 	"--n_rollout_threads", "25",
 	"--cuda",
-	"--cuda_idx", "1",
+	"--cuda_idx", "2",
 
 	"--save_interval", "10000",
     "--results_dir", "/data/group/mas/qmas/results",
