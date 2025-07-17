@@ -18,9 +18,6 @@ from onpolicy.runner.shared.base_runner import Runner
 from onpolicy.utils.shared_buffer_torchrl import SharedReplayBuffer
 
 
-def _t2n(x):
-    return x.detach().cpu().numpy()
-
 class PettingzooRunner(Runner):
     def __init__(self, config):
 
@@ -131,7 +128,11 @@ class PettingzooRunner(Runner):
             rnn_states_critic=np.zeros((self.n_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=np.float32),
             actions=np.zeros(actions_shape, dtype=np.float32),
             action_log_probs=np.zeros(actions_shape, dtype=np.float32),
+
+            # Although there is actually only one value per thread, we store it as if there were one per agent.
+            # Each agent will have the same value.
             value_preds=np.zeros((self.n_rollout_threads, self.num_agents, 1), dtype=np.float32),
+
             rewards=np.zeros((self.n_rollout_threads, self.num_agents, 1), dtype=np.float32),
             masks=np.ones((self.n_rollout_threads, self.num_agents, 1), dtype=np.float32),
             delta_steps=np.ones((self.n_rollout_threads, self.num_agents, 1), dtype=np.int32),
@@ -146,7 +147,7 @@ class PettingzooRunner(Runner):
 
         share_obs, obs, rnn_states, rnn_states_critic, masks, available_actions = self.buffer.compatibility_get_policy_input(step)
 
-        value, action, action_log_prob, rnn_states, rnn_states_critic = self.trainer.policy.get_actions(
+        values, action, action_log_prob, rnn_states, rnn_states_critic = self.trainer.policy.get_actions(
             share_obs,
             obs,
             rnn_states,
@@ -155,16 +156,20 @@ class PettingzooRunner(Runner):
             available_actions=available_actions
         )
 
-        values = np.array(np.split(_t2n(value), self.n_rollout_threads))
-        actions = np.array(np.split(_t2n(action), self.n_rollout_threads))
-        action_log_probs = np.array(np.split(_t2n(action_log_prob), self.n_rollout_threads))
-        rnn_states = np.array(np.split(_t2n(rnn_states), self.n_rollout_threads))
-        rnn_states_critic = np.array(np.split(_t2n(rnn_states_critic), self.n_rollout_threads))
+        # The value function predictions are made once over the entire share_obs.
+        # However, we need to compare them with per-agent returns.
+        # This is done by repeating the value predictions for each agent.
+        values = values.detach().cpu().reshape((self.n_rollout_threads, 1, 1)).repeat(1, self.policy.args.num_agents, 1)
+
+        actions = action.detach().cpu().reshape((self.n_rollout_threads, self.num_agents, *action.shape[1:]))
+        action_log_probs = action_log_prob.detach().cpu().reshape((self.n_rollout_threads, self.num_agents, *action_log_prob.shape[1:]))
+        rnn_states = rnn_states.detach().cpu().reshape((self.n_rollout_threads, self.num_agents, *rnn_states.shape[1:]))
+        rnn_states_critic = rnn_states_critic.detach().cpu().reshape((self.n_rollout_threads, self.num_agents, *rnn_states_critic.shape[1:]))
 
         if actions.shape[-1] == 1:
-            actions_env = [actions[idx, :, 0] for idx in range(self.n_rollout_threads)]
+            actions_env = [actions[idx, :, 0].numpy() for idx in range(self.n_rollout_threads)]
         else:
-            actions_env = [actions[idx, :, :] for idx in range(self.n_rollout_threads)]
+            actions_env = [actions[idx, :, :].numpy() for idx in range(self.n_rollout_threads)]
         
 
         return values, actions, action_log_probs, rnn_states, rnn_states_critic, actions_env
@@ -226,7 +231,8 @@ class PettingzooRunner(Runner):
             next_values = self.trainer.policy.get_values(share_obs,
                                                         rnn_states_critic,
                                                         masks)
-        next_values = next_values.detach().cpu().view(self.n_rollout_threads, self.num_agents, 1)
+        next_values = next_values.detach().cpu().view(self.n_rollout_threads, 1, 1)
+        next_values = next_values.repeat(1, self.num_agents, 1)
         self.buffer.compute_returns(next_values, self.trainer.value_normalizer)
 
 
@@ -275,10 +281,10 @@ class PettingzooRunner(Runner):
             )
             
             # [n_envs*n_agents, ...] -> [n_envs, n_agents, ...]
-            eval_actions = np.array(np.split(_t2n(eval_actions), self.n_eval_rollout_threads))
-            eval_rnn_states = np.array(np.split(_t2n(eval_rnn_states), self.n_eval_rollout_threads))
+            eval_actions = eval_actions.detach().cpu().reshape((self.n_eval_rollout_threads, self.num_agents, *eval_actions.shape[1:]))
+            eval_rnn_states = eval_rnn_states.detach().cpu().reshape((self.n_eval_rollout_threads, self.num_agents, *eval_rnn_states.shape[1:]))
 
-            eval_actions_env = [eval_actions[idx, :, 0] for idx in range(self.n_eval_rollout_threads)]
+            eval_actions_env = [eval_actions[idx, :, 0].numpy() for idx in range(self.n_eval_rollout_threads)]
 
             # step
             eval_obs, eval_rewards, eval_dones, eval_infos = self.eval_envs.step(eval_actions_env)
@@ -368,7 +374,7 @@ class PettingzooRunner(Runner):
                     aa = None
 
                 for agentIdx in range(self.num_agents):
-                    if len(trajectory[agentIdx]) == HISTORY_LENGTH: # and render_env.envs[0].env.step_count == HISTORY_LENGTH - 1:
+                    if hasattr(self.policy, "diffuser") and len(trajectory[agentIdx]) == HISTORY_LENGTH: # and render_env.envs[0].env.step_count == HISTORY_LENGTH - 1:
                         
                         trajectory_tensor = torch.stack(list(trajectory[agentIdx]), dim=0)
                         
@@ -413,15 +419,17 @@ class PettingzooRunner(Runner):
                 
                 actions, rnn_states = self.trainer.policy.act(
                     state_pred,
-                    np.concatenate(rnn_states),
+                    # np.concatenate(rnn_states)
+                    np.concatenate(rnn_states if isinstance(rnn_states, (list, tuple)) else [rnn_states]),
                     np.concatenate(masks),
                     deterministic=True,
                     available_actions=aa
                 )
 
                 # [n_envs*n_agents, ...] -> [n_envs, n_agents, ...]
-                actions = np.array(np.split(_t2n(actions), self.n_render_rollout_threads))
-                rnn_states = np.array(np.split(_t2n(rnn_states), self.n_render_rollout_threads))
+                actions = actions.detach().cpu().reshape((self.n_render_rollout_threads, self.num_agents, *actions.shape[1:]))
+                # rnn_states = rnn_states.detach().cpu().reshape((self.n_render_rollout_threads, self.num_agents, *rnn_states.shape[1:]))
+                rnn_states = rnn_states.detach().cpu().reshape((self.n_render_rollout_threads, *rnn_states.shape[1:]))
 
                 actions_env = [actions[idx, :, :] for idx in range(self.n_render_rollout_threads)]
 
@@ -439,7 +447,8 @@ class PettingzooRunner(Runner):
                 if not np.all(dones):
                     if ipython_clear_output:
                         clear_output(wait = True)
-                    render_env.envs[0].env.render(state_pred_full, history_length=HISTORY_LENGTH)
+                    # render_env.envs[0].env.render(state_pred_full, history_length=HISTORY_LENGTH)
+                    render_env.envs[0].env.render()
                     # render_env.envs[0].env.render()
 
                 # append frame
