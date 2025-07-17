@@ -134,16 +134,19 @@ class QmasAlgorithm(R_MAPPO):
         
         # Build trajectories.
         trajectories = torch.cat([actions_batch, obs_batch], dim=-1)
+        
 
-        # Condition randomly.
-        fix_mask = torch.zeros_like(trajectories)
-        # x0 = torch.zeros_like(trajectories)
-        for i in range(trajectories.shape[0]):
-            for j in range(trajectories.shape[1]):
-                # We must have the t=0 condition.
-                if np.random.rand() > 0.5 or i == 0:
-                    fix_mask[i, j] = 1.0
-                    # x0[i, j] = trajectories[i, j]
+        # Condition using visibility mask.
+        
+        visibility_mask = sample["visibility_mask"]  # shape: (B, T, D_obs)
+        # Transform visibility_mask to match obs_batch processing
+        visibility_mask = visibility_mask.permute(1, 0, *range(2, visibility_mask.ndim))
+        visibility_mask = visibility_mask.flatten(start_dim=1, end_dim=2)
+        visibility_mask = visibility_mask.permute(1, 0, *range(2, visibility_mask.ndim))
+        visibility_mask = visibility_mask.reshape(*visibility_mask.shape[:2], -1)
+        
+        action_visibility = torch.ones_like(actions_batch)  # shape: (B, T, D_act)
+        fix_mask = torch.cat([action_visibility, visibility_mask.float()], dim=-1)  # shape: (B, T, D_act + D_obs)
 
         # Update the fix_mask. This determines which parts of the trajectory are fixed and which are predicted.
         # This applies to both update_diffusion and update_classifier.
