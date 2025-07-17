@@ -374,7 +374,7 @@ class PettingzooRunner(Runner):
                     aa = None
 
                 for agentIdx in range(self.num_agents):
-                    if len(trajectory[agentIdx]) == HISTORY_LENGTH: # and render_env.envs[0].env.step_count == HISTORY_LENGTH - 1:
+                    if hasattr(self.policy, "diffuser") and len(trajectory[agentIdx]) == HISTORY_LENGTH: # and render_env.envs[0].env.step_count == HISTORY_LENGTH - 1:
                         
                         trajectory_tensor = torch.stack(list(trajectory[agentIdx]), dim=0)
                         
