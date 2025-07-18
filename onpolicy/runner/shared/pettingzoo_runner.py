@@ -372,20 +372,23 @@ class PettingzooRunner(Runner):
                         
                         trajectory_tensor = torch.stack(list(trajectory[agentIdx]), dim=0)
                         
-                        # Set up conditions (prior knowledge).
-                        condition = np.zeros((1, HISTORY_LENGTH, transition_size), dtype=np.float32)
-                        condition_mask = np.zeros((1, HISTORY_LENGTH, transition_size), dtype=np.float32)
+                        # Set up conditions (prior knowledge) using visibility mask logic.
+                        condition = torch.zeros((1, HISTORY_LENGTH, transition_size), dtype=torch.float32, device=self.device)
+                        condition_mask = torch.zeros((1, HISTORY_LENGTH, transition_size), dtype=torch.float32, device=self.device)
+
                         for i in range(len(trajectory_tensor)):
-                            # if (np.random.rand() > 0.5 and i<7) or i == 0: 
-                            #  # Ensure at least t=0 is always conditioned
-                            # if i < 4:
-                            # if True:
-                            if i == 0 or np.random.rand() > 0.8:
-                            # if i % 2 == 0 or i == 1:
-                                condition[0, i] = trajectory_tensor[i]
-                                condition_mask[0, i] = 1.0
-                        condition = torch.from_numpy(condition).to(self.device)
-                        condition_mask = torch.from_numpy(condition_mask).to(self.device)
+                            act = trajectory_tensor[i, :act_size]
+                            obs = trajectory_tensor[i, act_size:]
+
+                            # Create a binary mask for visibility
+                            visibility = torch.ones_like(obs)
+                            if "visibility_mask" in infos[0]:
+                                visibility = torch.tensor(infos[0]["visibility_mask"][agentIdx], dtype=torch.float32, device=self.device)
+
+                            condition[0, i, :act_size] = act
+                            condition[0, i, act_size:] = obs * visibility
+                            condition_mask[0, i, :act_size] = 1.0
+                            condition_mask[0, i, act_size:] = visibility
 
                         # The prior and fix_mask represent the known data and are applied as described by Janner et al.
                         # We set the fix_mask manually here as a workaround for CleanDiffuser not taking it as an input.
