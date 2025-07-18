@@ -21,6 +21,8 @@ def add_args(parser):
     ''' Adds environment arguments. '''
     
     import argparse
+    parser.add_argument("--num_adversaries", type=int, default=1,
+                        help="The number of adversaries in the environment.")
     parser.add_argument("--no_ego_obs", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--random_start_positions", action=argparse.BooleanOptionalAction, default=False,
                         help="If true, agents will start at random positions in the world. If false, they will start at [0,0].")
@@ -55,7 +57,8 @@ class parallel_env(ParallelEnv):
 
 
     def __init__(self,
-                 num_agents = 3,
+                 num_agents = 1,
+                 num_adversaries: int = 1,
                  max_cycles: int = -1,
                  world_size: float = 50.0,
                  no_ego_obs: bool = False,
@@ -70,7 +73,6 @@ class parallel_env(ParallelEnv):
         # Configuration.
         self.max_cycles = max_cycles
         self.world_dims = np.array([world_size, world_size], dtype=np.float32)
-        num_adversaries = 1 #just 1 leader for now
         self.no_ego_obs = no_ego_obs
         self.random_start_positions = random_start_positions
         self.state_per_agent = state_per_agent
@@ -146,16 +148,12 @@ class parallel_env(ParallelEnv):
                 reset_start_position=True,
                 position=start_position,
             )
+            adversary.velocity = np.random.uniform(-1.0, 1.0, size=2)  # Random initial velocity
         
         # Reset other state.
         self.step_count = 0
         self.dones = dict.fromkeys(self.agents, False)
-        
-        # Initialize alpha (velocity) and save base value for variations
-        self.alpha = np.random.uniform(-1.0, 1.0, size=2)
-        self.base_alpha = self.alpha.copy()  # Store the initial alpha for reference
-        self.alpha_history = [self.alpha.copy()]
-        
+
         self.state_history = {
             a: [copy(a.position)] for a in self.agents + self.adversaries
         }
@@ -224,7 +222,7 @@ class parallel_env(ParallelEnv):
 
             # Plot actual history for the agent.
             history = self.state_history[agent]
-            plt.plot([h[0] for h in history], [h[1] for h in history], 'b', alpha=0.5, linewidth=0.5)            
+            plt.plot([h[0] for h in history], [h[1] for h in history], 'b', alpha=0.5, linewidth=0.5, label=f"{agent} actual")            
         
         # Plot the adversary positions.
         positions = [a.position for a in self.possible_adversaries]
@@ -234,7 +232,7 @@ class parallel_env(ParallelEnv):
 
             # Plot actual history for the adversary.
             history = self.state_history[adversary]
-            plt.plot([h[0] for h in history], [h[1] for h in history], 'r', alpha=0.5, linewidth=0.5)
+            plt.plot([h[0] for h in history], [h[1] for h in history], 'r', alpha=0.5, linewidth=0.5, label=f"{adversary} actual")
 
 
         # Plot history of predictions from the perspective of agent 0.
@@ -318,7 +316,7 @@ class parallel_env(ParallelEnv):
             "adversaries": {
                 a: {
                     "position": a.position,
-                    "velocity": self.alpha,
+                    "velocity": a.velocity,
                 } for a in self.possible_adversaries
             }
         }
@@ -361,27 +359,24 @@ class parallel_env(ParallelEnv):
 
         return obs, obs_mask
     
-    def _update_alpha(self):
+    def _update_adversary_velocity(self, adversary):
         """
-        Update alpha based on the step count to create a more complex pattern.
-        This function creates a time-varying alpha that follows different patterns.
+        Update velocity based on the step count to create a more complex pattern.
+        This function creates a time-varying velocity that follows different patterns.
         """
         if random.random() < 0.3:
-            # Randomly change alpha to create a new pattern
-            self.alpha += np.random.normal(0, 0.3, size=2)
+            # Randomly change velocity to create a new pattern
+            adversary.velocity += np.random.normal(0, 0.3, size=2)
                 
         # # Add some random noise to make the trajectory more natural
         noise_magnitude = 0.05 * min(1.0, self.step_count / 50.0)  # Gradually increase noise
-        self.alpha += np.random.normal(0, noise_magnitude, size=2)
+        adversary.velocity += np.random.normal(0, noise_magnitude, size=2)
 
-        # Normalize alpha to keep it within a reasonable range.
-        norm = np.linalg.norm(self.alpha)
+        # Normalize velocity to keep it within a reasonable range.
+        norm = np.linalg.norm(adversary.velocity)
         if norm > 1.0:
-            self.alpha = self.alpha / norm
-        
-        # Record alpha history
-        self.alpha_history.append(self.alpha.copy())
-        
+            adversary.velocity = adversary.velocity / norm
+                
     def step(self, action_dict={}, lastStep=False):
         ''''
         Perform a step in the environment based on the given action dictionary.
@@ -396,10 +391,7 @@ class parallel_env(ParallelEnv):
             info_dict (dict): A dictionary containing additional information for each agent.
         '''
         self.step_count += 1
-        
-        # Update alpha with time-varying pattern
-        self._update_alpha()
-        
+                
         obs_dict = {}
         reward_dict = {agent: 0.0 for agent in self.possible_agents}
         truncated_dict = {agent: False for agent in self.possible_agents}
@@ -409,7 +401,7 @@ class parallel_env(ParallelEnv):
             } for agent in self.possible_agents
         }
 
-        # Perform actions.
+        # Perform agent actions.
         for agent in self.agents:
             if agent in action_dict:
                 action = action_dict[agent]
@@ -419,28 +411,26 @@ class parallel_env(ParallelEnv):
 
                 self.state_history[agent].append(agent.position.copy())
 
-        # Increment the reference state using the time-varying alpha
+        # Perform adversary actions.
         for adversary in self.adversaries:
-            adversary.position += self.alpha
+            self._update_adversary_velocity(adversary)
+            adversary.position += adversary.velocity
             self.state_history[adversary].append(adversary.position.copy())
 
-        # Provide reward based on distance to reference state
-        meanAdversary = np.mean([a.position for a in self.adversaries], axis=0)
+        # Provide penalty to all agents based on distance of each adversary to the closest agent.
+        for adversary in self.adversaries:
+            closest_agent = min(self.agents, key=lambda a: np.linalg.norm(adversary.position - a.position))
+            distance = np.linalg.norm(adversary.position - closest_agent.position)
+            # Reward is negative distance to encourage agents to stay close to adversaries.
+            rwd = -distance
         for agent in self.agents:
-            distance = np.linalg.norm(agent.position - meanAdversary)
-            reward_dict[agent] = -distance
+            reward_dict[agent] += rwd
 
         # Perform observations.
         for agent in self.possible_agents:
             agent_observation, obs_mask = self.observe(agent)
             obs_dict[agent] = agent_observation
             info_dict[agent]["visibility_mask"] = obs_mask
-            info_dict[f"distance/{agent}"] = np.linalg.norm(agent.position - meanAdversary)
-            info_dict[f"position/{agent}"] = agent.position.tolist()
-        
-        # Add reference position and velocity to the info dictionary.
-        info_dict["reference_position"] = meanAdversary.tolist()
-        info_dict["reference_velocity"] = self.alpha.tolist()
 
         # Check truncation conditions.
         if lastStep or (self.max_cycles >= 0 and self.step_count >= self.max_cycles):
