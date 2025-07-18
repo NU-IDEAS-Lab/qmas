@@ -101,6 +101,7 @@ class parallel_env(ParallelEnv):
                     "velocity": spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32),
                 }) for a in self.possible_adversaries
             }),
+            "id": spaces.Discrete(len(self.possible_agents))
         }
         if not self.no_ego_obs:
             obs_space["agents"] = spaces.Dict({
@@ -318,7 +319,8 @@ class parallel_env(ParallelEnv):
                     "position": a.position,
                     "velocity": a.velocity,
                 } for a in self.possible_adversaries
-            }
+            },
+            "id": self.possible_agents.index(agent)
         }
         if not self.no_ego_obs:
             obs["agents"] = {
