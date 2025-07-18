@@ -431,7 +431,7 @@ class PettingzooRunner(Runner):
                 # rnn_states = rnn_states.detach().cpu().reshape((self.n_render_rollout_threads, self.num_agents, *rnn_states.shape[1:]))
                 rnn_states = rnn_states.detach().cpu().reshape((self.n_render_rollout_threads, *rnn_states.shape[1:]))
 
-                actions_env = [actions[idx, :, :] for idx in range(self.n_render_rollout_threads)]
+                actions_env = [actions[idx, :, :].numpy() for idx in range(self.n_render_rollout_threads)]
 
                 # Take a step in the environment and get the results.
                 obs, share_obs, render_rewards, dones, infos, available_actions = render_env.step(actions_env)
@@ -447,8 +447,8 @@ class PettingzooRunner(Runner):
                 if not np.all(dones):
                     if ipython_clear_output:
                         clear_output(wait = True)
-                    # render_env.envs[0].env.render(state_pred_full, history_length=HISTORY_LENGTH)
-                    render_env.envs[0].env.render()
+                    render_env.envs[0].env.render(state_pred_full, history_length=HISTORY_LENGTH)
+                    # render_env.envs[0].env.render()
                     # render_env.envs[0].env.render()
 
                 # append frame
