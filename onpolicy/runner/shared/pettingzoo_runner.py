@@ -367,6 +367,8 @@ class PettingzooRunner(Runner):
 
             dones = False
             while not np.all(dones):
+                time_start = time.time()
+
                 self.trainer.prep_rollout()
 
                 aa = np.concatenate(available_actions)
@@ -448,7 +450,9 @@ class PettingzooRunner(Runner):
                 for i in range(self.num_agents):
                     transition = np.concatenate((actions[0][i], obs[0][i]), axis=0)
                     trajectory[i].append(torch.from_numpy(transition))
-                                
+
+                time_stop = time.time()
+
                 if not np.all(dones):
                     if ipython_clear_output:
                         clear_output(wait = True)
@@ -462,6 +466,9 @@ class PettingzooRunner(Runner):
                 if self.all_args.save_gifs:        
                     image = infos[0]["frame"]
                     frames.append(image)
+                
+                # Print the FPS information.
+                print(f"Step {render_env.envs[0].env.step_count} - FPS: {1 / (time_stop - time_start):.2f}, Time per step: {time_stop - time_start:.4f}s (excluding render)")
 
             # save gif
             if self.all_args.save_gifs:
