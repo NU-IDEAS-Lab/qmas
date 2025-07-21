@@ -372,9 +372,11 @@ class PettingzooRunner(Runner):
                 aa = np.concatenate(available_actions)
                 if np.any(aa == None):
                     aa = None
+                
+                use_prediction = hasattr(self.policy, "diffuser") and len(trajectory[0]) == HISTORY_LENGTH
 
                 for agentIdx in range(self.num_agents):
-                    if hasattr(self.policy, "diffuser") and len(trajectory[agentIdx]) == HISTORY_LENGTH: # and render_env.envs[0].env.step_count == HISTORY_LENGTH - 1:
+                    if use_prediction:
                         
                         trajectory_tensor = torch.stack(list(trajectory[agentIdx]), dim=0)
                         
@@ -450,9 +452,11 @@ class PettingzooRunner(Runner):
                 if not np.all(dones):
                     if ipython_clear_output:
                         clear_output(wait = True)
-                    render_env.envs[0].env.render(state_pred_full, history_length=HISTORY_LENGTH)
-                    # render_env.envs[0].env.render()
-                    # render_env.envs[0].env.render()
+                    
+                    spf = state_pred_full if use_prediction else None
+
+                    # Perform rendering.
+                    render_env.envs[0].env.render(spf, history_length=HISTORY_LENGTH)
 
                 # append frame
                 if self.all_args.save_gifs:        

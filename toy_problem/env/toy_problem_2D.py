@@ -184,7 +184,7 @@ class parallel_env(ParallelEnv):
         return np.random.uniform(-self.world_dims / 2, self.world_dims / 2)
 
 
-    def render(self, pred=[], figsize=(9, 6), history_length=2):
+    def render(self, pred=None, figsize=(9, 6), history_length=2):
         ''' Renders the environment.
             
             Args:
@@ -196,7 +196,7 @@ class parallel_env(ParallelEnv):
 
         # Convert the predicted state back into a dictionary (unflatten).
         pred_unflattened = []
-        pred_steps = pred.shape[0]
+        pred_steps = pred.shape[0] if pred is not None else 0
         for i in range(pred_steps):
             p = spaces.unflatten(self.observation_spaces, pred[i].flatten())
             pred_unflattened.append(p)
