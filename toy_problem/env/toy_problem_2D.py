@@ -337,7 +337,8 @@ class parallel_env(ParallelEnv):
                     "position": True,
                     "velocity": True,
                 } for a in self.possible_adversaries
-            }
+            },
+            "id": True
         }
         if not self.no_ego_obs:
             # Set probability of observing another agent
