@@ -129,6 +129,12 @@ class R_MAPPO():
                                                                               masks_batch, 
                                                                               available_actions_batch,
                                                                               active_masks_batch)
+        
+        # Reshape and repeat values for each agent.
+        # The value function predictions are made once over the entire share_obs.
+        # However, we need to compare them with per-agent returns.
+        values = values.reshape((values.shape[0], 1, 1)).repeat(1, self.policy.args.num_agents, 1).reshape((-1, 1))
+
         # actor update
         imp_weights = torch.exp(action_log_probs - old_action_log_probs_batch)
 
@@ -157,6 +163,7 @@ class R_MAPPO():
 
         if update_actor:
             self.policy.actor_optimizer.step()
+
 
         # critic update
         value_loss = self.cal_value_loss(values, value_preds_batch, return_batch, active_masks_batch, update_value_normalizer=update_critic)
@@ -187,6 +194,7 @@ class R_MAPPO():
 
         :return train_info: (dict) contains information regarding training update (e.g. loss, grad norms, etc).
         """
+
         if self._use_popart or self._use_valuenorm:
             advantages = buffer.returns[:last_step] - self.value_normalizer.denormalize(buffer.value_preds[:last_step])
         else:
