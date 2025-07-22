@@ -373,6 +373,7 @@ class PettingzooRunner(Runner):
                 if np.any(aa == None):
                     aa = None
 
+                predicted_positions = None
                 for agentIdx in range(self.num_agents):
                     if hasattr(self.policy, "diffuser") and len(trajectory[agentIdx]) == HISTORY_LENGTH: # and render_env.envs[0].env.step_count == HISTORY_LENGTH - 1:
                         
@@ -416,7 +417,7 @@ class PettingzooRunner(Runner):
                     else:
                         state_pred[agentIdx] = torch.from_numpy(obs[0, agentIdx])
                         state_pred_full[:, agentIdx, :] = torch.zeros((HISTORY_LENGTH, *obs_shape), dtype=torch.float32)
-                
+
                 actions, rnn_states = self.trainer.policy.act(
                     state_pred,
                     # np.concatenate(rnn_states)
@@ -447,9 +448,10 @@ class PettingzooRunner(Runner):
                 if not np.all(dones):
                     if ipython_clear_output:
                         clear_output(wait = True)
-                    # render_env.envs[0].env.render(state_pred_full, history_length=HISTORY_LENGTH)
-                    render_env.envs[0].env.render()
-                    # render_env.envs[0].env.render()
+                    if hasattr(self.policy, "diffuser") and len(trajectory[0]) == HISTORY_LENGTH:
+                        render_env.envs[0].env.render(predicted_positions=state_pred_full)
+                    else:
+                        render_env.envs[0].env.render()
 
                 # append frame
                 if self.all_args.save_gifs:        

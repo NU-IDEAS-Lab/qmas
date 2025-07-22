@@ -16,6 +16,7 @@ from copy import copy
 from enum import IntEnum
 from torch_geometric.utils.convert import from_networkx
 from torch_geometric.data import Data
+from collections import Counter
 
 
 def add_args(parser):
@@ -424,7 +425,7 @@ class parallel_env(ParallelEnv):
         return observation, info
 
 
-    def render(self, figsize=(12, 9)):
+    def render(self, figsize=(12, 9), predicted_positions = None):
         ''' Renders the environment.
             
             Args:
@@ -464,6 +465,24 @@ class parallel_env(ParallelEnv):
             plt.scatter(*agent.position, color=color, marker=marker, zorder=10, alpha=0.3, s=300)
             plt.plot([], [], color=color, marker=marker, linestyle='None', label=agent.name, alpha=0.5)
 
+            if predicted_positions is not None and i==0:
+                pred_unflattened = []
+                pred_steps = predicted_positions.shape[0]
+                for j in range(pred_steps):
+                    p = spaces.unflatten(self.observation_spaces, predicted_positions[j].flatten())
+                    pred_unflattened.append(p)
+                
+                # Plot history of predictions from the perspective of agent 0.
+                if len(pred_unflattened) > 0:
+                    agent_preds = [pred_unflattened[y][self.possible_agents[0]] for y in range(len(pred_unflattened))]
+                    node_ids = [x["agent_graph_position"][self.possible_agents[0]][0] for x in agent_preds]
+                    counter = Counter(node_ids)
+                    most_common_node, _ = counter.most_common(1)[0]
+                    pos = nx.get_node_attributes(self.pg.graph, 'pos')
+                    node = [pos.get(most_common_node, (0.0, 0.0))]
+
+                    plt.scatter(node[0][0], node[0][1], marker="*", s=300, alpha=0.4, zorder=10)            
+                    plt.annotate(f"Pred agent 0", (node[0][0] + 3, node[0][1]), fontsize=8, color='blue')
         plt.legend(bbox_to_anchor=(1.04, 1), loc="upper left")
         plt.gcf().text(0,0,f'Current step: {self.step_count}, Average idleness time: {self.pg.getAverageIdlenessTime(self.step_count):.2f}')
         plt.show()
