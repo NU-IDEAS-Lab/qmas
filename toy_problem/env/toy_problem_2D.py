@@ -23,13 +23,14 @@ def add_args(parser):
     import argparse
     parser.add_argument("--num_adversaries", type=int, default=1,
                         help="The number of adversaries in the environment.")
-    parser.add_argument("--no_ego_obs", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--random_start_positions", action=argparse.BooleanOptionalAction, default=False,
                         help="If true, agents will start at random positions in the world. If false, they will start at [0,0].")
     parser.add_argument("--state_per_agent", action=argparse.BooleanOptionalAction, default=False,
                         help="If true, the state function will return a separate copy of the state for each agent. "
                              "This is useful for centralized training, decentralized execution. "
                              "If false, the state function will return a single copy of the state that is shared among all agents.")
+    parser.add_argument("--observation_probability", type=float, default=1.0,
+                        help="The probability that an agent will observe another entity.")
 
 
 def validate_args(parsed_args):
@@ -61,9 +62,9 @@ class parallel_env(ParallelEnv):
                  num_adversaries: int = 1,
                  max_cycles: int = -1,
                  world_size: float = 50.0,
-                 no_ego_obs: bool = False,
                  random_start_positions: bool = False,
                  state_per_agent: bool = False,
+                 observation_probability: float = 1.0,
                 ):
         """
         Initialize the environment.
@@ -73,9 +74,9 @@ class parallel_env(ParallelEnv):
         # Configuration.
         self.max_cycles = max_cycles
         self.world_dims = np.array([world_size, world_size], dtype=np.float32)
-        self.no_ego_obs = no_ego_obs
         self.random_start_positions = random_start_positions
         self.state_per_agent = state_per_agent
+        self.observation_probability = observation_probability
 
         # Set up entities.
         self.possible_agents = [
@@ -101,15 +102,14 @@ class parallel_env(ParallelEnv):
                     "velocity": spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32),
                 }) for a in self.possible_adversaries
             }),
-            "id": spaces.Discrete(len(self.possible_agents))
-        }
-        if not self.no_ego_obs:
-            obs_space["agents"] = spaces.Dict({
+            "agents": spaces.Dict({
                 a: spaces.Dict({
                     "position": spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32),
                     "velocity": spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32),
                 }) for a in self.possible_agents
-            })
+            }),
+            "id": spaces.Discrete(len(self.possible_agents)),
+        }
         obs_space = spaces.Dict(obs_space)
         self.observation_spaces = spaces.Dict({agent: obs_space for agent in self.possible_agents}) # type: ignore
 
@@ -238,13 +238,12 @@ class parallel_env(ParallelEnv):
 
         # Plot history of predictions from the perspective of agent 0.
         if len(pred_unflattened) > 0:
-            if not self.no_ego_obs:
-                agent_preds = [pred_unflattened[i][self.possible_agents[0]]["agents"] for i in range(len(pred_unflattened))]
-                for i, agent in enumerate(self.possible_agents):
-                    # Get the history of predictions for this agent.
-                    history = [p[agent]["position"] for p in agent_preds]
-                    plt.plot([h[0] for h in history], [h[1] for h in history], 'b--', alpha=0.5, linewidth=1.5)            
-                    plt.annotate(f"Pred {agent}", (history[-1][0] + 1, history[-1][1]), fontsize=8, color='blue')
+            agent_preds = [pred_unflattened[i][self.possible_agents[0]]["agents"] for i in range(len(pred_unflattened))]
+            for i, agent in enumerate(self.possible_agents):
+                # Get the history of predictions for this agent.
+                history = [p[agent]["position"] for p in agent_preds]
+                plt.plot([h[0] for h in history], [h[1] for h in history], 'b--', alpha=0.5, linewidth=1.5)            
+                plt.annotate(f"Pred {agent}", (history[-1][0] + 1, history[-1][1]), fontsize=8, color='blue')
             
             adversary_preds = [pred_unflattened[i][self.possible_agents[0]]["adversaries"] for i in range(len(pred_unflattened))]
             for i, adversary in enumerate(self.possible_adversaries):
@@ -320,45 +319,41 @@ class parallel_env(ParallelEnv):
                     "velocity": a.velocity,
                 } for a in self.possible_adversaries
             },
-            "id": self.possible_agents.index(agent)
-        }
-        if not self.no_ego_obs:
-            obs["agents"] = {
+            "agents": {
                 a: {
                     "position": a.position,
-                    "velocity": a.position - self.state_history[a][-1] if len(self.state_history[a]) > 0 else np.array([0.0, 0.0], dtype=np.float32),
+                    "velocity": a.velocity,
                 } for a in self.possible_agents
-            }
+            },
+            "id": self.possible_agents.index(agent),
+        }
         
         # Create a visibility mask for the agents.
+        def visible(entity):
+            if force_visible:
+                return True
+            if entity == agent:
+                return True
+            if random.random() < self.observation_probability:
+                return True
+            return False
         obs_mask = {
-            "adversaries": {
-                a: {
-                    "position": True,
-                    "velocity": True,
-                } for a in self.possible_adversaries
-            },
+            "adversaries": {},
+            "agents": {},
             "id": True
         }
-        if not self.no_ego_obs:
-            # Set probability of observing another agent
-            visibility_prob = 1.0
-
-            obs_mask["agents"] = {}
-            for a in self.possible_agents:
-                if a == agent:
-                    # Ego agent always sees itself
-                    obs_mask["agents"][a] = {
-                        "position": True,
-                        "velocity": True,
-                    }
-                else:
-                    # Other agents are seen probabilistically
-                    visible = np.random.rand() < visibility_prob
-                    obs_mask["agents"][a] = {
-                        "position": visible,
-                        "velocity": visible,
-                    }
+        for a in self.possible_adversaries:
+            vis = visible(a)
+            obs_mask["adversaries"][a] = {
+                "position": vis,
+                "velocity": vis,
+            }
+        for a in self.possible_agents:
+            vis = visible(a)
+            obs_mask["agents"][a] = {
+                "position": vis,
+                "velocity": vis,
+            }
 
         return obs, obs_mask
     
