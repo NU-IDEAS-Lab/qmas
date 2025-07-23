@@ -434,6 +434,7 @@ class parallel_env(ParallelEnv):
             Returns:
                 None
         '''
+        self._plotted_prediction_labels = set()
         fig, ax = plt.subplots(figsize=figsize)
         markers = ['p']
         markers_done = ['X']
@@ -465,24 +466,30 @@ class parallel_env(ParallelEnv):
             plt.scatter(*agent.position, color=color, marker=marker, zorder=10, alpha=0.3, s=300)
             plt.plot([], [], color=color, marker=marker, linestyle='None', label=agent.name, alpha=0.5)
 
-            if predicted_positions is not None and i==0:
+            if predicted_positions is not None:
                 pred_unflattened = []
                 pred_steps = predicted_positions.shape[0]
                 for j in range(pred_steps):
                     p = spaces.unflatten(self.observation_spaces, predicted_positions[j].flatten())
                     pred_unflattened.append(p)
-                
-                # Plot history of predictions from the perspective of agent 0.
-                if len(pred_unflattened) > 0:
-                    agent_preds = [pred_unflattened[y][self.possible_agents[0]] for y in range(len(pred_unflattened))]
-                    node_ids = [x["agent_graph_position"][self.possible_agents[0]][0] for x in agent_preds]
-                    counter = Counter(node_ids)
-                    most_common_node, _ = counter.most_common(1)[0]
-                    pos = nx.get_node_attributes(self.pg.graph, 'pos')
-                    node = [pos.get(most_common_node, (0.0, 0.0))]
 
-                    plt.scatter(node[0][0], node[0][1], marker="*", s=300, alpha=0.4, zorder=10)            
-                    plt.annotate(f"Pred agent 0", (node[0][0] + 3, node[0][1]), fontsize=8, color='blue')
+                # Plot history of predictions from the perspective of agent 0.
+                agent_preds = pred_unflattened[-1][self.possible_agents[0]]
+                graph_pos = agent_preds["agent_graph_position"]
+                pos = nx.get_node_attributes(self.pg.graph, "pos")
+
+                for i, agent in enumerate(self.possible_agents):
+                    if agent in graph_pos:
+                        node_id = int(round(graph_pos[agent][0]))
+                        prediction = pos[node_id]
+                        color = colors[i % len(colors)]
+                        label = f"{agent.name} prediction"
+                        if label in self._plotted_prediction_labels:
+                            label = None
+                        else:
+                            self._plotted_prediction_labels.add(label)
+                        plt.scatter(*prediction, color=color, marker="*", s=250, alpha=0.6, zorder=11)
+                        plt.plot([], [], color=color, marker="*", linestyle='None', label=label)
         plt.legend(bbox_to_anchor=(1.04, 1), loc="upper left")
         plt.gcf().text(0,0,f'Current step: {self.step_count}, Average idleness time: {self.pg.getAverageIdlenessTime(self.step_count):.2f}')
         plt.show()
