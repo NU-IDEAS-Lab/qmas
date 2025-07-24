@@ -367,32 +367,39 @@ class PettingzooRunner(Runner):
 
             dones = False
             while not np.all(dones):
+                time_start = time.time()
+
                 self.trainer.prep_rollout()
 
                 aa = np.concatenate(available_actions)
                 if np.any(aa == None):
                     aa = None
+                
+                use_prediction = hasattr(self.policy, "diffuser") and len(trajectory[0]) == HISTORY_LENGTH
 
                 predicted_positions = None
                 for agentIdx in range(self.num_agents):
-                    if hasattr(self.policy, "diffuser") and len(trajectory[agentIdx]) == HISTORY_LENGTH: # and render_env.envs[0].env.step_count == HISTORY_LENGTH - 1:
+                    if use_prediction:
                         
                         trajectory_tensor = torch.stack(list(trajectory[agentIdx]), dim=0)
                         
-                        # Set up conditions (prior knowledge).
-                        condition = np.zeros((1, HISTORY_LENGTH, transition_size), dtype=np.float32)
-                        condition_mask = np.zeros((1, HISTORY_LENGTH, transition_size), dtype=np.float32)
+                        # Set up conditions (prior knowledge) using visibility mask logic.
+                        condition = torch.zeros((1, HISTORY_LENGTH, transition_size), dtype=torch.float32, device=self.device)
+                        condition_mask = torch.zeros((1, HISTORY_LENGTH, transition_size), dtype=torch.float32, device=self.device)
+
                         for i in range(len(trajectory_tensor)):
-                            # if (np.random.rand() > 0.5 and i<7) or i == 0: 
-                            #  # Ensure at least t=0 is always conditioned
-                            # if i < 4:
-                            # if True:
-                            if i == 0 or np.random.rand() > 0.8:
-                            # if i % 2 == 0 or i == 1:
-                                condition[0, i] = trajectory_tensor[i]
-                                condition_mask[0, i] = 1.0
-                        condition = torch.from_numpy(condition).to(self.device)
-                        condition_mask = torch.from_numpy(condition_mask).to(self.device)
+                            act = trajectory_tensor[i, :act_size]
+                            obs = trajectory_tensor[i, act_size:]
+
+                            # Create a binary mask for visibility
+                            visibility = torch.ones_like(obs)
+                            if "visibility_mask" in infos[0]:
+                                visibility = torch.tensor(infos[0]["visibility_mask"][agentIdx], dtype=torch.float32, device=self.device)
+
+                            condition[0, i, :act_size] = act
+                            condition[0, i, act_size:] = obs * visibility
+                            condition_mask[0, i, :act_size] = 1.0
+                            condition_mask[0, i, act_size:] = visibility
 
                         # The prior and fix_mask represent the known data and are applied as described by Janner et al.
                         # We set the fix_mask manually here as a workaround for CleanDiffuser not taking it as an input.
@@ -432,7 +439,7 @@ class PettingzooRunner(Runner):
                 # rnn_states = rnn_states.detach().cpu().reshape((self.n_render_rollout_threads, self.num_agents, *rnn_states.shape[1:]))
                 rnn_states = rnn_states.detach().cpu().reshape((self.n_render_rollout_threads, *rnn_states.shape[1:]))
 
-                actions_env = [actions[idx, :, :] for idx in range(self.n_render_rollout_threads)]
+                actions_env = [actions[idx, :, :].numpy() for idx in range(self.n_render_rollout_threads)]
 
                 # Take a step in the environment and get the results.
                 obs, share_obs, render_rewards, dones, infos, available_actions = render_env.step(actions_env)
@@ -444,19 +451,25 @@ class PettingzooRunner(Runner):
                 for i in range(self.num_agents):
                     transition = np.concatenate((actions[0][i], obs[0][i]), axis=0)
                     trajectory[i].append(torch.from_numpy(transition))
-                                
+
+                time_stop = time.time()
+
                 if not np.all(dones):
                     if ipython_clear_output:
                         clear_output(wait = True)
-                    if hasattr(self.policy, "diffuser") and len(trajectory[0]) == HISTORY_LENGTH:
-                        render_env.envs[0].env.render(predicted_positions=state_pred_full)
-                    else:
-                        render_env.envs[0].env.render()
+                    
+                    spf = state_pred_full if use_prediction else None
+
+                    # Perform rendering.
+                    render_env.envs[0].env.render(spf, history_length=HISTORY_LENGTH)
 
                 # append frame
                 if self.all_args.save_gifs:        
                     image = infos[0]["frame"]
                     frames.append(image)
+                
+                # Print the FPS information.
+                print(f"Step {render_env.envs[0].env.step_count} - FPS: {1 / (time_stop - time_start):.2f}, Time per step: {time_stop - time_start:.4f}s (excluding render)")
 
             # save gif
             if self.all_args.save_gifs:

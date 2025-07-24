@@ -124,6 +124,16 @@ class QmasAlgorithm(R_MAPPO):
         rewards_batch = rewards_batch.permute(1, 0, *range(2, rewards_batch.ndim))
         rewards_batch = rewards_batch.reshape(*rewards_batch.shape[:2], -1)
 
+        # Condition using visibility mask.
+        visibility_mask_batch = sample["visibility_mask"]  # shape: (B, T, D_obs)
+        # Transform visibility_mask to match obs_batch processing
+        visibility_mask_batch = visibility_mask_batch.permute(1, 0, *range(2, visibility_mask_batch.ndim))
+        visibility_mask_batch = visibility_mask_batch.flatten(start_dim=1, end_dim=2)
+        visibility_mask_batch = visibility_mask_batch.permute(1, 0, *range(2, visibility_mask_batch.ndim))
+        
+        action_visibility = torch.ones_like(actions_batch)  # shape: (B, T, D_act)
+        fix_mask_batch = torch.cat([action_visibility, visibility_mask_batch.float()], dim=-1)  # shape: (B, T, D_act + D_obs)
+        
         # Perform optimization step for all agents.
         for i in range(actions_batch.shape[2]):
             agent_obs_batch = obs_batch[:, :, i, :]
@@ -138,19 +148,12 @@ class QmasAlgorithm(R_MAPPO):
             # Build trajectories.
             trajectories = torch.cat([agent_actions_batch, agent_obs_batch], dim=-1)
 
-            # Condition randomly.
-            fix_mask = torch.zeros_like(trajectories)
-            # x0 = torch.zeros_like(trajectories)
-            for i in range(trajectories.shape[0]):
-                for j in range(trajectories.shape[1]):
-                    # We must have the t=0 condition.
-                    if np.random.rand() > 0.5 or i == 0:
-                        fix_mask[i, j] = 1.0
-                        # x0[i, j] = trajectories[i, j]
+            # Get the visibility mask for the current agent.
+            agent_fix_mask = fix_mask_batch[:, :, i, :]
 
             # Update the fix_mask. This determines which parts of the trajectory are fixed and which are predicted.
             # This applies to both update_diffusion and update_classifier.
-            self.policy.diffuser.fix_mask = torch.nn.Parameter(fix_mask, requires_grad=False)
+            self.policy.diffuser.fix_mask = torch.nn.Parameter(agent_fix_mask, requires_grad=False)
 
             # Update diffuser model.
             diffuser_loss = self.policy.diffuser.update_diffusion(

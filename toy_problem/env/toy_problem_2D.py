@@ -21,13 +21,16 @@ def add_args(parser):
     ''' Adds environment arguments. '''
     
     import argparse
-    parser.add_argument("--no_ego_obs", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--num_adversaries", type=int, default=1,
+                        help="The number of adversaries in the environment.")
     parser.add_argument("--random_start_positions", action=argparse.BooleanOptionalAction, default=False,
                         help="If true, agents will start at random positions in the world. If false, they will start at [0,0].")
     parser.add_argument("--state_per_agent", action=argparse.BooleanOptionalAction, default=False,
                         help="If true, the state function will return a separate copy of the state for each agent. "
                              "This is useful for centralized training, decentralized execution. "
                              "If false, the state function will return a single copy of the state that is shared among all agents.")
+    parser.add_argument("--observation_probability", type=float, default=1.0,
+                        help="The probability that an agent will observe another entity.")
 
 
 def validate_args(parsed_args):
@@ -55,12 +58,13 @@ class parallel_env(ParallelEnv):
 
 
     def __init__(self,
-                 num_agents = 3,
+                 num_agents = 1,
+                 num_adversaries: int = 1,
                  max_cycles: int = -1,
                  world_size: float = 50.0,
-                 no_ego_obs: bool = False,
                  random_start_positions: bool = False,
                  state_per_agent: bool = False,
+                 observation_probability: float = 1.0,
                 ):
         """
         Initialize the environment.
@@ -70,10 +74,9 @@ class parallel_env(ParallelEnv):
         # Configuration.
         self.max_cycles = max_cycles
         self.world_dims = np.array([world_size, world_size], dtype=np.float32)
-        num_adversaries = 1 #just 1 leader for now
-        self.no_ego_obs = no_ego_obs
         self.random_start_positions = random_start_positions
         self.state_per_agent = state_per_agent
+        self.observation_probability = observation_probability
 
         # Set up entities.
         self.possible_agents = [
@@ -99,14 +102,14 @@ class parallel_env(ParallelEnv):
                     "velocity": spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32),
                 }) for a in self.possible_adversaries
             }),
-        }
-        if not self.no_ego_obs:
-            obs_space["agents"] = spaces.Dict({
+            "agents": spaces.Dict({
                 a: spaces.Dict({
                     "position": spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32),
                     "velocity": spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32),
                 }) for a in self.possible_agents
-            })
+            }),
+            "id": spaces.Discrete(len(self.possible_agents)),
+        }
         obs_space = spaces.Dict(obs_space)
         self.observation_spaces = spaces.Dict({agent: obs_space for agent in self.possible_agents}) # type: ignore
 
@@ -146,16 +149,12 @@ class parallel_env(ParallelEnv):
                 reset_start_position=True,
                 position=start_position,
             )
+            adversary.velocity = np.random.uniform(-1.0, 1.0, size=2)  # Random initial velocity
         
         # Reset other state.
         self.step_count = 0
         self.dones = dict.fromkeys(self.agents, False)
-        
-        # Initialize alpha (velocity) and save base value for variations
-        self.alpha = np.random.uniform(-1.0, 1.0, size=2)
-        self.base_alpha = self.alpha.copy()  # Store the initial alpha for reference
-        self.alpha_history = [self.alpha.copy()]
-        
+
         self.state_history = {
             a: [copy(a.position)] for a in self.agents + self.adversaries
         }
@@ -185,7 +184,7 @@ class parallel_env(ParallelEnv):
         return np.random.uniform(-self.world_dims / 2, self.world_dims / 2)
 
 
-    def render(self, pred=[], figsize=(9, 6), history_length=2):
+    def render(self, pred=None, figsize=(9, 6), history_length=2):
         ''' Renders the environment.
             
             Args:
@@ -197,7 +196,7 @@ class parallel_env(ParallelEnv):
 
         # Convert the predicted state back into a dictionary (unflatten).
         pred_unflattened = []
-        pred_steps = pred.shape[0]
+        pred_steps = pred.shape[0] if pred is not None else 0
         for i in range(pred_steps):
             p = spaces.unflatten(self.observation_spaces, pred[i].flatten())
             pred_unflattened.append(p)
@@ -224,7 +223,7 @@ class parallel_env(ParallelEnv):
 
             # Plot actual history for the agent.
             history = self.state_history[agent]
-            plt.plot([h[0] for h in history], [h[1] for h in history], 'b', alpha=0.5, linewidth=0.5)            
+            plt.plot([h[0] for h in history], [h[1] for h in history], 'b', alpha=0.5, linewidth=0.5, label=f"{agent} actual")            
         
         # Plot the adversary positions.
         positions = [a.position for a in self.possible_adversaries]
@@ -234,18 +233,17 @@ class parallel_env(ParallelEnv):
 
             # Plot actual history for the adversary.
             history = self.state_history[adversary]
-            plt.plot([h[0] for h in history], [h[1] for h in history], 'r', alpha=0.5, linewidth=0.5)
+            plt.plot([h[0] for h in history], [h[1] for h in history], 'r', alpha=0.5, linewidth=0.5, label=f"{adversary} actual")
 
 
         # Plot history of predictions from the perspective of agent 0.
         if len(pred_unflattened) > 0:
-            if not self.no_ego_obs:
-                agent_preds = [pred_unflattened[i][self.possible_agents[0]]["agents"] for i in range(len(pred_unflattened))]
-                for i, agent in enumerate(self.possible_agents):
-                    # Get the history of predictions for this agent.
-                    history = [p[agent]["position"] for p in agent_preds]
-                    plt.plot([h[0] for h in history], [h[1] for h in history], 'b--', alpha=0.5, linewidth=1.5)            
-                    plt.annotate(f"Pred {agent}", (history[-1][0] + 1, history[-1][1]), fontsize=8, color='blue')
+            agent_preds = [pred_unflattened[i][self.possible_agents[0]]["agents"] for i in range(len(pred_unflattened))]
+            for i, agent in enumerate(self.possible_agents):
+                # Get the history of predictions for this agent.
+                history = [p[agent]["position"] for p in agent_preds]
+                plt.plot([h[0] for h in history], [h[1] for h in history], 'b--', alpha=0.5, linewidth=1.5)            
+                plt.annotate(f"Pred {agent}", (history[-1][0] + 1, history[-1][1]), fontsize=8, color='blue')
             
             adversary_preds = [pred_unflattened[i][self.possible_agents[0]]["adversaries"] for i in range(len(pred_unflattened))]
             for i, adversary in enumerate(self.possible_adversaries):
@@ -318,70 +316,65 @@ class parallel_env(ParallelEnv):
             "adversaries": {
                 a: {
                     "position": a.position,
-                    "velocity": self.alpha,
+                    "velocity": a.velocity,
                 } for a in self.possible_adversaries
-            }
-        }
-        if not self.no_ego_obs:
-            obs["agents"] = {
+            },
+            "agents": {
                 a: {
                     "position": a.position,
-                    "velocity": a.position - self.state_history[a][-1] if len(self.state_history[a]) > 0 else np.array([0.0, 0.0], dtype=np.float32),
+                    "velocity": a.velocity,
                 } for a in self.possible_agents
-            }
+            },
+            "id": self.possible_agents.index(agent),
+        }
         
         # Create a visibility mask for the agents.
+        def visible(entity):
+            if force_visible:
+                return True
+            if entity == agent:
+                return True
+            if random.random() < self.observation_probability:
+                return True
+            return False
         obs_mask = {
-            "adversaries": {
-                a: {
-                    "position": True,
-                    "velocity": True,
-                } for a in self.possible_adversaries
-            }
+            "adversaries": {},
+            "agents": {},
+            "id": True
         }
-        if not self.no_ego_obs:
-            # Set probability of observing another agent
-            visibility_prob = 0.7
-
-            obs_mask["agents"] = {}
-            for a in self.possible_agents:
-                if a == agent:
-                    # Ego agent always sees itself
-                    obs_mask["agents"][a] = {
-                        "position": True,
-                        "velocity": True,
-                    }
-                else:
-                    # Other agents are seen probabilistically
-                    visible = np.random.rand() < visibility_prob
-                    obs_mask["agents"][a] = {
-                        "position": visible,
-                        "velocity": visible,
-                    }
+        for a in self.possible_adversaries:
+            vis = visible(a)
+            obs_mask["adversaries"][a] = {
+                "position": vis,
+                "velocity": vis,
+            }
+        for a in self.possible_agents:
+            vis = visible(a)
+            obs_mask["agents"][a] = {
+                "position": vis,
+                "velocity": vis,
+            }
 
         return obs, obs_mask
     
-    def _update_alpha(self):
+    def _update_adversary_velocity(self, adversary):
         """
-        Update alpha based on the step count to create a more complex pattern.
-        This function creates a time-varying alpha that follows different patterns.
+        Update velocity based on the step count to create a more complex pattern.
+        This function creates a time-varying velocity that follows different patterns.
         """
         if random.random() < 0.3:
-            # Randomly change alpha to create a new pattern
-            self.alpha += np.random.normal(0, 0.3, size=2)
+            # Randomly change velocity to create a new pattern
+            adversary.velocity += np.random.normal(0, 0.3, size=2)
                 
         # # Add some random noise to make the trajectory more natural
         noise_magnitude = 0.05 * min(1.0, self.step_count / 50.0)  # Gradually increase noise
-        self.alpha += np.random.normal(0, noise_magnitude, size=2)
+        adversary.velocity += np.random.normal(0, noise_magnitude, size=2)
 
-        # Normalize alpha to keep it within a reasonable range.
-        norm = np.linalg.norm(self.alpha)
+        # Normalize velocity to keep it within a reasonable range.
+        norm = np.linalg.norm(adversary.velocity)
         if norm > 1.0:
-            self.alpha = self.alpha / norm
-        
-        # Record alpha history
-        self.alpha_history.append(self.alpha.copy())
-        
+            adversary.velocity = adversary.velocity / norm
+                
     def step(self, action_dict={}, lastStep=False):
         ''''
         Perform a step in the environment based on the given action dictionary.
@@ -396,10 +389,7 @@ class parallel_env(ParallelEnv):
             info_dict (dict): A dictionary containing additional information for each agent.
         '''
         self.step_count += 1
-        
-        # Update alpha with time-varying pattern
-        self._update_alpha()
-        
+                
         obs_dict = {}
         reward_dict = {agent: 0.0 for agent in self.possible_agents}
         truncated_dict = {agent: False for agent in self.possible_agents}
@@ -409,7 +399,7 @@ class parallel_env(ParallelEnv):
             } for agent in self.possible_agents
         }
 
-        # Perform actions.
+        # Perform agent actions.
         for agent in self.agents:
             if agent in action_dict:
                 action = action_dict[agent]
@@ -419,28 +409,26 @@ class parallel_env(ParallelEnv):
 
                 self.state_history[agent].append(agent.position.copy())
 
-        # Increment the reference state using the time-varying alpha
+        # Perform adversary actions.
         for adversary in self.adversaries:
-            adversary.position += self.alpha
+            self._update_adversary_velocity(adversary)
+            adversary.position += adversary.velocity
             self.state_history[adversary].append(adversary.position.copy())
 
-        # Provide reward based on distance to reference state
-        meanAdversary = np.mean([a.position for a in self.adversaries], axis=0)
+        # Provide penalty to all agents based on distance of each adversary to the closest agent.
+        for adversary in self.adversaries:
+            closest_agent = min(self.agents, key=lambda a: np.linalg.norm(adversary.position - a.position))
+            distance = np.linalg.norm(adversary.position - closest_agent.position)
+            # Reward is negative distance to encourage agents to stay close to adversaries.
+            rwd = -distance
         for agent in self.agents:
-            distance = np.linalg.norm(agent.position - meanAdversary)
-            reward_dict[agent] = -distance
+            reward_dict[agent] += rwd
 
         # Perform observations.
         for agent in self.possible_agents:
             agent_observation, obs_mask = self.observe(agent)
             obs_dict[agent] = agent_observation
             info_dict[agent]["visibility_mask"] = obs_mask
-            info_dict[f"distance/{agent}"] = np.linalg.norm(agent.position - meanAdversary)
-            info_dict[f"position/{agent}"] = agent.position.tolist()
-        
-        # Add reference position and velocity to the info dictionary.
-        info_dict["reference_position"] = meanAdversary.tolist()
-        info_dict["reference_velocity"] = self.alpha.tolist()
 
         # Check truncation conditions.
         if lastStep or (self.max_cycles >= 0 and self.step_count >= self.max_cycles):
