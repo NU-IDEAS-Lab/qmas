@@ -367,14 +367,18 @@ class PettingzooRunner(Runner):
 
             dones = False
             while not np.all(dones):
+                time_start = time.time()
+
                 self.trainer.prep_rollout()
 
                 aa = np.concatenate(available_actions)
                 if np.any(aa == None):
                     aa = None
+                
+                use_prediction = hasattr(self.policy, "diffuser") and len(trajectory[0]) == HISTORY_LENGTH
 
                 for agentIdx in range(self.num_agents):
-                    if hasattr(self.policy, "diffuser") and len(trajectory[agentIdx]) == HISTORY_LENGTH: # and render_env.envs[0].env.step_count == HISTORY_LENGTH - 1:
+                    if use_prediction:
                         
                         trajectory_tensor = torch.stack(list(trajectory[agentIdx]), dim=0)
                         
@@ -434,7 +438,7 @@ class PettingzooRunner(Runner):
                 # rnn_states = rnn_states.detach().cpu().reshape((self.n_render_rollout_threads, self.num_agents, *rnn_states.shape[1:]))
                 rnn_states = rnn_states.detach().cpu().reshape((self.n_render_rollout_threads, *rnn_states.shape[1:]))
 
-                actions_env = [actions[idx, :, :] for idx in range(self.n_render_rollout_threads)]
+                actions_env = [actions[idx, :, :].numpy() for idx in range(self.n_render_rollout_threads)]
 
                 # Take a step in the environment and get the results.
                 obs, share_obs, render_rewards, dones, infos, available_actions = render_env.step(actions_env)
@@ -446,18 +450,25 @@ class PettingzooRunner(Runner):
                 for i in range(self.num_agents):
                     transition = np.concatenate((actions[0][i], obs[0][i]), axis=0)
                     trajectory[i].append(torch.from_numpy(transition))
-                                
+
+                time_stop = time.time()
+
                 if not np.all(dones):
                     if ipython_clear_output:
                         clear_output(wait = True)
-                    # render_env.envs[0].env.render(state_pred_full, history_length=HISTORY_LENGTH)
-                    render_env.envs[0].env.render()
-                    # render_env.envs[0].env.render()
+                    
+                    spf = state_pred_full if use_prediction else None
+
+                    # Perform rendering.
+                    render_env.envs[0].env.render(spf, history_length=HISTORY_LENGTH)
 
                 # append frame
                 if self.all_args.save_gifs:        
                     image = infos[0]["frame"]
                     frames.append(image)
+                
+                # Print the FPS information.
+                print(f"Step {render_env.envs[0].env.step_count} - FPS: {1 / (time_stop - time_start):.2f}, Time per step: {time_stop - time_start:.4f}s (excluding render)")
 
             # save gif
             if self.all_args.save_gifs:
