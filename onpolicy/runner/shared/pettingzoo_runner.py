@@ -347,6 +347,7 @@ class PettingzooRunner(Runner):
         state_pred = torch.zeros((self.num_agents, *obs_shape), dtype=torch.float32)
         state_pred_full = torch.zeros((HISTORY_LENGTH, self.num_agents, *obs_shape), dtype=torch.float32)
         
+        prev_prediction = None  # For autoregression
         for i_episode in range(self.all_args.render_episodes):
             for i in range(self.num_agents):
                 trajectory[i].clear()
@@ -400,23 +401,32 @@ class PettingzooRunner(Runner):
                             condition_mask[0, i, :act_size] = 1.0
                             condition_mask[0, i, act_size:] = visibility
 
+                        # Autoregression
+                        prior = condition.clone()
+                        if prev_prediction is not None and self.all_args.diffusion_autoregression_steps > 0:
+                            k = self.all_args.diffusion_autoregression_steps
+                            prior[:, :k] = torch.where(
+                                condition_mask[:, :k] == 0,
+                                prev_prediction[:, -k:],
+                                prior[:, :k]
+                            )
+
                         # The prior and fix_mask represent the known data and are applied as described by Janner et al.
                         # We set the fix_mask manually here as a workaround for CleanDiffuser not taking it as an input.
                         self.policy.diffuser.fix_mask = torch.nn.Parameter(condition_mask, requires_grad=False)
                         pred, log = self.policy.diffuser.sample(
-                            prior=condition,
-
+                            prior=prior,
                             solver="ddpm",
                             n_samples=1,
-                            sample_steps = 5,
-
-                            # The condition_cg and condition_cg_mask represent the known data and are used for the guide function.
+                            sample_steps=5,
                             condition_cg=condition,
                             condition_cg_mask=condition_mask,
                             w_cg=0.1,
                             w_cfg=0.0
                         )
-                        
+
+                        prev_prediction = pred.detach()
+
                         # Strip the action part of the prediction.
                         state_pred[agentIdx] = pred[0, -1, act_size:]
                         state_pred_full[:, agentIdx, :] = pred[0, :, act_size:]
@@ -479,4 +489,4 @@ class PettingzooRunner(Runner):
                     duration=self.all_args.ifi,
                 )
             
-            # time.sleep(3.0)
+            # time.sleep(3.0)s
