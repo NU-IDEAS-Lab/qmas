@@ -110,14 +110,12 @@ class QmasAlgorithm(R_MAPPO):
         obs_batch = obs_batch.permute(1, 0, *range(2, obs_batch.ndim))
         obs_batch = obs_batch.flatten(start_dim=1, end_dim=2)
         obs_batch = obs_batch.permute(1, 0, *range(2, obs_batch.ndim))
-        obs_batch = obs_batch.reshape(*obs_batch.shape[:2], -1)
 
         # Process actions.
         actions_batch = sample["actions"]
         actions_batch = actions_batch.permute(1, 0, *range(2, actions_batch.ndim))
         actions_batch = actions_batch.flatten(start_dim=1, end_dim=2)
         actions_batch = actions_batch.permute(1, 0, *range(2, actions_batch.ndim))
-        actions_batch = actions_batch.reshape(*actions_batch.shape[:2], -1)
 
         # Process rewards.
         rewards_batch = sample["rewards"]
@@ -125,44 +123,51 @@ class QmasAlgorithm(R_MAPPO):
         rewards_batch = rewards_batch.flatten(start_dim=1, end_dim=2)
         rewards_batch = rewards_batch.permute(1, 0, *range(2, rewards_batch.ndim))
         rewards_batch = rewards_batch.reshape(*rewards_batch.shape[:2], -1)
-        rewards_batch = rewards_batch.sum(axis=-1) # Sum rewards for all agents.
 
-        # Calculate trajectory returns.
-        discounts = torch.ones((rewards_batch.shape[0], rewards_batch.shape[1]), dtype=torch.float32, device=self.device) * 0.997 # TODO: This constant is from Janner et al. (2022).
-        discounts = torch.pow(discounts, torch.arange(1, rewards_batch.shape[1] + 1, dtype=torch.float32, device=self.device))
-        returns_batch = torch.sum(rewards_batch * discounts, dim=1).reshape((-1, 1))
+        # Condition using visibility mask.
+        visibility_mask_batch = sample["visibility_mask"]  # shape: (B, T, D_obs)
+        # Transform visibility_mask to match obs_batch processing
+        visibility_mask_batch = visibility_mask_batch.permute(1, 0, *range(2, visibility_mask_batch.ndim))
+        visibility_mask_batch = visibility_mask_batch.flatten(start_dim=1, end_dim=2)
+        visibility_mask_batch = visibility_mask_batch.permute(1, 0, *range(2, visibility_mask_batch.ndim))
         
-        # Build trajectories.
-        trajectories = torch.cat([actions_batch, obs_batch], dim=-1)
+        action_visibility = torch.ones_like(actions_batch)  # shape: (B, T, D_act)
+        fix_mask_batch = torch.cat([action_visibility, visibility_mask_batch.float()], dim=-1)  # shape: (B, T, D_act + D_obs)
+        
+        # Perform optimization step for all agents.
+        for i in range(actions_batch.shape[2]):
+            agent_obs_batch = obs_batch[:, :, i, :]
+            agent_actions_batch = actions_batch[:, :, i, :]
+            agent_rewards_batch = rewards_batch[:, :, i]
 
-        # Condition randomly.
-        fix_mask = torch.zeros_like(trajectories)
-        # x0 = torch.zeros_like(trajectories)
-        for i in range(trajectories.shape[0]):
-            for j in range(trajectories.shape[1]):
-                # We must have the t=0 condition.
-                if np.random.rand() > 0.5 or i == 0:
-                    fix_mask[i, j] = 1.0
-                    # x0[i, j] = trajectories[i, j]
+            # Calculate trajectory returns.
+            discounts = torch.ones((agent_rewards_batch.shape[0], agent_rewards_batch.shape[1]), dtype=torch.float32, device=self.device) * 0.997 # TODO: This constant is from Janner et al. (2022).
+            discounts = torch.pow(discounts, torch.arange(1, rewards_batch.shape[1] + 1, dtype=torch.float32, device=self.device))
+            agent_returns_batch = torch.sum(agent_rewards_batch * discounts, dim=1).reshape((-1, 1))
 
-        # Update the fix_mask. This determines which parts of the trajectory are fixed and which are predicted.
-        # This applies to both update_diffusion and update_classifier.
-        self.policy.diffuser.fix_mask = torch.nn.Parameter(fix_mask, requires_grad=False)
+            # Build trajectories.
+            trajectories = torch.cat([agent_actions_batch, agent_obs_batch], dim=-1)
 
-        # Update diffuser model.
-        diffuser_loss = self.policy.diffuser.update_diffusion(
-            x0=trajectories,
-        )['diffusion_loss']
+            # Get the visibility mask for the current agent.
+            agent_fix_mask = fix_mask_batch[:, :, i, :]
 
-        # Update guide model.
-        guide_loss = self.policy.diffuser.update_classifier(
-            x0=trajectories,
-            condition_cg=returns_batch
-        )['classifier_loss']
+            # Update the fix_mask. This determines which parts of the trajectory are fixed and which are predicted.
+            # This applies to both update_diffusion and update_classifier.
+            self.policy.diffuser.fix_mask = torch.nn.Parameter(agent_fix_mask, requires_grad=False)
 
-        train_info['diffuser_loss'] += diffuser_loss
-        train_info['guide_loss'] += guide_loss
+            # Update diffuser model.
+            diffuser_loss = self.policy.diffuser.update_diffusion(
+                x0=trajectories,
+            )['diffusion_loss']
 
+            # Update guide model.
+            guide_loss = self.policy.diffuser.update_classifier(
+                x0=trajectories,
+                condition_cg=agent_returns_batch
+            )['classifier_loss']
+
+            train_info['diffuser_loss'] += diffuser_loss
+            train_info['guide_loss'] += guide_loss
 
 
     def prep_training(self):
