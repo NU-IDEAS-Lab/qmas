@@ -9,8 +9,8 @@ args = [
 	"--env_class", "toy_problem.toy_problem_2D_v0.parallel_env",
 	"--user_name", "ideas-mas",
 
-	"--num_agents", "5",
-    "--num_adversaries", "5",
+	"--num_agents", "2",
+    "--num_adversaries", "2",
 	"--state_per_agent",
 
 	"--num_env_steps", "1000000",

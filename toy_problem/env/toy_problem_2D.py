@@ -415,14 +415,14 @@ class parallel_env(ParallelEnv):
             adversary.position += adversary.velocity
             self.state_history[adversary].append(adversary.position.copy())
 
-        # Provide penalty to all agents based on distance of each adversary to the closest agent.
-        for adversary in self.adversaries:
-            closest_agent = min(self.agents, key=lambda a: np.linalg.norm(adversary.position - a.position))
-            distance = np.linalg.norm(adversary.position - closest_agent.position)
-            # Reward is negative distance to encourage agents to stay close to adversaries.
-            rwd = -distance
-        for agent in self.agents:
-            reward_dict[agent] += rwd
+        # Assign per-agent reward based on distance to assigned adversary (by index).
+        for i, agent in enumerate(self.agents):
+            if i < len(self.adversaries):
+                assigned_adv = self.adversaries[i]
+                distance = np.linalg.norm(agent.position - assigned_adv.position)
+                reward_dict[agent] = -distance
+            else:
+                reward_dict[agent] = 0.0  # No assigned adversary
 
         # Perform observations.
         for agent in self.possible_agents:
