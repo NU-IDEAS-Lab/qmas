@@ -23,6 +23,8 @@ def add_args(parser):
     import argparse
     parser.add_argument("--num_adversaries", type=int, default=1,
                         help="The number of adversaries in the environment.")
+    parser.add_argument("--num_dimensions", type=int, default=2,
+                        help="The number of dimensions in the environment.")
     parser.add_argument("--random_start_positions", action=argparse.BooleanOptionalAction, default=False,
                         help="If true, agents will start at random positions in the world. If false, they will start at [0,0].")
     parser.add_argument("--state_per_agent", action=argparse.BooleanOptionalAction, default=False,
@@ -60,6 +62,7 @@ class parallel_env(ParallelEnv):
     def __init__(self,
                  num_agents = 1,
                  num_adversaries: int = 1,
+                 num_dimensions: int = 2,
                  max_cycles: int = -1,
                  world_size: float = 50.0,
                  random_start_positions: bool = False,
@@ -72,8 +75,9 @@ class parallel_env(ParallelEnv):
         super().__init__()
 
         # Configuration.
+        self.num_dimensions = num_dimensions
         self.max_cycles = max_cycles
-        self.world_dims = np.array([world_size, world_size], dtype=np.float32)
+        self.world_dims = np.array([world_size] * self.num_dimensions, dtype=np.float32)
         self.random_start_positions = random_start_positions
         self.state_per_agent = state_per_agent
         self.observation_probability = observation_probability
@@ -91,21 +95,21 @@ class parallel_env(ParallelEnv):
         ]
 
         # Create the action space.
-        action_space = spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32)
+        action_space = spaces.Box(low=-np.inf, high=np.inf, shape=(self.num_dimensions,), dtype=np.float32)
         self.action_spaces = spaces.Dict({agent: action_space for agent in self.possible_agents}) # type: ignore
         
         # Create the observation space.
         obs_space = {
             "adversaries": spaces.Dict({
                 a: spaces.Dict({
-                    "position": spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32),
-                    "velocity": spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32),
+                    "position": spaces.Box(low=-np.inf, high=np.inf, shape=(self.num_dimensions,), dtype=np.float32),
+                    "velocity": spaces.Box(low=-np.inf, high=np.inf, shape=(self.num_dimensions,), dtype=np.float32),
                 }) for a in self.possible_adversaries
             }),
             "agents": spaces.Dict({
                 a: spaces.Dict({
-                    "position": spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32),
-                    "velocity": spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32),
+                    "position": spaces.Box(low=-np.inf, high=np.inf, shape=(self.num_dimensions,), dtype=np.float32),
+                    "velocity": spaces.Box(low=-np.inf, high=np.inf, shape=(self.num_dimensions,), dtype=np.float32),
                 }) for a in self.possible_agents
             }),
             "id": spaces.Discrete(len(self.possible_agents)),
@@ -131,11 +135,13 @@ class parallel_env(ParallelEnv):
 
         if seed != None:
             random.seed(seed)
+        
+        origin = np.array([0.0] * self.num_dimensions, dtype=np.float32)
 
         # Reset the agents.
         self.agents = copy(self.possible_agents)
         for agent in self.agents:
-            start_position = self.get_random_position() if self.random_start_positions else np.array([0.0, 0.0], dtype=np.float32)
+            start_position = self.get_random_position() if self.random_start_positions else origin
             agent.reset(
                 reset_start_position=True,
                 position=start_position
@@ -144,12 +150,12 @@ class parallel_env(ParallelEnv):
         # Reset the adversaries.
         self.adversaries = copy(self.possible_adversaries)
         for adversary in self.adversaries:
-            start_position = self.get_random_position() if self.random_start_positions else np.array([0.0, 0.0], dtype=np.float32)
+            start_position = self.get_random_position() if self.random_start_positions else origin
             adversary.reset(
                 reset_start_position=True,
                 position=start_position,
             )
-            adversary.velocity = np.random.uniform(-1.0, 1.0, size=2)  # Random initial velocity
+            adversary.velocity = np.random.uniform(-1.0, 1.0, size=self.num_dimensions)  # Random initial velocity
         
         # Reset other state.
         self.step_count = 0
@@ -181,7 +187,7 @@ class parallel_env(ParallelEnv):
     def get_random_position(self):
         ''' Returns a random position in the world. '''
 
-        return np.random.uniform(-self.world_dims / 2, self.world_dims / 2)
+        return np.random.uniform(-self.world_dims / 2, self.world_dims / 2).astype(np.float32)
 
 
     def render(self, pred=None, figsize=(9, 6), history_length=2):
@@ -345,14 +351,14 @@ class parallel_env(ParallelEnv):
         for a in self.possible_adversaries:
             vis = visible(a)
             obs_mask["adversaries"][a] = {
-                "position": vis,
-                "velocity": vis,
+                "position": np.array([vis] * self.num_dimensions, dtype=bool),
+                "velocity": np.array([vis] * self.num_dimensions, dtype=bool),
             }
         for a in self.possible_agents:
             vis = visible(a)
             obs_mask["agents"][a] = {
-                "position": vis,
-                "velocity": vis,
+                "position": np.array([vis] * self.num_dimensions, dtype=bool),
+                "velocity": np.array([vis] * self.num_dimensions, dtype=bool),
             }
 
         return obs, obs_mask
@@ -364,11 +370,11 @@ class parallel_env(ParallelEnv):
         """
         if random.random() < 0.3:
             # Randomly change velocity to create a new pattern
-            adversary.velocity += np.random.normal(0, 0.3, size=2)
+            adversary.velocity += np.random.normal(0, 0.3, size=self.num_dimensions)
                 
         # # Add some random noise to make the trajectory more natural
         noise_magnitude = 0.05 * min(1.0, self.step_count / 50.0)  # Gradually increase noise
-        adversary.velocity += np.random.normal(0, noise_magnitude, size=2)
+        adversary.velocity += np.random.normal(0, noise_magnitude, size=self.num_dimensions)
 
         # Normalize velocity to keep it within a reasonable range.
         norm = np.linalg.norm(adversary.velocity)
