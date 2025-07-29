@@ -184,7 +184,6 @@ class PettingzooRunner(Runner):
         visibility_mask = None
         if "visibility_mask" in infos[0]:
             visibility_mask = np.array([info["visibility_mask"] for info in infos])
-            visibility_mask = np.array(np.split(visibility_mask, self.n_rollout_threads))
 
         # Add information to the logger.
         keys = infos[0].keys()
@@ -384,9 +383,10 @@ class PettingzooRunner(Runner):
                         trajectory_tensor = torch.stack(list(trajectory[agentIdx]), dim=0)
                         
                         # Set up conditions (prior knowledge) using visibility mask logic.
-                        condition = torch.zeros((1, HISTORY_LENGTH, transition_size), dtype=torch.float32, device=self.device)
-                        condition_mask = torch.zeros((1, HISTORY_LENGTH, transition_size), dtype=torch.float32, device=self.device)
+                        prior = torch.zeros((1, HISTORY_LENGTH, transition_size), dtype=torch.float32, device=self.device)
+                        prior_mask = torch.zeros((1, HISTORY_LENGTH, transition_size), dtype=torch.float32, device=self.device)
 
+                        # Apply the trajectory and visibility data to the prior.
                         for i in range(len(trajectory_tensor)):
                             act = trajectory_tensor[i, :act_size]
                             obs = trajectory_tensor[i, act_size:]
@@ -396,31 +396,31 @@ class PettingzooRunner(Runner):
                             if "visibility_mask" in infos[0]:
                                 visibility = torch.tensor(infos[0]["visibility_mask"][agentIdx], dtype=torch.float32, device=self.device)
 
-                            condition[0, i, :act_size] = act
-                            condition[0, i, act_size:] = obs * visibility
-                            condition_mask[0, i, :act_size] = 1.0
-                            condition_mask[0, i, act_size:] = visibility
+                            prior[0, i, :act_size] = act
+                            prior[0, i, act_size:] = obs * visibility
+                            prior_mask[0, i, :act_size] = 1.0
+                            prior_mask[0, i, act_size:] = visibility
 
                         # Autoregression
-                        prior = condition.clone()
                         if prev_prediction is not None and self.all_args.diffusion_autoregression_steps > 0:
                             k = self.all_args.diffusion_autoregression_steps
                             prior[:, :k] = torch.where(
-                                condition_mask[:, :k] == 0,
+                                prior_mask[:, :k] == 0,
                                 prev_prediction[:, -k:],
                                 prior[:, :k]
                             )
+                            prior_mask[:, :k] = 1
 
                         # The prior and fix_mask represent the known data and are applied as described by Janner et al.
                         # We set the fix_mask manually here as a workaround for CleanDiffuser not taking it as an input.
-                        self.policy.diffuser.fix_mask = torch.nn.Parameter(condition_mask, requires_grad=False)
+                        self.policy.diffuser.fix_mask = torch.nn.Parameter(prior_mask, requires_grad=False)
                         pred, log = self.policy.diffuser.sample(
                             prior=prior,
                             solver="ddpm",
                             n_samples=1,
                             sample_steps=5,
-                            condition_cg=condition,
-                            condition_cg_mask=condition_mask,
+                            condition_cg=prior,
+                            condition_cg_mask=prior_mask,
                             w_cg=0.1,
                             w_cfg=0.0
                         )
