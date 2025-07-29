@@ -184,7 +184,6 @@ class PettingzooRunner(Runner):
         visibility_mask = None
         if "visibility_mask" in infos[0]:
             visibility_mask = np.array([info["visibility_mask"] for info in infos])
-            visibility_mask = np.array(np.split(visibility_mask, self.n_rollout_threads))
 
         # Add information to the logger.
         keys = infos[0].keys()
