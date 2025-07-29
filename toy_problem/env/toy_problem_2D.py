@@ -19,11 +19,20 @@ from toy_problem.env.entity import ENTITY_TYPE, Agent, Adversary
 
 def add_args(parser):
     ''' Adds environment arguments. '''
-    pass
-
-def parse_args(args):
-    ''' Parses environment arguments. '''
-    pass
+    
+    import argparse
+    parser.add_argument("--num_adversaries", type=int, default=1,
+                        help="The number of adversaries in the environment.")
+    parser.add_argument("--num_dimensions", type=int, default=2,
+                        help="The number of dimensions in the environment.")
+    parser.add_argument("--random_start_positions", action=argparse.BooleanOptionalAction, default=False,
+                        help="If true, agents will start at random positions in the world. If false, they will start at [0,0].")
+    parser.add_argument("--state_per_agent", action=argparse.BooleanOptionalAction, default=False,
+                        help="If true, the state function will return a separate copy of the state for each agent. "
+                             "This is useful for centralized training, decentralized execution. "
+                             "If false, the state function will return a single copy of the state that is shared among all agents.")
+    parser.add_argument("--observation_probability", type=float, default=1.0,
+                        help="The probability that an agent will observe another entity.")
 
 
 def validate_args(parsed_args):
@@ -47,14 +56,18 @@ class parallel_env(ParallelEnv):
     metadata = {
         "name": "toy_problem_v0",
         "render_modes": ["human", "rgb_array"],
-        "null_value": -1.0
     }
 
 
     def __init__(self,
-                 num_agents = 3,
+                 num_agents = 1,
+                 num_adversaries: int = 1,
+                 num_dimensions: int = 2,
                  max_cycles: int = -1,
-                 world_size: float = 20.0,
+                 world_size: float = 50.0,
+                 random_start_positions: bool = False,
+                 state_per_agent: bool = False,
+                 observation_probability: float = 1.0,
                 ):
         """
         Initialize the environment.
@@ -62,9 +75,12 @@ class parallel_env(ParallelEnv):
         super().__init__()
 
         # Configuration.
+        self.num_dimensions = num_dimensions
         self.max_cycles = max_cycles
-        self.world_dims = np.array([world_size, world_size], dtype=np.float32)
-        num_adversaries = 1 #just 1 leader for now
+        self.world_dims = np.array([world_size] * self.num_dimensions, dtype=np.float32)
+        self.random_start_positions = random_start_positions
+        self.state_per_agent = state_per_agent
+        self.observation_probability = observation_probability
 
         # Set up entities.
         self.possible_agents = [
@@ -79,25 +95,34 @@ class parallel_env(ParallelEnv):
         ]
 
         # Create the action space.
-        action_space = spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32)
+        action_space = spaces.Box(low=-np.inf, high=np.inf, shape=(self.num_dimensions,), dtype=np.float32)
         self.action_spaces = spaces.Dict({agent: action_space for agent in self.possible_agents}) # type: ignore
         
         # Create the observation space.
-        # obs_space = spaces.Box(low=-np.inf, high=np.inf, shape=(4 + num_agents*2, ), dtype=np.float32)
-        obs_space = spaces.Dict({
+        obs_space = {
             "adversaries": spaces.Dict({
-                adversary: spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32) for adversary in self.possible_adversaries
+                a: spaces.Dict({
+                    "position": spaces.Box(low=-np.inf, high=np.inf, shape=(self.num_dimensions,), dtype=np.float32),
+                    "velocity": spaces.Box(low=-np.inf, high=np.inf, shape=(self.num_dimensions,), dtype=np.float32),
+                }) for a in self.possible_adversaries
             }),
             "agents": spaces.Dict({
-                agent: spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32) for agent in self.possible_agents
+                a: spaces.Dict({
+                    "position": spaces.Box(low=-np.inf, high=np.inf, shape=(self.num_dimensions,), dtype=np.float32),
+                    "velocity": spaces.Box(low=-np.inf, high=np.inf, shape=(self.num_dimensions,), dtype=np.float32),
+                }) for a in self.possible_agents
             }),
-            "alpha": spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32),
-        })
+            "id": spaces.Discrete(len(self.possible_agents)),
+        }
+        obs_space = spaces.Dict(obs_space)
         self.observation_spaces = spaces.Dict({agent: obs_space for agent in self.possible_agents}) # type: ignore
 
         # The state space is a complete observation of the environment.
         # This is not part of the standard PettingZoo API, but is useful for centralized training.
-        self.state_space = obs_space
+        if self.state_per_agent:
+            self.state_space = self.observation_spaces
+        else:
+            self.state_space = obs_space
 
         self.reset_count = 0
         self.reset()
@@ -110,46 +135,51 @@ class parallel_env(ParallelEnv):
 
         if seed != None:
             random.seed(seed)
+        
+        origin = np.array([0.0] * self.num_dimensions, dtype=np.float32)
 
         # Reset the agents.
         self.agents = copy(self.possible_agents)
         for agent in self.agents:
+            start_position = self.get_random_position() if self.random_start_positions else origin
             agent.reset(
                 reset_start_position=True,
-                position=self.get_random_position()
+                position=start_position
             )
         
         # Reset the adversaries.
         self.adversaries = copy(self.possible_adversaries)
         for adversary in self.adversaries:
+            start_position = self.get_random_position() if self.random_start_positions else origin
             adversary.reset(
                 reset_start_position=True,
-                position=self.get_random_position(),
+                position=start_position,
             )
+            adversary.velocity = np.random.uniform(-1.0, 1.0, size=self.num_dimensions)  # Random initial velocity
         
         # Reset other state.
         self.step_count = 0
         self.dones = dict.fromkeys(self.agents, False)
-        
-        # Initialize alpha (velocity) and save base value for variations
-        self.alpha = np.array([random.random(), random.random()], dtype=np.float32)
-        self.base_alpha = self.alpha.copy()  # Store the initial alpha for reference
-        self.alpha_history = [self.alpha.copy()]
-        
+
         self.state_history = {
-            a: [np.array([0.0, 0.0], dtype=np.float32)] for a in self.agents + self.adversaries
+            a: [copy(a.position)] for a in self.agents + self.adversaries
         }
 
         # Set available actions.
         self.available_actions_dict = {agent: self._getAvailableActions(agent) for agent in self.agents}
 
-        # Return the initial observation.
-        observation = {agent: self.observe(agent) for agent in self.agents}
         info = {
             agent: {
                 "ready": True
             } for agent in self.agents
         }
+
+        # Return the initial observation.
+        observation = {}
+        for agent in self.agents:
+            obs, obs_mask = self.observe(agent)
+            observation[agent] = obs
+            info[agent]["visibility_mask"] = obs_mask
 
         return observation, info
 
@@ -157,14 +187,10 @@ class parallel_env(ParallelEnv):
     def get_random_position(self):
         ''' Returns a random position in the world. '''
 
-        # Just return [0,0] for now. Compatible with the existing trained policy.
-        # Remove when we are ready to train a new policy.
-        return np.array([0.0, 0.0], dtype=np.float32)
-
-        # return np.random.uniform(-self.world_dims / 2, self.world_dims / 2)
+        return np.random.uniform(-self.world_dims / 2, self.world_dims / 2).astype(np.float32)
 
 
-    def render(self, pred=[], figsize=(9, 6), history_length=2):
+    def render(self, pred=None, figsize=(9, 6), history_length=2):
         ''' Renders the environment.
             
             Args:
@@ -176,19 +202,17 @@ class parallel_env(ParallelEnv):
 
         # Convert the predicted state back into a dictionary (unflatten).
         pred_unflattened = []
-        pred_steps = len(pred)
+        pred_steps = pred.shape[0] if pred is not None else 0
         for i in range(pred_steps):
-            p = spaces.unflatten(self.observation_spaces, pred[i])
+            p = spaces.unflatten(self.observation_spaces, pred[i].flatten())
             pred_unflattened.append(p)
+
+        # print(f"Prediction: {pred}")
 
         # Plot as a line graph using matplotlib.
         plt.figure(figsize=figsize)
 
         # Set the axis limits.
-        # plt.xlim(-self.world_dims[0] / 2, self.world_dims[0] / 2)
-        # plt.ylim(-self.world_dims[1] / 2, self.world_dims[1] / 2)
-        # plt.xlim(0, self.world_dims[0])
-        # plt.ylim(0, self.world_dims[1])
         plt.xlim(-self.world_dims[0], self.world_dims[0])
         plt.ylim(-self.world_dims[1], self.world_dims[1])
         plt.gca().set_aspect('equal', adjustable='box')
@@ -197,20 +221,6 @@ class parallel_env(ParallelEnv):
         plt.title("2D Leader-Follower Environment")
         plt.grid()
         
-        # Plot the goal positions.
-        # for goal in self.goals:
-        #     if goal.state == GoalZone.GOAL_STATE.UNREACHED:
-        #         color = 'grey'
-        #     elif goal.state == GoalZone.GOAL_STATE.REACHED_AGENT:
-        #         color = 'green'
-        #     elif goal.state == GoalZone.GOAL_STATE.REACHED_ADVERSARY:
-        #         color = 'red'
-        #     label = f"Goal {goal.entity_id}"
-        #     marker = plt.Circle(goal.position, goal.radius, color=color, alpha=0.5, label=label)
-        #     plt.gca().add_artist(marker)
-        # positions = [g.position for g in self.goals]
-        # plt.plot([p[0] for p in positions], [p[1] for p in positions], 'go', label='Goals', markersize=self.goals[0].radius*10)
-
         # Plot the agent positions.
         positions = [a.position for a in self.possible_agents]
         plt.plot([p[0] for p in positions], [p[1] for p in positions], 'bo', label='Followers')
@@ -219,7 +229,7 @@ class parallel_env(ParallelEnv):
 
             # Plot actual history for the agent.
             history = self.state_history[agent]
-            plt.plot([h[0] for h in history], [h[1] for h in history], 'b', alpha=0.5, linewidth=0.5)            
+            plt.plot([h[0] for h in history], [h[1] for h in history], 'b', alpha=0.5, linewidth=0.5, label=f"{agent} actual")            
         
         # Plot the adversary positions.
         positions = [a.position for a in self.possible_adversaries]
@@ -229,7 +239,7 @@ class parallel_env(ParallelEnv):
 
             # Plot actual history for the adversary.
             history = self.state_history[adversary]
-            plt.plot([h[0] for h in history], [h[1] for h in history], 'r', alpha=0.5, linewidth=0.5)
+            plt.plot([h[0] for h in history], [h[1] for h in history], 'r', alpha=0.5, linewidth=0.5, label=f"{adversary} actual")
 
 
         # Plot history of predictions from the perspective of agent 0.
@@ -237,14 +247,14 @@ class parallel_env(ParallelEnv):
             agent_preds = [pred_unflattened[i][self.possible_agents[0]]["agents"] for i in range(len(pred_unflattened))]
             for i, agent in enumerate(self.possible_agents):
                 # Get the history of predictions for this agent.
-                history = [p[agent] for p in agent_preds]
+                history = [p[agent]["position"] for p in agent_preds]
                 plt.plot([h[0] for h in history], [h[1] for h in history], 'b--', alpha=0.5, linewidth=1.5)            
                 plt.annotate(f"Pred {agent}", (history[-1][0] + 1, history[-1][1]), fontsize=8, color='blue')
             
             adversary_preds = [pred_unflattened[i][self.possible_agents[0]]["adversaries"] for i in range(len(pred_unflattened))]
             for i, adversary in enumerate(self.possible_adversaries):
                 # Get the history of predictions for this adversary.
-                history = [p[adversary] for p in adversary_preds]
+                history = [p[adversary]["position"] for p in adversary_preds]
                 plt.plot([h[0] for h in history], [h[1] for h in history], 'r--', alpha=0.5, linewidth=1.5)            
                 plt.annotate(f"Pred {adversary}", (history[-1][0] + 1, history[-1][1]), fontsize=8, color='red')
 
@@ -282,20 +292,15 @@ class parallel_env(ParallelEnv):
         return get_available_action_space(action_space)
 
 
-    def state_old(self):
+    def state(self):
         ''' Returns the global state of the environment.
             This is useful for centralized training, decentralized execution. '''
         
-        return self._populateStateSpace(self.possible_agents[0])
-
-    def state(self):
-        ''' Similar to the state_old() method, but this returns a customized copy of the state space for each agent.
-            This is useful for centralized training, decentralized execution. '''
-        
-        state = {}
-        for agent in self.possible_agents:
-            state[agent] = self._populateStateSpace(agent)
-        return state
+        if self.state_per_agent:
+            # Return the state for each agent.
+            return {a: self._populateStateSpace(a, force_visible=True)[0] for a in self.possible_agents}
+        else:
+            return self._populateStateSpace(self.possible_agents[0], force_visible=True)[0]
 
 
     def observe(self, agent, radius=None, allow_done_agents=False):
@@ -310,40 +315,72 @@ class parallel_env(ParallelEnv):
         return self.available_actions_dict[agent]
 
 
-    def _populateStateSpace(self, agent):
+    def _populateStateSpace(self, agent, force_visible=False):
         ''' Returns a populated state/observation space.'''
 
-        # obs = np.array([a.position for a in self.possible_adversaries] + [self.alpha] + [a.position for a in self.possible_agents], dtype=np.float32)
-        # obs = obs.flatten()
-
         obs = {
-            "adversaries": {a: a.position for a in self.possible_adversaries},
-            "agents": {a: a.position for a in self.possible_agents},
-            "alpha": self.alpha,
+            "adversaries": {
+                a: {
+                    "position": a.position,
+                    "velocity": a.velocity,
+                } for a in self.possible_adversaries
+            },
+            "agents": {
+                a: {
+                    "position": a.position,
+                    "velocity": a.velocity,
+                } for a in self.possible_agents
+            },
+            "id": self.possible_agents.index(agent),
         }
+        
+        # Create a visibility mask for the agents.
+        def visible(entity):
+            if force_visible:
+                return True
+            if entity == agent:
+                return True
+            if random.random() < self.observation_probability:
+                return True
+            return False
+        obs_mask = {
+            "adversaries": {},
+            "agents": {},
+            "id": True
+        }
+        for a in self.possible_adversaries:
+            vis = visible(a)
+            obs_mask["adversaries"][a] = {
+                "position": np.array([vis] * self.num_dimensions, dtype=bool),
+                "velocity": np.array([vis] * self.num_dimensions, dtype=bool),
+            }
+        for a in self.possible_agents:
+            vis = visible(a)
+            obs_mask["agents"][a] = {
+                "position": np.array([vis] * self.num_dimensions, dtype=bool),
+                "velocity": np.array([vis] * self.num_dimensions, dtype=bool),
+            }
 
-        return obs
+        return obs, obs_mask
     
-    def _update_alpha(self):
+    def _update_adversary_velocity(self, adversary):
         """
-        Update alpha based on the step count to create a more complex pattern.
-        This function creates a time-varying alpha that follows different patterns.
+        Update velocity based on the step count to create a more complex pattern.
+        This function creates a time-varying velocity that follows different patterns.
         """
-        # Base frequency for oscillation
-        freq = 0.1
-        angle = freq * self.step_count
-        
-        # Create a more interesting pattern with multiple frequencies
-        self.alpha[0] = self.base_alpha[0] * (math.sin(angle) + 0.5 * math.sin(2.5 * angle))
-        self.alpha[1] = self.base_alpha[1] * (math.cos(angle) + 0.5 * math.cos(3.0 * angle))
-        
-        # Add some random noise to make the trajectory more natural
+        if random.random() < 0.3:
+            # Randomly change velocity to create a new pattern
+            adversary.velocity += np.random.normal(0, 0.3, size=self.num_dimensions)
+                
+        # # Add some random noise to make the trajectory more natural
         noise_magnitude = 0.05 * min(1.0, self.step_count / 50.0)  # Gradually increase noise
-        self.alpha += np.random.normal(0, noise_magnitude, size=2)
-        
-        # Record alpha history
-        self.alpha_history.append(self.alpha.copy())
-        
+        adversary.velocity += np.random.normal(0, noise_magnitude, size=self.num_dimensions)
+
+        # Normalize velocity to keep it within a reasonable range.
+        norm = np.linalg.norm(adversary.velocity)
+        if norm > 1.0:
+            adversary.velocity = adversary.velocity / norm
+                
     def step(self, action_dict={}, lastStep=False):
         ''''
         Perform a step in the environment based on the given action dictionary.
@@ -358,10 +395,7 @@ class parallel_env(ParallelEnv):
             info_dict (dict): A dictionary containing additional information for each agent.
         '''
         self.step_count += 1
-        
-        # Update alpha with time-varying pattern
-        self._update_alpha()
-        
+                
         obs_dict = {}
         reward_dict = {agent: 0.0 for agent in self.possible_agents}
         truncated_dict = {agent: False for agent in self.possible_agents}
@@ -371,7 +405,7 @@ class parallel_env(ParallelEnv):
             } for agent in self.possible_agents
         }
 
-        # Perform actions.
+        # Perform agent actions.
         for agent in self.agents:
             if agent in action_dict:
                 action = action_dict[agent]
@@ -381,27 +415,26 @@ class parallel_env(ParallelEnv):
 
                 self.state_history[agent].append(agent.position.copy())
 
-        # Increment the reference state using the time-varying alpha
+        # Perform adversary actions.
         for adversary in self.adversaries:
-            adversary.position += self.alpha
+            self._update_adversary_velocity(adversary)
+            adversary.position += adversary.velocity
             self.state_history[adversary].append(adversary.position.copy())
 
-        # Provide reward based on distance to reference state
-        meanAdversary = np.mean([a.position for a in self.adversaries], axis=0)
-        for agent in self.agents:
-            distance = np.linalg.norm(agent.position - meanAdversary)
-            reward_dict[agent] = -distance
+        # Assign per-agent reward based on distance to assigned adversary (by index).
+        for i, agent in enumerate(self.agents):
+            if i < len(self.adversaries):
+                assigned_adv = self.adversaries[i]
+                distance = np.linalg.norm(agent.position - assigned_adv.position)
+                reward_dict[agent] = -distance
+            else:
+                reward_dict[agent] = 0.0  # No assigned adversary
 
         # Perform observations.
         for agent in self.possible_agents:
-            agent_observation = self.observe(agent)
+            agent_observation, obs_mask = self.observe(agent)
             obs_dict[agent] = agent_observation
-            info_dict[f"distance/{agent}"] = np.linalg.norm(agent.position - meanAdversary)
-            info_dict[f"position/{agent}"] = agent.position.tolist()
-        
-        # Record miscellaneous information.
-        info_dict["reference_position"] = meanAdversary.tolist()
-        info_dict["reference_velocity"] = self.alpha.tolist()
+            info_dict[agent]["visibility_mask"] = obs_mask
 
         # Check truncation conditions.
         if lastStep or (self.max_cycles >= 0 and self.step_count >= self.max_cycles):

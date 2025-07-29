@@ -3,9 +3,6 @@ import numpy as np
 
 from onpolicy.algorithms.r_mappo.r_mappo import R_MAPPO
 from onpolicy.utils.util import get_grad_norm, get_shape_from_obs_space, get_shape_from_act_space
-from onpolicy.models.diffusion.diffusion import GaussianDiffusion
-from onpolicy.models.diffusion.diffusion import ValueDiffusion
-from onpolicy.models.diffusion.temporal import TemporalUnet, ValueFunction
 
 
 class QmasAlgorithm(R_MAPPO):
@@ -22,18 +19,6 @@ class QmasAlgorithm(R_MAPPO):
 
         self.prediction_horizon = policy.prediction_horizon
 
-        # Get the "null" value for the environment and determine conditioning function.
-        # self.null_value = env.envs[0].null_value
-        # if self.null_value is None:
-        #     from onpolicy.models.diffusion.helpers import apply_conditioning
-        #     self.conditioning_fn = apply_conditioning
-        # else:
-        #     self.conditioning_fn = self.policy._condition_sample
-        # TODO: Temporarily hardcode these values.
-        self.null_value = -1.0
-        self.conditioning_fn = self.policy._condition_sample
-        print(f"QmasAlgorithm: Null value for environment is {self.null_value}.")
-
 
     def diffusion_update(self, diffusion_model, optimizer, loss_args, update_model):
         """
@@ -44,14 +29,15 @@ class QmasAlgorithm(R_MAPPO):
         :return model_grad_norm: (torch.Tensor) gradient norm from model update.
         """
         if update_model:
-            gradient_accumulate_every = 2
+            gradient_accumulate_every = 1
             
             # Zero the gradients.
             optimizer.zero_grad()
             
             # Accumulate gradients.
             for _ in range(gradient_accumulate_every):
-                loss, info = diffusion_model.loss(*loss_args, conditioning_fn=self.conditioning_fn)
+                loss = diffusion_model.loss(*loss_args)
+                # loss, info = diffusion_model.loss(*loss_args, conditioning_fn=self.conditioning_fn)
                 loss = loss / gradient_accumulate_every
 
                 loss.backward()
@@ -62,7 +48,7 @@ class QmasAlgorithm(R_MAPPO):
             # Take an optimization step.
             optimizer.step()
             
-            return loss.item(), model_grad_norm, info
+            return loss.item(), model_grad_norm
         else:
             return None
 
@@ -117,21 +103,19 @@ class QmasAlgorithm(R_MAPPO):
     def train_sample_diffuser(self, sample, train_info, update_actor=True, update_critic=True):
         ''' Performs update for a single sample. '''
         
-        # Process shared observations.
-        share_obs_batch = sample["share_obs"][:, :, :, 0] # Get the shared observation from only one agent, since they should all be the same...
-
         # Permute, flatten, and then permute back to get rid of the thread dimension.
-        share_obs_batch = share_obs_batch.permute(1, 0, *range(2, share_obs_batch.ndim))
-        share_obs_batch = share_obs_batch.flatten(start_dim=1, end_dim=2)
-        share_obs_batch = share_obs_batch.permute(1, 0, *range(2, share_obs_batch.ndim))
-        share_obs_batch = share_obs_batch.reshape(*share_obs_batch.shape[:2], -1)
+
+        # Process observations.
+        obs_batch = sample["obs"] #[:, :, :, 0]
+        obs_batch = obs_batch.permute(1, 0, *range(2, obs_batch.ndim))
+        obs_batch = obs_batch.flatten(start_dim=1, end_dim=2)
+        obs_batch = obs_batch.permute(1, 0, *range(2, obs_batch.ndim))
 
         # Process actions.
         actions_batch = sample["actions"]
         actions_batch = actions_batch.permute(1, 0, *range(2, actions_batch.ndim))
         actions_batch = actions_batch.flatten(start_dim=1, end_dim=2)
         actions_batch = actions_batch.permute(1, 0, *range(2, actions_batch.ndim))
-        actions_batch = actions_batch.reshape(*actions_batch.shape[:2], -1)
 
         # Process rewards.
         rewards_batch = sample["rewards"]
@@ -139,48 +123,51 @@ class QmasAlgorithm(R_MAPPO):
         rewards_batch = rewards_batch.flatten(start_dim=1, end_dim=2)
         rewards_batch = rewards_batch.permute(1, 0, *range(2, rewards_batch.ndim))
         rewards_batch = rewards_batch.reshape(*rewards_batch.shape[:2], -1)
-        rewards_batch = rewards_batch.sum(axis=-1) # Sum rewards for all agents.
 
-        # Calculate trajectory returns.
-        discounts = torch.ones((rewards_batch.shape[0], rewards_batch.shape[1]), dtype=torch.float32, device=self.device) * 0.997 # TODO: This constant is from Janner et al. (2022).
-        discounts = torch.pow(discounts, torch.arange(1, rewards_batch.shape[1] + 1, dtype=torch.float32, device=self.device))
-        returns_batch = torch.sum(rewards_batch * discounts, dim=1).reshape((-1, 1))
+        # Condition using visibility mask.
+        visibility_mask_batch = sample["visibility_mask"]  # shape: (B, T, D_obs)
+        # Transform visibility_mask to match obs_batch processing
+        visibility_mask_batch = visibility_mask_batch.permute(1, 0, *range(2, visibility_mask_batch.ndim))
+        visibility_mask_batch = visibility_mask_batch.flatten(start_dim=1, end_dim=2)
+        visibility_mask_batch = visibility_mask_batch.permute(1, 0, *range(2, visibility_mask_batch.ndim))
         
-        # Set up conditions based on the shared observations.
-        # conditions = {i: share_obs_batch[:, i] for i in range(share_obs_batch.shape[1])} # condition based on the entire trajectory
-        # conditions = {i: share_obs_batch[:, i] for i in range(2)} # condition based on only the first two points
-        # conditions = {i: share_obs_batch[:, i] for i in range(1)} # condition based on only the first point
-        # conditions = {i: share_obs_batch[:, i] for i in range(share_obs_batch.shape[1] // 2)} # condition based on half of the trajectory
+        action_visibility = torch.ones_like(actions_batch)  # shape: (B, T, D_act)
+        fix_mask_batch = torch.cat([action_visibility, visibility_mask_batch.float()], dim=-1)  # shape: (B, T, D_act + D_obs)
+        
+        # Perform optimization step for all agents.
+        for i in range(actions_batch.shape[2]):
+            agent_obs_batch = obs_batch[:, :, i, :]
+            agent_actions_batch = actions_batch[:, :, i, :]
+            agent_rewards_batch = rewards_batch[:, :, i]
 
-        # Condition randomly.
-        conditions = {}
-        for i in range(share_obs_batch.shape[1]):
-            # We must have the t=0 condition.
-            if np.random.rand() > 0.5 or i == 0:
-                conditions[i] = share_obs_batch[:, i]
+            # Calculate trajectory returns.
+            discounts = torch.ones((agent_rewards_batch.shape[0], agent_rewards_batch.shape[1]), dtype=torch.float32, device=self.device) * 0.997 # TODO: This constant is from Janner et al. (2022).
+            discounts = torch.pow(discounts, torch.arange(1, rewards_batch.shape[1] + 1, dtype=torch.float32, device=self.device))
+            agent_returns_batch = torch.sum(agent_rewards_batch * discounts, dim=1).reshape((-1, 1))
 
-        # Build trajectories.
-        trajectories = torch.cat([actions_batch, share_obs_batch], dim=-1)
+            # Build trajectories.
+            trajectories = torch.cat([agent_actions_batch, agent_obs_batch], dim=-1)
 
-        # Update diffuser model.
-        diffuser_loss, diffuser_grad_norm, diffuser_info = self.diffusion_update(
-            self.policy.diffuser,
-            self.policy.diffuser_optimizer,
-            (trajectories, conditions),
-            update_model=True
-        )
+            # Get the visibility mask for the current agent.
+            agent_fix_mask = fix_mask_batch[:, :, i, :]
 
-        # Update guide model.
-        guide_loss, guide_grad_norm, guide_info = self.diffusion_update(
-            self.policy.guide,
-            self.policy.guide_optimizer,
-            (trajectories, conditions, returns_batch),
-            update_model=True
-        )
+            # Update the fix_mask. This determines which parts of the trajectory are fixed and which are predicted.
+            # This applies to both update_diffusion and update_classifier.
+            self.policy.diffuser.fix_mask = torch.nn.Parameter(agent_fix_mask, requires_grad=False)
 
-        train_info['diffuser_loss'] += diffuser_loss
-        train_info['guide_loss'] += guide_loss
+            # Update diffuser model.
+            diffuser_loss = self.policy.diffuser.update_diffusion(
+                x0=trajectories,
+            )['diffusion_loss']
 
+            # Update guide model.
+            guide_loss = self.policy.diffuser.update_classifier(
+                x0=trajectories,
+                condition_cg=agent_returns_batch
+            )['classifier_loss']
+
+            train_info['diffuser_loss'] += diffuser_loss
+            train_info['guide_loss'] += guide_loss
 
 
     def prep_training(self):
