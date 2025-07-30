@@ -376,8 +376,7 @@ class PettingzooRunner(Runner):
         # eval trajectory
         HISTORY_LENGTH = self.all_args.diffusion_horizon
         trajectory = [deque(maxlen=HISTORY_LENGTH) for _ in range(self.num_agents)]
-        state_pred = torch.zeros((self.num_agents, *obs_shape), dtype=torch.float32)
-        state_pred_full = torch.zeros((HISTORY_LENGTH, self.num_agents, *obs_shape), dtype=torch.float32)
+        state_predicted = torch.zeros((HISTORY_LENGTH, self.num_agents, *obs_shape), dtype=torch.float32)
         
         prev_prediction = None  # For autoregression
         for i_episode in range(self.all_args.render_episodes):
@@ -460,16 +459,15 @@ class PettingzooRunner(Runner):
 
                         prev_prediction = pred.detach()
 
+                        # Only take the first sample (n_samples is 1 anyway).
                         # Strip the action part of the prediction.
-                        state_pred[agentIdx] = pred[0, -1, act_size:]
-                        state_pred_full[:, agentIdx, :] = pred[0, :, act_size:]
+                        state_predicted[:, agentIdx, :] = pred[0, :, act_size:]
                     else:
-                        state_pred[agentIdx] = torch.from_numpy(obs[0, agentIdx])
-                        state_pred_full[:, agentIdx, :] = torch.zeros((HISTORY_LENGTH, *obs_shape), dtype=torch.float32)
+                        state_predicted[:, agentIdx, :] = torch.zeros((HISTORY_LENGTH, *obs_shape), dtype=torch.float32)
+                        state_predicted[-1, agentIdx] = torch.from_numpy(obs[0, agentIdx])
                 
                 actions, rnn_states = self.trainer.policy.act(
-                    state_pred,
-                    # np.concatenate(rnn_states)
+                    state_predicted[-1], # Use the final timestep of the prediction.
                     np.concatenate(rnn_states if isinstance(rnn_states, (list, tuple)) else [rnn_states]),
                     np.concatenate(masks),
                     deterministic=True,
@@ -485,11 +483,6 @@ class PettingzooRunner(Runner):
 
                 # Take a step in the environment and get the results.
                 obs, share_obs, render_rewards, dones, infos, available_actions = render_env.step(actions_env)
-                if "visibility_mask" in infos[0]:
-                    print("Visibility Mask:")
-                    for i, info in enumerate(infos):
-                        print(f"Agent {i}: {info['visibility_mask']}")
-                # obs_traj.append(torch.from_numpy(share_obs[0]))
                 for i in range(self.num_agents):
                     transition = np.concatenate((actions[0][i], obs[0][i]), axis=0)
                     trajectory[i].append(torch.from_numpy(transition))
@@ -500,7 +493,7 @@ class PettingzooRunner(Runner):
                     if ipython_clear_output:
                         clear_output(wait = True)
                     
-                    spf = state_pred_full if use_prediction else None
+                    spf = state_predicted if use_prediction else None
 
                     # Perform rendering.
                     render_env.envs[0].env.render(spf, history_length=HISTORY_LENGTH)
