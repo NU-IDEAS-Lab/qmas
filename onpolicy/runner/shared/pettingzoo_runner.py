@@ -375,13 +375,13 @@ class PettingzooRunner(Runner):
 
         # eval trajectory
         HISTORY_LENGTH = self.all_args.diffusion_horizon
-        trajectory = [deque(maxlen=HISTORY_LENGTH) for _ in range(self.num_agents)]
-        state_predicted = torch.zeros((HISTORY_LENGTH, self.num_agents, *obs_shape), dtype=torch.float32)
+        buffer = [deque(maxlen=HISTORY_LENGTH) for _ in range(self.num_agents)]
+        prediction = torch.zeros((HISTORY_LENGTH, self.num_agents, *obs_shape), dtype=torch.float32)
         
-        prev_prediction = None  # For autoregression
+        prediction_prev = None  # For autoregression
         for i_episode in range(self.all_args.render_episodes):
             for i in range(self.num_agents):
-                trajectory[i].clear()
+                buffer[i].clear()
 
             # Reset the environment and get the initial observations.
             obs, share_obs, available_actions = render_env.reset()
@@ -390,7 +390,10 @@ class PettingzooRunner(Runner):
 
             for i in range(self.num_agents):
                 transition = np.concatenate((np.zeros(act_size, dtype=np.float32), obs[0][i]), axis=0)
-                trajectory[i].append(torch.from_numpy(transition))
+                buffer[i].append({
+                    "transition": torch.from_numpy(transition).to(self.device),
+                    "visibility_mask": torch.ones(transition.shape, dtype=torch.float32, device=self.device)
+                })
 
             if self.all_args.save_gifs:        
                 frames = []
@@ -407,67 +410,32 @@ class PettingzooRunner(Runner):
                 if np.any(aa == None):
                     aa = None
                 
-                use_prediction = hasattr(self.policy, "diffuser") and len(trajectory[0]) == HISTORY_LENGTH
+                # Use the prediction from the diffuser if available.
+                use_prediction = hasattr(self.policy, "diffuser") and len(buffer[0]) == HISTORY_LENGTH
+                if use_prediction:
+                    for agentIdx in range(self.num_agents):
+                        trajectory = torch.stack([t["transition"] for t in buffer[agentIdx]], dim=0)
+                        visibility_mask = torch.stack([t["visibility_mask"] for t in buffer[agentIdx]], dim=0)
 
-                for agentIdx in range(self.num_agents):
-                    if use_prediction:
-                        
-                        trajectory_tensor = torch.stack(list(trajectory[agentIdx]), dim=0)
-                        
-                        # Set up conditions (prior knowledge) using visibility mask logic.
-                        prior = torch.zeros((1, HISTORY_LENGTH, transition_size), dtype=torch.float32, device=self.device)
-                        prior_mask = torch.zeros((1, HISTORY_LENGTH, transition_size), dtype=torch.float32, device=self.device)
-
-                        # Apply the trajectory and visibility data to the prior.
-                        for i in range(len(trajectory_tensor)):
-                            act = trajectory_tensor[i, :act_size]
-                            obs = trajectory_tensor[i, act_size:]
-
-                            # Create a binary mask for visibility
-                            visibility = torch.ones_like(obs)
-                            if "visibility_mask" in infos[0]:
-                                visibility = torch.tensor(infos[0]["visibility_mask"][agentIdx], dtype=torch.float32, device=self.device)
-
-                            prior[0, i, :act_size] = act
-                            prior[0, i, act_size:] = obs * visibility
-                            prior_mask[0, i, :act_size] = 1.0
-                            prior_mask[0, i, act_size:] = visibility
-
-                        # Autoregression
-                        if prev_prediction is not None and self.all_args.diffusion_autoregression_steps > 0:
-                            k = self.all_args.diffusion_autoregression_steps
-                            prior[:, :k] = torch.where(
-                                prior_mask[:, :k] == 0,
-                                prev_prediction[:, -k:],
-                                prior[:, :k]
-                            )
-                            prior_mask[:, :k] = 1
-
-                        # The prior and fix_mask represent the known data and are applied as described by Janner et al.
-                        # We set the fix_mask manually here as a workaround for CleanDiffuser not taking it as an input.
-                        self.policy.diffuser.fix_mask = torch.nn.Parameter(prior_mask, requires_grad=False)
-                        pred, log = self.policy.diffuser.sample(
-                            prior=prior,
-                            solver="ddpm",
-                            n_samples=1,
-                            sample_steps=5,
-                            condition_cg=prior,
-                            condition_cg_mask=prior_mask,
-                            w_cg=0.1,
-                            w_cfg=0.0
+                        # Get the prediction from the diffuser.
+                        pred = self.trainer.policy.get_prediction(
+                            trajectory=trajectory,
+                            visibility_mask=visibility_mask,
+                            prediction_prev=prediction_prev
                         )
 
-                        prev_prediction = pred.detach()
+                        # Store as the previous prediction.
+                        prediction_prev = pred.detach()
 
                         # Only take the first sample (n_samples is 1 anyway).
                         # Strip the action part of the prediction.
-                        state_predicted[:, agentIdx, :] = pred[0, :, act_size:]
-                    else:
-                        state_predicted[:, agentIdx, :] = torch.zeros((HISTORY_LENGTH, *obs_shape), dtype=torch.float32)
-                        state_predicted[-1, agentIdx] = torch.from_numpy(obs[0, agentIdx])
+                        prediction[:, agentIdx, :] = pred[0, :, act_size:]
+                else:
+                    prediction.zero_()
+                    prediction[-1] = torch.from_numpy(obs[0])
                 
                 actions, rnn_states = self.trainer.policy.act(
-                    state_predicted[-1], # Use the final timestep of the prediction.
+                    prediction[-1], # Use the final timestep of the prediction.
                     np.concatenate(rnn_states if isinstance(rnn_states, (list, tuple)) else [rnn_states]),
                     np.concatenate(masks),
                     deterministic=True,
@@ -483,9 +451,16 @@ class PettingzooRunner(Runner):
 
                 # Take a step in the environment and get the results.
                 obs, share_obs, render_rewards, dones, infos, available_actions = render_env.step(actions_env)
+                viz_mask_obs = infos[0]["visibility_mask"] if "visibility_mask" in infos[0] else np.ones_like(obs)
+                viz_mask_actions = np.ones_like(actions_env[0])  # Assuming actions are fully visible.
+                viz_mask = np.concatenate([viz_mask_actions, viz_mask_obs], axis=-1)
                 for i in range(self.num_agents):
                     transition = np.concatenate((actions[0][i], obs[0][i]), axis=0)
-                    trajectory[i].append(torch.from_numpy(transition))
+                    agent_viz_mask = viz_mask[i]
+                    buffer[i].append({
+                        "transition": torch.from_numpy(transition).to(self.device),
+                        "visibility_mask": torch.from_numpy(agent_viz_mask).to(self.device)
+                    })
 
                 time_stop = time.time()
 
@@ -493,7 +468,7 @@ class PettingzooRunner(Runner):
                     if ipython_clear_output:
                         clear_output(wait = True)
                     
-                    spf = state_predicted if use_prediction else None
+                    spf = prediction if use_prediction else None
 
                     # Perform rendering.
                     render_env.envs[0].env.render(spf, history_length=HISTORY_LENGTH)
