@@ -109,6 +109,39 @@ def get_shape_from_act_space(act_space, flatten_dicts=True):
         act_shape = act_space[0].shape[0] + 1  
     return act_shape
 
+def flatten_mask(space, mask):
+    result = np.zeros(spaces.flatdim(space))
+
+    if isinstance(space, spaces.Dict):
+        idx = 0
+        for k, v in space.spaces.items():
+            res = flatten_mask(v, mask[k])
+            result[idx:idx + res.size] = res
+            idx += res.size
+    elif isinstance(space, spaces.Tuple):
+        idx = 0
+        for v in space:
+            res = flatten_mask(v, mask[idx])
+            result[idx:idx + res.size] = res
+            idx += res.size
+    elif isinstance(space, spaces.Sequence):
+        idx = 0
+        for v in space:
+            res = flatten_mask(v, mask[idx])
+            result[idx:idx + res.size] = res
+            idx += res.size
+    elif isinstance(space, spaces.Box):
+        result = mask.flatten()
+    elif isinstance(space, spaces.Discrete):
+        result = np.ones(spaces.flatdim(space)) * mask
+    elif isinstance(space, spaces.MultiDiscrete):
+        result = np.ones(spaces.flatdim(space)) * mask
+    elif isinstance(space, spaces.MultiBinary):
+        result = np.ones(spaces.flatdim(space)) * mask
+    
+    return result
+        
+
 def tile_images(img_nhwc):
     """
     Tile N images into one big PxQ image

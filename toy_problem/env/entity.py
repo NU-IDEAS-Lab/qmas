@@ -22,7 +22,7 @@ class Entity():
             position = self.get_random_start_position()
         self.startingPosition = np.copy(position)
         self._position = position
-        self._velocity = np.array([0.0, 0.0])
+        self._velocity = np.zeros_like(position)
         self.reset()
     
 
@@ -35,7 +35,7 @@ class Entity():
                 self.startingPosition = position
         
         self.position = np.copy(self.startingPosition)
-        self.velocity = np.array([0.0, 0.0])
+        self.velocity = np.zeros_like(self.startingPosition)
 
 
     def get_random_start_position(self):

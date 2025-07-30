@@ -9,4 +9,6 @@ __pycache__/
 /results/
 .vscode/
 
+*.zarr
+
 /onpolicy/scripts/results/

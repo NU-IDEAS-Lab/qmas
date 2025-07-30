@@ -5,6 +5,8 @@ from gymnasium.spaces import Dict, Graph
 import numpy as np
 from torch_geometric.data import Data
 
+from onpolicy.utils.util import flatten_mask
+
 
 class PettingzooEnv(object):
     ''' Wrapper to make Pettingzoo environments compatible with the onpolicy algorithms. '''
@@ -213,6 +215,28 @@ class PettingzooEnv(object):
 
 
     def _info_wrapper(self, info):
+        ''' Converts the info dictionary to a format that is compatible with the onpolicy algorithms. '''
+
+        # Set up new location for the combined visibility mask.
+        if "visibility_mask" not in info:
+            all_viz = []
+        
+        for a in self.env.possible_agents:
+            i = info[a]
+            if "visibility_mask" in i:
+                viz = i["visibility_mask"]
+                if self.flatten_observations:
+                    viz = flatten_mask(self.env.observation_space(a), viz)
+                    all_viz.append(viz)
+            else:
+                return info  # If visibility mask is not present, return the info as is.
+
+        if all_viz:
+            # Combine the visibility masks into a single tensor.
+            all_viz = np.array(all_viz, dtype=np.float32)
+            all_viz = np.reshape(all_viz, (self.num_agents, -1))
+            info["visibility_mask"] = all_viz
+
         return info
 
     def _get_matching_arg_dict(self, fn, args_input):
