@@ -85,17 +85,6 @@ def add_args(parser):
                         help="The maximum degree of neighbors in the neighbors action space.")
 
 
-def parse_args(args):
-    ''' Parses environment arguments. '''
-
-    import argparse
-    parser = argparse.ArgumentParser()
-    add_args(parser)
-    parsed_args, unknown_args = parser.parse_known_args(args)
-    validate_args(parsed_args)
-    return parsed_args, unknown_args
-
-
 def validate_args(parsed_args):
     ''' Validates the arguments. '''
     
@@ -163,7 +152,7 @@ class parallel_env(ParallelEnv):
                  action_neighbors_max_degree = 15,
                  reward_method_terminal = "average",
                  observation_radius = np.inf,
-                 observe_method = "ajg_new",
+                 observe_method = "adjacency",
                  observe_method_global = "",
                  observe_bitmap_size = 50,
                  attrition_method = "none",
