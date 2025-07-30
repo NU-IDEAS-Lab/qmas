@@ -539,18 +539,22 @@ class parallel_env(ParallelEnv):
         vertices = sorted(vertices)
         
         obs = {}
+        obs_mask = {}
 
         # Add agent ID.
         if observe_method in ["adjacency"]:
             obs["agent_id"] = agent.id
+            obs_mask["agent_id"] = np.array([True], dtype=bool)
 
         # Add vertex idleness time (raw).
         if observe_method in ["adjacency"]:
             # Create dictionary with default value of -1.0.
             obs["vertex_state"] = {v: -1.0 for v in range(self.pg.graph.number_of_nodes())}
+            obs_mask["vertex_state"] = {v: np.array([False], dtype=bool) for v in range(self.pg.graph.number_of_nodes())}
 
             for node in vertices:
                 obs["vertex_state"][node] = self.pg.getNodeIdlenessTime(node, self.step_count)
+                obs_mask["vertex_state"][node] = np.array([True], dtype=bool)
 
         # Add weighted adjacency matrix (normalized).
         if observe_method in ["adjacency"]:
@@ -563,13 +567,13 @@ class parallel_env(ParallelEnv):
                 adjacency[edge[0], edge[1]] = weight
                 adjacency[edge[1], edge[0]] = weight
             obs["adjacency"] = adjacency
+            obs_mask["adjacency"] = np.ones((self.pg.graph.number_of_nodes(), self.pg.graph.number_of_nodes()), dtype=bool)
         
         # Add agent graph position vector.
         if observe_method in ["adjacency"]:
-            graphPos = {}
             # Set default value of -1.0
-            for a in self.possible_agents:
-                graphPos[a] = -1.0 * np.ones(3, dtype=np.float32)
+            graphPos = {a: -1.0 * np.ones(3, dtype=np.float32) for a in self.possible_agents}
+            obs_mask["agent_graph_position"] = {a: np.array([False], dtype=bool) for a in self.possible_agents}
             
             # Fill in actual values for agents we can see.
             for a in agents:
@@ -583,9 +587,12 @@ class parallel_env(ParallelEnv):
                     vec[1] = a.edge[1]
                     vec[2] = self._getAgentPathLength(a, self._getPathToNode(a, a.edge[0])) / self.pg.graph.edges[a.edge]["weight"]
                 graphPos[a] = vec
+                obs_mask["agent_graph_position"][a] = np.array([True], dtype=bool)
             obs["agent_graph_position"] = graphPos
 
         if observe_method in ["pyg"]:
+            obs_mask = None
+
             # Copy pg map to g
             g = deepcopy(self.pg.graph)
  
@@ -735,7 +742,7 @@ class parallel_env(ParallelEnv):
         if (type(obs) == dict and obs == {}) or (type(obs) != dict and len(obs) < 1):
             raise ValueError(f"Invalid observation method {observe_method}")
         
-        return obs
+        return obs, obs_mask
     
     def _calculateEdgeWeight(self, pos1, pos2):
         '''Calculate the weights of the edges based on the position of the two points, here simply use the Euclidean distance'''
