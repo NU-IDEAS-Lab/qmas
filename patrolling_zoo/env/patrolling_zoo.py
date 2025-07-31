@@ -386,7 +386,7 @@ class parallel_env(ParallelEnv):
         return observation, info
 
 
-    def render(self, figsize=(12, 9), predicted_positions = None):
+    def render(self, predicted_positions = None, figsize=(12, 9), history_length=10):
         ''' Renders the environment.
             
             Args:
@@ -427,30 +427,45 @@ class parallel_env(ParallelEnv):
             plt.scatter(*agent.position, color=color, marker=marker, zorder=10, alpha=0.3, s=300)
             plt.plot([], [], color=color, marker=marker, linestyle='None', label=agent.name, alpha=0.5)
 
-            if predicted_positions is not None:
-                pred_unflattened = []
-                pred_steps = predicted_positions.shape[0]
-                for j in range(pred_steps):
-                    p = spaces.unflatten(self.observation_spaces, predicted_positions[j].flatten())
-                    pred_unflattened.append(p)
+        # Draw the predicted agent positions if provided.
+        if predicted_positions is not None:
+            pred_unflattened = []
+            pred_steps = predicted_positions.shape[0]
+            # for j in range(pred_steps): ### TEMP: We only care about the last step.
+            for j in range(pred_steps - 1, pred_steps):
+                p = spaces.unflatten(self.observation_spaces, predicted_positions[j].flatten())
+                pred_unflattened.append(p)
 
-                # Plot history of predictions from the perspective of agent 0.
-                agent_preds = pred_unflattened[-1][self.possible_agents[0]]
-                graph_pos = agent_preds["agent_graph_position"]
-                pos = nx.get_node_attributes(self.pg.graph, "pos")
+            # Plot history of predictions from the perspective of agent 0.
+            agent_preds = pred_unflattened[-1][self.possible_agents[0]]
+            graph_pos = agent_preds["agent_graph_position"]
+            pos = nx.get_node_attributes(self.pg.graph, "pos")
 
-                for i, agent in enumerate(self.possible_agents):
-                    if agent in graph_pos:
-                        node_id = int(round(graph_pos[agent][0]))
-                        prediction = pos[node_id]
-                        color = colors[i % len(colors)]
-                        label = f"{agent.name} prediction"
-                        if label in self._plotted_prediction_labels:
-                            label = None
-                        else:
-                            self._plotted_prediction_labels.add(label)
-                        plt.scatter(*prediction, color=color, marker="*", s=250, alpha=0.6, zorder=11)
-                        plt.plot([], [], color=color, marker="*", linestyle='None', label=label)
+            for i, agent in enumerate(self.possible_agents):
+                if agent in graph_pos:
+                    print(f"Agent {agent.name} prediction: {graph_pos[agent]}")
+                    node_id_a = int(round(graph_pos[agent][0]))
+                    node_id_b = int(round(graph_pos[agent][1]))
+                    if node_id_a < 0 or node_id_b < 0 or node_id_a >= self.pg.graph.number_of_nodes() or node_id_b >= self.pg.graph.number_of_nodes():
+                        continue
+
+                    posA = np.array(pos[node_id_a])
+                    posB = np.array(pos[node_id_b])
+                    dist = self._dist(posA, posB)
+                    if dist < 1e-6:
+                        prediction = posA
+                    else:
+                        prediction = posA + graph_pos[agent][2] * (posB - posA)
+
+                    color = colors[i % len(colors)]
+                    label = f"{agent.name} prediction"
+                    if label in self._plotted_prediction_labels:
+                        label = None
+                    else:
+                        self._plotted_prediction_labels.add(label)
+                    plt.scatter(*prediction, color=color, marker="*", s=250, alpha=0.6, zorder=11)
+                    plt.plot([], [], color=color, marker="*", linestyle='None', label=label)
+
         plt.legend(bbox_to_anchor=(1.04, 1), loc="upper left")
         plt.gcf().text(0,0,f'Current step: {self.step_count}, Average idleness time: {self.pg.getAverageIdlenessTime(self.step_count):.2f}')
         plt.show()
