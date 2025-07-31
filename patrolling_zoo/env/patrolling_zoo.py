@@ -573,7 +573,7 @@ class parallel_env(ParallelEnv):
         if observe_method in ["adjacency"]:
             # Set default value of -1.0
             graphPos = {a: -1.0 * np.ones(3, dtype=np.float32) for a in self.possible_agents}
-            obs_mask["agent_graph_position"] = {a: np.array([False], dtype=bool) for a in self.possible_agents}
+            obs_mask["agent_graph_position"] = {a: np.zeros(3, dtype=bool) for a in self.possible_agents}
             
             # Fill in actual values for agents we can see.
             for a in agents:
@@ -587,7 +587,7 @@ class parallel_env(ParallelEnv):
                     vec[1] = a.edge[1]
                     vec[2] = self._getAgentPathLength(a, self._getPathToNode(a, a.edge[0])) / self.pg.graph.edges[a.edge]["weight"]
                 graphPos[a] = vec
-                obs_mask["agent_graph_position"][a] = np.array([True], dtype=bool)
+                obs_mask["agent_graph_position"][a] = np.ones(3, dtype=bool)
             obs["agent_graph_position"] = graphPos
 
         if observe_method in ["pyg"]:
