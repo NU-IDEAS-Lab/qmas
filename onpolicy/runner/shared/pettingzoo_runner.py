@@ -294,7 +294,7 @@ class PettingzooRunner(Runner):
                     aa = None
                 
                 # Use the prediction from the diffuser if available.
-                use_prediction = hasattr(self.policy, "diffuser") and len(buffer[0]) == HISTORY_LENGTH
+                use_prediction = hasattr(self.policy, "diffuser") and len(buffer[0]) == HISTORY_LENGTH and not self.all_args.diffusion_disable
                 if use_prediction:
                     for agentIdx in range(self.num_agents):
                         trajectory = torch.stack([t["transition"] for t in buffer[agentIdx]], dim=0)
@@ -416,7 +416,7 @@ class PettingzooRunner(Runner):
                     aa = None
                 
                 # Use the prediction from the diffuser if available.
-                use_prediction = hasattr(self.policy, "diffuser") and len(buffer[0]) == HISTORY_LENGTH
+                use_prediction = hasattr(self.policy, "diffuser") and len(buffer[0]) == HISTORY_LENGTH and not self.all_args.diffusion_disable
                 if use_prediction:
                     for agentIdx in range(self.num_agents):
                         trajectory = torch.stack([t["transition"] for t in buffer[agentIdx]], dim=0)
