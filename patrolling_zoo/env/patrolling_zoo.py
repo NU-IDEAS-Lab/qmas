@@ -563,13 +563,13 @@ class parallel_env(ParallelEnv):
 
         # Add vertex idleness time (raw).
         if observe_method in ["adjacency"]:
-            # Create dictionary with default value of -1.0.
-            obs["vertex_state"] = {v: -1.0 for v in range(self.pg.graph.number_of_nodes())}
-            obs_mask["vertex_state"] = {v: np.array([False], dtype=bool) for v in range(self.pg.graph.number_of_nodes())}
+            obs["vertex_state"] = {}
+            obs_mask["vertex_state"] = {}
 
-            for node in vertices:
+            # Fill in actual values. Set the obs_mask to True for vertices that are visible.
+            for node in range(self.pg.graph.number_of_nodes()):
                 obs["vertex_state"][node] = self.pg.getNodeIdlenessTime(node, self.step_count)
-                obs_mask["vertex_state"][node] = np.array([True], dtype=bool)
+                obs_mask["vertex_state"][node] = np.array([node in vertices], dtype=bool)
 
         # Add weighted adjacency matrix (normalized).
         if observe_method in ["adjacency"]:
@@ -586,12 +586,11 @@ class parallel_env(ParallelEnv):
         
         # Add agent graph position vector.
         if observe_method in ["adjacency"]:
-            # Set default value of -1.0
-            graphPos = {a: -1.0 * np.ones(3, dtype=np.float32) for a in self.possible_agents}
-            obs_mask["agent_graph_position"] = {a: np.zeros(3, dtype=bool) for a in self.possible_agents}
-            
-            # Fill in actual values for agents we can see.
-            for a in agents:
+            graphPos = {}
+            obs_mask["agent_graph_position"] = {}
+
+            # Fill in actual values. Set the obs_mask to True for agents that are visible.
+            for a in self.possible_agents:
                 vec = np.zeros(3, dtype=np.float32)
                 if a.edge == None:
                     vec[0] = a.lastNode
@@ -602,7 +601,7 @@ class parallel_env(ParallelEnv):
                     vec[1] = a.edge[1]
                     vec[2] = self._getAgentPathLength(a, self._getPathToNode(a, a.edge[0])) / self.pg.graph.edges[a.edge]["weight"]
                 graphPos[a] = vec
-                obs_mask["agent_graph_position"][a] = np.ones(3, dtype=bool)
+                obs_mask["agent_graph_position"][a] = np.ones(3, dtype=bool) if a in agents else np.zeros(3, dtype=bool)
             obs["agent_graph_position"] = graphPos
 
         if observe_method in ["pyg"]:
