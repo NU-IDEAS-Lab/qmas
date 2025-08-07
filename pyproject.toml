@@ -18,5 +18,5 @@ classifiers = [
 ]
 
 [tool.setuptools.packages.find]
-where = [".", "flocking_zoo", "onpolicy", "patrolling_zoo", "comms_policy", "qmas", "test", "toy_problem"]
+where = [".", "flocking_zoo", "onpolicy", "patrolling_zoo", "comms_policy", "qmas", "test", "toy_problem", "isru_zoo"]
 namespaces = false
