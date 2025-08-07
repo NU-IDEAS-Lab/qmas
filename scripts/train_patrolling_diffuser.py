@@ -4,8 +4,8 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-	"--experiment_name", "diffuser-patrolling",
-    "--project_name", "qmas",
+	"--experiment_name", "diffuser-patrolling-obs200",
+	"--project_name", "qmas",
 	"--env_class", "patrolling_zoo.patrolling_zoo_v0.parallel_env",
 	"--user_name", "ideas-mas",
 
@@ -14,8 +14,8 @@ args = [
 	"--action_method", "neighbors",
 	"--observe_method", "adjacency",
 	"--observe_method_global", "adjacency",
-	"--observation_radius", "400.0",
-    "--state_per_agent",
+	"--observation_radius", "200.0",
+	"--state_per_agent",
 	"--communication_model", "bernoulli",
 	"--communication_probability", "0.2",
 	"--alpha", "1.0",
@@ -40,7 +40,7 @@ args = [
 	"--use_centralized_V",
 	"--use_gae",
 	"--use_gae_amadm",
-    "--skip_steps",
+	"--skip_steps",
 	"--share_policy",
 	"--no-share_reward",
 	"--use_ReLU",
@@ -52,10 +52,10 @@ args = [
 
 	"--n_rollout_threads", "25",
 	"--cuda",
-	"--cuda_idx", "2",
+	"--cuda_idx", "6",
 
 	"--save_interval", "10000",
-    "--results_dir", "/data/group/mas/qmas/results",
+	"--results_dir", "/data/group/mas/qmas/results",
 	"--use_wandb",
 ]
 

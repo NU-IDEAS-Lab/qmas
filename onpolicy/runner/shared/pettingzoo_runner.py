@@ -294,7 +294,7 @@ class PettingzooRunner(Runner):
                     aa = None
                 
                 # Use the prediction from the diffuser if available.
-                use_prediction = hasattr(self.policy, "diffuser") and len(buffer[0]) == HISTORY_LENGTH
+                use_prediction = hasattr(self.policy, "diffuser") and len(buffer[0]) == HISTORY_LENGTH and not self.all_args.diffusion_disable
                 if use_prediction:
                     for agentIdx in range(self.num_agents):
                         trajectory = torch.stack([t["transition"] for t in buffer[agentIdx]], dim=0)
@@ -416,7 +416,7 @@ class PettingzooRunner(Runner):
                     aa = None
                 
                 # Use the prediction from the diffuser if available.
-                use_prediction = hasattr(self.policy, "diffuser") and len(buffer[0]) == HISTORY_LENGTH
+                use_prediction = hasattr(self.policy, "diffuser") and len(buffer[0]) == HISTORY_LENGTH and not self.all_args.diffusion_disable
                 if use_prediction:
                     for agentIdx in range(self.num_agents):
                         trajectory = torch.stack([t["transition"] for t in buffer[agentIdx]], dim=0)
@@ -447,11 +447,16 @@ class PettingzooRunner(Runner):
                     available_actions=aa
                 )
 
+                # Perform rendering.
+                if ipython_clear_output:
+                    clear_output(wait = True)
+                spf = prediction if use_prediction else None
+                render_env.envs[0].env.render(spf, history_length=HISTORY_LENGTH)
+
+                # Prepare the actions for the environment.
                 # [n_envs*n_agents, ...] -> [n_envs, n_agents, ...]
                 actions = actions.detach().cpu().reshape((self.n_render_rollout_threads, self.num_agents, *actions.shape[1:]))
-                # rnn_states = rnn_states.detach().cpu().reshape((self.n_render_rollout_threads, self.num_agents, *rnn_states.shape[1:]))
                 rnn_states = rnn_states.detach().cpu().reshape((self.n_render_rollout_threads, *rnn_states.shape[1:]))
-
                 actions_env = [actions[idx, :, :].numpy() for idx in range(self.n_render_rollout_threads)]
 
                 # Take a step in the environment and get the results.
@@ -468,15 +473,6 @@ class PettingzooRunner(Runner):
                     })
 
                 time_stop = time.time()
-
-                if not np.all(dones):
-                    if ipython_clear_output:
-                        clear_output(wait = True)
-                    
-                    spf = prediction if use_prediction else None
-
-                    # Perform rendering.
-                    render_env.envs[0].env.render(spf, history_length=HISTORY_LENGTH)
 
                 # append frame
                 if self.all_args.save_gifs:        
