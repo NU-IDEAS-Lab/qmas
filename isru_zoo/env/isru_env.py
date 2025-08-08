@@ -146,11 +146,11 @@ class parallel_env(ParallelEnv):
             )
         
         # Reset resources.
-        self.resource_maps = {}
+        self.map_resources = {}
         for r in self.possible_resources:
-            self.resource_maps[r] = np.zeros(self.world_dims, dtype=np.float32)
+            self.map_resources[r] = np.zeros(self.world_dims, dtype=np.float32)
             for _ in r.quantity:
-                self.resource_maps[r][
+                self.map_resources[r][
                     np.random.choice(world_indices_x),
                     np.random.choice(world_indices_y)
                 ] += 1.0
@@ -312,48 +312,46 @@ class parallel_env(ParallelEnv):
     def _populateStateSpace(self, agent, force_visible=False):
         ''' Returns a populated state/observation space.'''
 
+        # Load agent data into a map.
+        map_entities = np.zeros(self.world_dims, dtype=np.int32)
+        # TODO: Insert agents/entities at their positions.
+
+        # Build the combined map.
+        layers = [self.map_obstacles, map_entities, *self.map_resources]
+        map_combined = np.concatenate(layers, axis=-1)
+
+        # Create the observation.
         obs = {
-            "adversaries": {
-                a: {
-                    "position": a.position,
-                    "velocity": a.velocity,
-                } for a in self.possible_adversaries
-            },
-            "agents": {
-                a: {
-                    "position": a.position,
-                    "velocity": a.velocity,
-                } for a in self.possible_agents
-            },
-            "id": self.possible_agents.index(agent),
+            "id": agent.id,
+            "map": map_combined
         }
         
-        # Create a visibility mask for the agents.
-        def visible(entity):
-            if force_visible:
-                return True
-            if entity == agent:
-                return True
-            if random.random() < self.observation_probability:
-                return True
-            return False
-        obs_mask = {
-            "adversaries": {},
-            "agents": {},
-            "id": True
-        }
-        for a in self.possible_adversaries:
-            vis = visible(a)
-            obs_mask["adversaries"][a] = {
-                "position": np.array([vis] * self.num_dimensions, dtype=bool),
-                "velocity": np.array([vis] * self.num_dimensions, dtype=bool),
-            }
-        for a in self.possible_agents:
-            vis = visible(a)
-            obs_mask["agents"][a] = {
-                "position": np.array([vis] * self.num_dimensions, dtype=bool),
-                "velocity": np.array([vis] * self.num_dimensions, dtype=bool),
-            }
+        # # Create a visibility mask for the agents.
+        # def visible(entity):
+        #     if force_visible:
+        #         return True
+        #     if entity == agent:
+        #         return True
+        #     if random.random() < self.observation_probability:
+        #         return True
+        #     return False
+        # obs_mask = {
+        #     "adversaries": {},
+        #     "agents": {},
+        #     "id": True
+        # }
+        # for a in self.possible_adversaries:
+        #     vis = visible(a)
+        #     obs_mask["adversaries"][a] = {
+        #         "position": np.array([vis] * self.num_dimensions, dtype=bool),
+        #         "velocity": np.array([vis] * self.num_dimensions, dtype=bool),
+        #     }
+        # for a in self.possible_agents:
+        #     vis = visible(a)
+        #     obs_mask["agents"][a] = {
+        #         "position": np.array([vis] * self.num_dimensions, dtype=bool),
+        #         "velocity": np.array([vis] * self.num_dimensions, dtype=bool),
+        #     }
 
         return obs, obs_mask
     
