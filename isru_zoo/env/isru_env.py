@@ -14,7 +14,7 @@ from enum import IntEnum
 from torch_geometric.utils.convert import from_networkx
 from torch_geometric.data import Data
 
-from isru_zoo.env.entity import ENTITY_TYPE, Agent
+from isru_zoo.env.entity import ENTITY_TYPE, Agent, Depot
 from isru_zoo.env.resource import TestResource1, TestResource2
 
 
@@ -24,8 +24,6 @@ def add_args(parser):
     import argparse
     parser.add_argument("--num_obstacles", type=int, default=20,
                         help="The number of obstacles to place in the world.")
-    parser.add_argument("--random_start_positions", action=argparse.BooleanOptionalAction, default=False,
-                        help="If true, agents will start at random positions in the world. If false, they will start at [0,0].")
     parser.add_argument("--world_size", type=float, default=50.0,
                         help="The size of the world. The world is a square with side length `world_size`.")
     
@@ -60,7 +58,6 @@ class parallel_env(ParallelEnv):
                  max_cycles: int = -1,
                  world_size: float = 50.0,
                  num_obstacles: int = 10,
-                 random_start_positions: bool = False
                 ):
         """
         Initialize the environment.
@@ -69,9 +66,8 @@ class parallel_env(ParallelEnv):
 
         # Configuration.
         self.max_cycles = max_cycles
-        self.world_dims = np.array([world_size, world_size], dtype=np.float32)
+        self.world_dims = np.array([world_size, world_size], dtype=np.int32)
         self.num_obstacles = num_obstacles
-        self.random_start_positions = random_start_positions
 
         # Set up entities.
         self.possible_agents = [
@@ -86,6 +82,14 @@ class parallel_env(ParallelEnv):
             TestResource2(5)
         ]
 
+        # Set up depots.
+        self.possible_depots = [
+            Depot(
+                position=self.get_random_position(),
+                resource = r
+            ) for r in self.possible_resources
+        ]
+
         # Create the action space.
         action_space = spaces.Dict({
             # Movement is specified by relative motion in two dimensions.
@@ -95,21 +99,25 @@ class parallel_env(ParallelEnv):
             # Resource actions are represented as a floating point value for each resource type.
             # To pick up resources, the agent uses a positive number.
             # To drop resources, the agent uses a negative number.
-            "resources": spaces.Box(low=-np.inf, high=np.inf, shape=(len(self.possible_resources),), dtype=np.int32),
+            "resources": spaces.Box(low=-np.inf, high=np.inf, shape=(len(self.possible_resources),), dtype=np.float32),
         })
         self.action_spaces = spaces.Dict({agent: action_space for agent in self.possible_agents}) # type: ignore
         
+        # Determine number of layers in the map.
+        # Layers are: obstacles, agents, depots, resources.
+        num_layers = 1 + 1 + 1 + len(self.possible_resources)
+
         # Create the state space.
         # The state space is a complete observation of the environment.
         # This is not part of the standard PettingZoo API, but is useful for centralized training.
         self.state_space = spaces.Dict({
-            "agents": spaces.Dict({
-                a: spaces.Dict({
-                    "position": spaces.Box(low=-np.inf, high=np.inf, shape=(self.num_dimensions,), dtype=np.float32),
-                    "velocity": spaces.Box(low=-np.inf, high=np.inf, shape=(self.num_dimensions,), dtype=np.float32),
-                }) for a in self.possible_agents
-            }),
             "id": spaces.Discrete(len(self.possible_agents)),
+            "map": spaces.Box(
+                low=-np.inf,
+                high=np.inf,
+                shape=(*self.world_dims, num_layers),
+                dtype=np.float32
+            )
         })
 
         # Set up observation spaces. These are just the state space.
@@ -126,8 +134,8 @@ class parallel_env(ParallelEnv):
             random.seed(seed)
         
         origin = np.array([0.0, 0.0], dtype=np.float32)
-        world_indices_x = np.arange(self.world_dims)
-        world_indices_y = np.arange(self.world_dims)
+        world_indices_x = np.arange(self.world_dims[0])
+        world_indices_y = np.arange(self.world_dims[1])
 
         # Reset obstacles.
         self.map_obstacles = np.zeros(self.world_dims, dtype=np.float32)
@@ -135,25 +143,34 @@ class parallel_env(ParallelEnv):
             np.random.choice(world_indices_x, self.num_obstacles),
             np.random.choice(world_indices_y, self.num_obstacles)
         ] = 1.0
+        positions_available = np.argwhere(self.map_obstacles == 0)
 
         # Reset the agents.
         self.agents = copy(self.possible_agents)
         for agent in self.agents:
-            start_position = self.get_random_position() if self.random_start_positions else origin
+            idx = np.random.randint(positions_available.shape[0])
+            start_position = positions_available[idx]
             agent.reset(
                 reset_start_position=True,
                 position=start_position
             )
+
+        # Reset depots.
+        # Ensure they are placed in an available location.
+        self.map_depots = np.zeros(self.world_dims, dtype=np.float32)
+        for depot in self.possible_depots:
+            idx = np.random.randint(positions_available.shape[0])
+            depot.position = positions_available[idx]
+            self.map_depots[depot.position[0], depot.position[1]] = depot.resource_id
         
         # Reset resources.
         self.map_resources = {}
         for r in self.possible_resources:
             self.map_resources[r] = np.zeros(self.world_dims, dtype=np.float32)
-            for _ in r.quantity:
-                self.map_resources[r][
-                    np.random.choice(world_indices_x),
-                    np.random.choice(world_indices_y)
-                ] += 1.0
+            for _ in range(r.quantity):
+                idx = np.random.randint(positions_available.shape[0])
+                pos = positions_available[idx]
+                self.map_resources[r][pos] += 1.0
 
         # Reset other state.
         self.step_count = 0
@@ -290,11 +307,7 @@ class parallel_env(ParallelEnv):
         ''' Returns the global state of the environment.
             This is useful for centralized training, decentralized execution. '''
         
-        if self.state_per_agent:
-            # Return the state for each agent.
-            return {a: self._populateStateSpace(a, force_visible=True)[0] for a in self.possible_agents}
-        else:
-            return self._populateStateSpace(self.possible_agents[0], force_visible=True)[0]
+        return self._populateStateSpace(self.possible_agents[0], force_visible=True)[0]
 
 
     def observe(self, agent, radius=None, allow_done_agents=False):
@@ -313,17 +326,22 @@ class parallel_env(ParallelEnv):
         ''' Returns a populated state/observation space.'''
 
         # Load agent data into a map.
-        map_entities = np.zeros(self.world_dims, dtype=np.int32)
+        map_agents = np.zeros(self.world_dims, dtype=np.int32)
         # TODO: Insert agents/entities at their positions.
 
         # Build the combined map.
-        layers = [self.map_obstacles, map_entities, *self.map_resources]
-        map_combined = np.concatenate(layers, axis=-1)
+        layers = [self.map_obstacles, map_agents, self.map_depots, *self.map_resources.values()]
+        map_combined = np.stack(layers, axis=-1)
 
         # Create the observation.
         obs = {
-            "id": agent.id,
+            "id": self.possible_agents.index(agent),
             "map": map_combined
+        }
+
+        obs_mask = {
+            "id": True,
+            "map": np.ones_like(map_combined, dtype=bool)
         }
         
         # # Create a visibility mask for the agents.

@@ -3,7 +3,7 @@ from enum import IntEnum
 
 class ENTITY_TYPE(IntEnum):
     AGENT = 0
-    ADVERSARY = 1
+    DEPOT = 1
     ZONE = 2
 
 
@@ -87,17 +87,25 @@ class Agent(Entity):
         super().reset(*args, **kwargs)
 
 
-class Adversary(Entity):
-    ''' This base class stores all generic adversary state. '''
+class Depot(Entity):
+    ''' This base class stores all generic depot state. '''
 
-    entity_type = ENTITY_TYPE.ADVERSARY
+    entity_type = ENTITY_TYPE.DEPOT
 
-    def __init__(self, *args, speed_max = 1.0, **kwargs):
+    def __init__(self, resource, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.speed_max = speed_max
 
-    def reset(self, *args, target=None, **kwargs):
-        self.target = target
+        # Store the resource associated with this depot.
+        self.resource = resource
+    
+
+    @property
+    def resource_id(self):
+        ''' Returns the ID of the resource associated with this depot. '''
+        return self.resource.resource_id
+
+
+    def reset(self, *args, **kwargs):
         super().reset(*args, **kwargs)
 
 
