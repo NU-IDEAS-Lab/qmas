@@ -22,9 +22,9 @@ def add_args(parser):
     ''' Adds environment arguments. '''
     
     import argparse
-    parser.add_argument("--num_obstacles", type=int, default=20,
+    parser.add_argument("--num_obstacles", type=int, default=0,
                         help="The number of obstacles to place in the world.")
-    parser.add_argument("--world_size", type=float, default=50.0,
+    parser.add_argument("--world_size", type=float, default=5.0,
                         help="The size of the world. The world is a square with side length `world_size`.")
     
 
@@ -110,15 +110,21 @@ class parallel_env(ParallelEnv):
         # Create the state space.
         # The state space is a complete observation of the environment.
         # This is not part of the standard PettingZoo API, but is useful for centralized training.
-        self.state_space = spaces.Dict({
-            "id": spaces.Discrete(len(self.possible_agents)),
-            "map": spaces.Box(
-                low=-np.inf,
-                high=np.inf,
-                shape=(*self.world_dims, num_layers),
-                dtype=np.float32
-            )
-        })
+        # self.state_space = spaces.Dict({
+        #     "id": spaces.Discrete(len(self.possible_agents)),
+        #     "map": spaces.Box(
+        #         low=-np.inf,
+        #         high=np.inf,
+        #         shape=(*self.world_dims, num_layers),
+        #         dtype=np.float32
+        #     )
+        # })
+        self.state_space = spaces.Box(
+            low=-np.inf,
+            high=np.inf,
+            shape=(*self.world_dims, num_layers),
+            dtype=np.float32
+        )
 
         # Set up observation spaces. These are just the state space.
         obs_space = self.state_space
@@ -225,7 +231,7 @@ class parallel_env(ParallelEnv):
         plt.figure(figsize=figsize)
 
         # Plot the map layers.
-        map_layers = state["map"]
+        map_layers = state
         num_layers = map_layers.shape[-1]
         for i in range(num_layers):
             plt.subplot(1, num_layers, i + 1)
@@ -296,16 +302,18 @@ class parallel_env(ParallelEnv):
         map_combined = np.stack(layers, axis=-1)
 
         # Create the observation.
-        obs = {
-            "id": self.possible_agents.index(agent),
-            "map": map_combined
-        }
+        # obs = {
+        #     "id": self.possible_agents.index(agent),
+        #     "map": map_combined
+        # }
+        obs = map_combined
 
         # Create the observation visibility mask.
-        obs_mask = {
-            "id": True,
-            "map": np.ones_like(map_combined, dtype=bool)
-        }
+        # obs_mask = {
+        #     "id": True,
+        #     "map": np.ones_like(map_combined, dtype=bool)
+        # }
+        obs_mask = np.ones_like(map_combined, dtype=bool)
         
         return obs, obs_mask
     
@@ -380,15 +388,15 @@ class parallel_env(ParallelEnv):
         ''' Returns the reward for the given agent. '''
 
         # Provide reward for the agent to be in proximity of (30, 30).
-        target_position = np.array([30, 30], dtype=np.float32)
+        target_position = np.array([0, 0], dtype=np.float32)
         distance = np.linalg.norm(agent.position - target_position)
-        reward = -distance / np.linalg.norm(self.world_dims)  # Normalize by world size.
+        reward = -distance
 
         # Provide a bonus reward if the resource actions are both 1.
-        if agent.last_action is not None:
-            resource_actions = agent.last_action["resources"]
-            if np.allclose(resource_actions, 1.0, atol=0.1):
-                reward += 1.0
+        # if agent.last_action is not None:
+        #     resource_actions = agent.last_action["resources"]
+        #     if np.allclose(resource_actions, 1.0, atol=0.1):
+        #         reward += 1.0
 
         return reward
 
