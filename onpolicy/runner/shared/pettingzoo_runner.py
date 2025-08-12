@@ -398,7 +398,7 @@ class PettingzooRunner(Runner):
             masks = np.ones((self.n_render_rollout_threads, self.num_agents, 1), dtype=np.float32)
 
             for i in range(self.num_agents):
-                transition = np.concatenate((np.zeros(act_size, dtype=np.float32), obs[0][i]), axis=0)
+                transition = np.concatenate((np.zeros(act_size, dtype=np.float32), obs[0][i].flatten()), axis=0)
                 buffer[i].append({
                     "transition": torch.from_numpy(transition).to(self.device),
                     "visibility_mask": torch.ones(transition.shape, dtype=torch.float32, device=self.device)
@@ -467,9 +467,9 @@ class PettingzooRunner(Runner):
                 obs, share_obs, render_rewards, dones, infos, available_actions = render_env.step(actions_env)
                 viz_mask_obs = np.expand_dims(infos[0]["visibility_mask"], 0) if "visibility_mask" in infos[0] else np.ones_like(obs)
                 viz_mask_actions = np.ones(actions.shape, dtype=np.float32)  # Assuming actions are fully visible.
-                viz_mask = np.concatenate([viz_mask_actions, viz_mask_obs], axis=-1)
+                viz_mask = np.concatenate([viz_mask_actions, viz_mask_obs.reshape(self.n_render_rollout_threads, self.num_agents, -1)], axis=-1)
                 for i in range(self.num_agents):
-                    transition = np.concatenate((actions[0][i].float(), obs[0][i]), axis=0)
+                    transition = np.concatenate((actions[0][i].float(), obs[0][i].flatten()), axis=0)
                     agent_viz_mask = viz_mask[0, i]
                     buffer[i].append({
                         "transition": torch.from_numpy(transition).to(self.device),
