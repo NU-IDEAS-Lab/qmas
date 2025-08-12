@@ -218,60 +218,21 @@ class parallel_env(ParallelEnv):
             p = spaces.unflatten(self.observation_spaces, pred[i].flatten())
             pred_unflattened.append(p)
 
-        # print(f"Prediction: {pred}")
+        # Get the true environment state.
+        state = self.state()
 
-        # Plot as a line graph using matplotlib.
+        # Plot state as a grid using matplotlib.
         plt.figure(figsize=figsize)
 
-        # Set the axis limits.
-        plt.xlim(-self.world_dims[0], self.world_dims[0])
-        plt.ylim(-self.world_dims[1], self.world_dims[1])
-        plt.gca().set_aspect('equal', adjustable='box')
-        plt.axhline(0, color='black', lw=0.5)
-        plt.axvline(0, color='black', lw=0.5)
-        plt.title("2D Leader-Follower Environment")
-        plt.grid()
-        
-        # Plot the agent positions.
-        positions = [a.position for a in self.possible_agents]
-        plt.plot([p[0] for p in positions], [p[1] for p in positions], 'bo', label='Followers')
-        for i, agent in enumerate(self.agents):
-            plt.annotate(f"{agent}", (positions[i][0] + 1, positions[i][1]), fontsize=8, color='blue')
+        # Plot the map layers.
+        map_layers = state["map"]
+        num_layers = map_layers.shape[-1]
+        for i in range(num_layers):
+            plt.subplot(1, num_layers, i + 1)
+            plt.imshow(map_layers[:, :, i], cmap="gray", origin="lower")
+            plt.title(f"Layer {i}")
+            plt.axis("off")
 
-            # Plot actual history for the agent.
-            history = self.state_history[agent]
-            plt.plot([h[0] for h in history], [h[1] for h in history], 'b', alpha=0.5, linewidth=0.5, label=f"{agent} actual")            
-        
-        # Plot the adversary positions.
-        positions = [a.position for a in self.possible_adversaries]
-        plt.plot([p[0] for p in positions], [p[1] for p in positions], 'ro', label='Leaders')
-        for i, adversary in enumerate(self.adversaries):
-            plt.annotate(f"{adversary}", (positions[i][0] + 1, positions[i][1]), fontsize=8, color='red')        
-
-            # Plot actual history for the adversary.
-            history = self.state_history[adversary]
-            plt.plot([h[0] for h in history], [h[1] for h in history], 'r', alpha=0.5, linewidth=0.5, label=f"{adversary} actual")
-
-
-        # Plot history of predictions from the perspective of agent 0.
-        if len(pred_unflattened) > 0:
-            agent_preds = [pred_unflattened[i][self.possible_agents[0]]["agents"] for i in range(len(pred_unflattened))]
-            for i, agent in enumerate(self.possible_agents):
-                # Get the history of predictions for this agent.
-                history = [p[agent]["position"] for p in agent_preds]
-                plt.plot([h[0] for h in history], [h[1] for h in history], 'b--', alpha=0.5, linewidth=1.5)            
-                plt.annotate(f"Pred {agent}", (history[-1][0] + 1, history[-1][1]), fontsize=8, color='blue')
-            
-            adversary_preds = [pred_unflattened[i][self.possible_agents[0]]["adversaries"] for i in range(len(pred_unflattened))]
-            for i, adversary in enumerate(self.possible_adversaries):
-                # Get the history of predictions for this adversary.
-                history = [p[adversary]["position"] for p in adversary_preds]
-                plt.plot([h[0] for h in history], [h[1] for h in history], 'r--', alpha=0.5, linewidth=1.5)            
-                plt.annotate(f"Pred {adversary}", (history[-1][0] + 1, history[-1][1]), fontsize=8, color='red')
-
-        # Add legend outside the plot.
-        plt.legend(loc='upper left', bbox_to_anchor=(1, 1), fontsize=8)
-        plt.tight_layout()
 
         # Show the plot.
         plt.show()      
@@ -339,58 +300,15 @@ class parallel_env(ParallelEnv):
             "map": map_combined
         }
 
+        # Create the observation visibility mask.
         obs_mask = {
             "id": True,
             "map": np.ones_like(map_combined, dtype=bool)
         }
         
-        # # Create a visibility mask for the agents.
-        # def visible(entity):
-        #     if force_visible:
-        #         return True
-        #     if entity == agent:
-        #         return True
-        #     if random.random() < self.observation_probability:
-        #         return True
-        #     return False
-        # obs_mask = {
-        #     "adversaries": {},
-        #     "agents": {},
-        #     "id": True
-        # }
-        # for a in self.possible_adversaries:
-        #     vis = visible(a)
-        #     obs_mask["adversaries"][a] = {
-        #         "position": np.array([vis] * self.num_dimensions, dtype=bool),
-        #         "velocity": np.array([vis] * self.num_dimensions, dtype=bool),
-        #     }
-        # for a in self.possible_agents:
-        #     vis = visible(a)
-        #     obs_mask["agents"][a] = {
-        #         "position": np.array([vis] * self.num_dimensions, dtype=bool),
-        #         "velocity": np.array([vis] * self.num_dimensions, dtype=bool),
-        #     }
-
         return obs, obs_mask
     
-    def _update_adversary_velocity(self, adversary):
-        """
-        Update velocity based on the step count to create a more complex pattern.
-        This function creates a time-varying velocity that follows different patterns.
-        """
-        if random.random() < 0.3:
-            # Randomly change velocity to create a new pattern
-            adversary.velocity += np.random.normal(0, 0.3, size=self.num_dimensions)
-                
-        # # Add some random noise to make the trajectory more natural
-        noise_magnitude = 0.05 * min(1.0, self.step_count / 50.0)  # Gradually increase noise
-        adversary.velocity += np.random.normal(0, noise_magnitude, size=self.num_dimensions)
-
-        # Normalize velocity to keep it within a reasonable range.
-        norm = np.linalg.norm(adversary.velocity)
-        if norm > 1.0:
-            adversary.velocity = adversary.velocity / norm
-                
+    
     def step(self, action_dict={}, lastStep=False):
         ''''
         Perform a step in the environment based on the given action dictionary.
