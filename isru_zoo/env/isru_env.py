@@ -288,7 +288,8 @@ class parallel_env(ParallelEnv):
 
         # Load agent data into a map.
         map_agents = np.zeros(self.world_dims, dtype=np.int32)
-        # TODO: Insert agents/entities at their positions.
+        for i, a in enumerate(self.agents):
+            map_agents[a.position[0], a.position[1]] = i + 1  # Start from 1 to avoid confusion with empty space.
 
         # Build the combined map.
         layers = [self.map_obstacles, map_agents, self.map_depots, *self.map_resources.values()]
