@@ -349,8 +349,12 @@ class parallel_env(ParallelEnv):
                 action = spaces.unflatten(self.action_space(agent), action_dict[agent])
                 agent.last_action = action
 
-                # Move the agent.                
-                raw_position=agent.position + action["movement"].astype(np.int32)
+                # Set agent velocity.
+                agent.velocity = action["movement"].astype(np.int32)
+                agent.velocity = np.clip(agent.velocity, -1, 1)
+
+                # Move the agent.
+                raw_position=agent.position + agent.velocity
                 new_position = np.clip(raw_position, 0, [self.world_dims[0] - 1, self.world_dims[1] - 1])
                 if self.map_obstacles[new_position[0], new_position[1]] == 0:
                     agent.position = new_position
