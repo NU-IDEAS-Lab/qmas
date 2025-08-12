@@ -120,6 +120,10 @@ class PettingzooRunner(Runner):
             actions_shape = (self.n_rollout_threads, self.num_agents, *act_shape)
         else:
             actions_shape = (self.n_rollout_threads, self.num_agents, act_shape)
+        
+        # Get the shape of action log probabilities from the policy.
+        action_log_prob_shape = (self.n_rollout_threads, self.num_agents, self.policy.actor.act.log_prob_dim)
+        
 
         # Initialize buffer.
         self.buffer.insert(
@@ -128,7 +132,7 @@ class PettingzooRunner(Runner):
             rnn_states_actor=np.zeros((self.n_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=np.float32),
             rnn_states_critic=np.zeros((self.n_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=np.float32),
             actions=np.zeros(actions_shape, dtype=np.float32),
-            action_log_probs=np.zeros(actions_shape, dtype=np.float32),
+            action_log_probs=np.zeros(action_log_prob_shape, dtype=np.float32),
 
             # Although there is actually only one value per thread, we store it as if there were one per agent.
             # Each agent will have the same value.

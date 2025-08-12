@@ -61,6 +61,7 @@ class ACTLayer(nn.Module):
         
         action_outs = get_action_out(action_space)
         self.action_outs = nn.ModuleList(action_outs)
+        self.log_prob_dim = len(action_outs)
     
 
     def forward(self, x, available_actions=None, deterministic=False):
