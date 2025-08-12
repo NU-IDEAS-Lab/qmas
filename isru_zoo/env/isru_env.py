@@ -350,13 +350,24 @@ class parallel_env(ParallelEnv):
                 agent.last_action = action
 
                 # Move the agent.                
-                agent.position += action["movement"].astype(np.int32)
-
-                # Ensure the agent stays within bounds.
-                agent.position = np.clip(agent.position, [0, 0], self.world_dims - 1)
-
+                raw_position=agent.position + action["movement"].astype(np.int32)
+                new_position = np.clip(raw_position, 0, [self.world_dims[0] - 1, self.world_dims[1] - 1])
+                if self.map_obstacles[new_position[0], new_position[1]] == 0:
+                    agent.position = new_position
                 # Handle the resource actions.
                 # TODO: Implement resource pickup/dropoff using the action["resources"] values.
+                for r in self.map_resources.keys():
+                    if self.map_resources[r][*agent.position]==1 and isinstance(agent, Extractor):
+                        if action['resources']==0:
+                            agent.resources[r]+=1
+                            self.map_resources[r][*agent.position]=0
+                
+                for depot in self.possible_depots: 
+                    if self.map_depots[*agent.position]==depot.resource_id and isinstance(agent, Hauler):
+                        if action['resources']==1:
+                            depot.resources[depot.resource_id]=agent.resources[depot.resource_id]
+                            agent.resources[depot.resource_id]=0
+
 
         # Check termination conditions.
         end_truncate = lastStep or (self.max_cycles >= 0 and self.step_count >= self.max_cycles)
@@ -403,5 +414,6 @@ class parallel_env(ParallelEnv):
 
     def _getAvailableActions(self, agent):
         ''' Returns the available actions for the given agent. '''
+
 
         return None
