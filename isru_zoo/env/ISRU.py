@@ -153,35 +153,7 @@ class CustomEnvironment(ParallelEnv):
         # Update global map as the union of all agent maps.
         self.global_map = np.minimum.reduce(list(self.agent_maps.values()))
 
-    def update_mode(self):
-        """
-        Check whether to switch modes:
-        - In exploration mode, switch to relay if the phase lasts longer than the exploration period 
-            or no unvisited tile remains in agent_1's map.
-        - In relay mode, switch to exploration if all data is delivered or the relay phase times out.
-        In each switch, extend the period for the next cycle.
-        """
-        duration = self.step_count - self.mode_start_step
-        if self.mode == 1:
-            no_tiles = not np.any(self.agent_maps[self.possible_agents[0]] == self.unvisited_value)
-            if duration >= self.exploration_period or no_tiles:
-                self.mode = 0
-                self.mode_start_step = self.step_count
-                self.exploration_period += 200
-                # print(f"Switched to Relay mode at step {self.step_count}")
-                # Call render when first exploration phase ends
-                # if self.step_count < self.exploration_period + 200:
-                #     self.render()
-        # elif self.mode == 0:
-            all_sent = all(val == 0 for val in self.data_collected.values())
-            if all_sent or duration >= self.relay_period:
-                self.mode = 1
-                self.mode_start_step = self.step_count
-                self.relay_period += 200
-                # print(f"Switched to Exploration mode at step {self.step_count}")
-                # Call render when first relay phase ends
-                # if self.step_count < self.exploration_period + self.relay_period + 400:
-                #     self.render()
+
 
     def update_communication_graph(self):
         """
@@ -235,225 +207,90 @@ class CustomEnvironment(ParallelEnv):
         self.step_count += 1
         base_station = np.array([self.entrance_x, self.entrance_y], dtype=np.float32)
         
-        if self.mode == 1:
-            # --- Exploration Mode ---
-            for agent, action in actions.items():
-                # Check available power.
-                if self.power_levels[agent] <= 0:
-                    self.dones[agent] = True
-                    continue
-
-                # Movement cost.
-                operating_cost = 0.01
-                self.power_levels[agent] -= operating_cost
-                self.energy_consumption_record[agent]['operating_cost'] += operating_cost
-                self.power_levels[agent] = max(0, self.power_levels[agent])
-
-                # Update observation to set self.seen.
-                self.observe(agent)
-
-                # If no unvisited tile is seen in local patch, update nearest target.
-                if not self.seen[agent]:
-                    self.get_nearest_uncleaned(agent)
-                    
-                    old_distance = np.linalg.norm(self.nearest_tile - self.positions[agent])
-                else:
-                    old_distance = None
-
-                # Compute new candidate position.
-                action_cont = self.disc_action_2_continuous[int(action[0])]
-                raw_position = self.positions[agent] + np.clip(action_cont, -1, 1) * self.timestep
-                new_position = np.clip(raw_position, 0, [self.cave_size[0] - 1, self.cave_size[1] - 1])
-                # Check for collision against obstacles.
-                if (not np.array_equal(raw_position, new_position) or 
-                    self.global_map[int(new_position[0]), int(new_position[1])] == self.omv):
-                    rewards[agent] -= 2  # penalty for collision/hitting wall
-                elif self.global_map[int(new_position[0]), int(new_position[1])] == self.res:
-                    if action[1]==0 and agent=='agent_2':  #agent_2 is the excavator 0 for pick 1 for drop
-                        self.resources[agent] += 1
-                        self.global_map[int(new_position[0]), int(new_position[1])] = -1        
-            
-                else:
-                    self.positions[agent] = new_position
-                    if agent == 'agent_2' and action[1] == 1 or agent == 'agent_3' and action[1] == 0:  # agent_2 performing drop action
         
-                        distance_2_to_3 = np.linalg.norm(self.positions['agent_2'] - self.positions['agent_3'])
-                        
-                        if distance_2_to_3 <= 1:  # If they're close enough
-                            # Transfer all resources from agent_2 to agent_3
-                            resources_to_transfer = self.resources['agent_2']
-                            if resources_to_transfer > 0:  # Only transfer if agent_2 has resources
-                                self.resources['agent_3'] += resources_to_transfer
-                                self.resources['agent_2'] = 0
-            
-                    move_cost = np.linalg.norm(action_cont) * self.timestep * 0.05
-                    self.power_levels[agent] -= move_cost
-                    self.energy_consumption_record[agent]['movement_cost'] += move_cost
-                    self.power_levels[agent] = max(0, self.power_levels[agent])
-                    if self.power_levels[agent] <= 0:
-                        continue
+        # --- Exploration Mode ---
+        for agent, action in actions.items():
+            # Check available power.
+            if self.power_levels[agent] <= 0:
+                self.dones[agent] = True
+                continue
 
-                # Exploration update over a 10x10 region.
-                new_resources=0
-                grid_x, grid_y = int(self.positions[agent][0]), int(self.positions[agent][1])
-                new_explorations = 0
-                for i in range(grid_x - self.half, grid_x + self.half):
-                    for j in range(grid_y - self.half, grid_y + self.half):
-                        if 0 <= i < self.cave_size[0] and 0 <= j < self.cave_size[1]:
-                            if self.agent_maps[agent][i, j] == self.unvisited_value:
-                                self.agent_maps[agent][i, j] = -1
-                            if self.global_map[i, j] == self.res:
-                                new_resources += 1
-                                self.agent_maps[agent][i, j] = self.res
-                                # Also update the global map.
-                            if self.global_map[i, j] == self.unvisited_value:
-                                self.global_map[i, j] = -1
-                                new_explorations += 1
-                # Data collection and power cost for exploration sensing.
-                if new_explorations == 0:
-                    rewards[agent] -= 1
-                else:
-                    lidar_cost = 0.025
-                    self.power_levels[agent] -= lidar_cost
-                    self.data_collected[agent] += new_explorations
-                    self.energy_consumption_record[agent]['lidar_working_cost'] += lidar_cost
+            # Movement cost.
+            operating_cost = 0.01
+            self.power_levels[agent] -= operating_cost
+            self.energy_consumption_record[agent]['operating_cost'] += operating_cost
+            self.power_levels[agent] = max(0, self.power_levels[agent])
 
+            # Update observation to set self.seen.
+            self.observe(agent)
 
-                # Deliver data if near base station.
-                if (np.linalg.norm(self.positions[agent] - base_station) <= self.communication_ranges[agent] and 
-                    self.data_collected[agent] > 0):
-                    self.base_info += self.data_collected[agent]
-                    data_delivery_cost = self.data_collected[agent] * 0.01
-                    self.power_levels[agent] -= data_delivery_cost
-                    self.energy_consumption_record[agent]['data_relay_cost'] += data_delivery_cost
-                    self.data_collected[agent] = 0
-                if (np.linalg.norm(self.positions[agent] - base_station <=0.5)) and agent=='agent_3' and action[1]==1:
-                    self.base_resources = self.resources[agent]
-                    self.resources[agent] =0
+            # If no unvisited tile is seen in local patch, update nearest target.
+            if not self.seen[agent]:
+                self.get_nearest_uncleaned(agent)
 
-        elif self.mode == 0:
-            # --- Relay Mode ---
-            for agent, action in actions.items():
-                # Check power.
-                
-                if self.power_levels[agent] <= 0:
-                    self.dones[agent] = True
-                    continue
-
-                operating_cost = 0.01
-                self.power_levels[agent] -= operating_cost
-                self.energy_consumption_record[agent]['operating_cost'] += operating_cost
-                
-                self.power_levels[agent] = max(0, self.power_levels[agent])
-                if self.data_collected[agent] ==0 :
-                    continue
-                self.observe(agent)
-                old_distance = np.linalg.norm(base_station - self.positions[agent])
-                action_cont = self.disc_action_2_continuous[int(action)]
-                raw_position = self.positions[agent] + np.clip(action_cont, -1, 1) * self.timestep
-                new_position = np.clip(raw_position, 0, [self.cave_size[0]-1, self.cave_size[1]-1])
-                if (not np.array_equal(raw_position, new_position) or 
-                    self.obstacles[int(new_position[0]), int(new_position[1])] == self.omv):
-                    rewards[agent] -= 2
+            # Compute new candidate position.
+            action_cont = self.disc_action_2_continuous[int(action[0])]
+            raw_position = self.positions[agent] + np.clip(action_cont, -1, 1) * self.timestep
+            new_position = np.clip(raw_position, 0, [self.cave_size[0] - 1, self.cave_size[1] - 1])
+            # Check for collision against obstacles.
+            if (not np.array_equal(raw_position, new_position) or 
+                self.global_map[int(new_position[0]), int(new_position[1])] == self.omv):
+                rewards[agent] -= 2  # penalty for collision/hitting wall
+            elif self.global_map[int(new_position[0]), int(new_position[1])] == self.res:
+                if action[1]==0 and agent=='agent_2':  #agent_2 is the excavator 0 for pick 1 for drop
+                    self.resources[agent] += 1
+                    self.global_map[int(new_position[0]), int(new_position[1])] = -1        
+        
+            else:
+                self.positions[agent] = new_position
+                if agent == 'agent_2' and action[1] == 1 or agent == 'agent_3' and action[1] == 0:  # agent_2 performing drop action
+    
+                    distance_2_to_3 = np.linalg.norm(self.positions['agent_2'] - self.positions['agent_3'])
                     
-                elif self.global_map[int(new_position[0]), int(new_position[1])] == self.res:
-                    if action[1]==0 and agent=='agent_2':  #agent_2 is the excavator 0 for pick 1 for drop
-                        self.resources[agent] += 1
-                        self.global_map[int(new_position[0]), int(new_position[1])] = -1
-                else:
-                    self.positions[agent] = new_position
-                    self.power_levels[agent] -= np.linalg.norm(action_cont) * self.timestep * 0.05
-                    self.energy_consumption_record[agent]['movement_cost'] += np.linalg.norm(action_cont) * self.timestep * 0.05
-                    self.power_levels[agent] = max(0, self.power_levels[agent])
-                    if self.power_levels[agent] == 0:
-                        continue
+                    if distance_2_to_3 <= 1:  # If they're close enough
+                        # Transfer all resources from agent_2 to agent_3
+                        resources_to_transfer = self.resources['agent_2']
+                        if resources_to_transfer > 0:  # Only transfer if agent_2 has resources
+                            self.resources['agent_3'] += resources_to_transfer
+                            self.resources['agent_2'] = 0
+        
+                move_cost = np.linalg.norm(action_cont) * self.timestep * 0.05
+                self.power_levels[agent] -= move_cost
+                self.energy_consumption_record[agent]['movement_cost'] += move_cost
+                self.power_levels[agent] = max(0, self.power_levels[agent])
+                if self.power_levels[agent] <= 0:
+                    continue
 
-                grid_x, grid_y = int(self.positions[agent][0]), int(self.positions[agent][1])
-                new_explorations = 0
-                new_resources = 0
-                for i in range(grid_x - self.half, grid_x + self.half):
-                    for j in range(grid_y - self.half, grid_y + self.half):
-                        if 0 <= i < self.cave_size[0] and 0 <= j < self.cave_size[1]:
-                            if self.agent_maps[agent][i, j] == self.unvisited_value:
-                                self.agent_maps[agent][i, j] = -1
-                            if self.global_map[i, j] == self.res:
-                                new_resources += 1
-                                self.agent_maps[agent][i, j] = self.res
-                            if self.global_map[i, j] == self.unvisited_value:
-                                    self.global_map[i, j] = -1
-                                    new_explorations += 1
+            # Exploration update over a 10x10 region.
+            new_resources=0
+            grid_x, grid_y = int(self.positions[agent][0]), int(self.positions[agent][1])
+            new_explorations = 0
+            for i in range(grid_x - self.half, grid_x + self.half):
+                for j in range(grid_y - self.half, grid_y + self.half):
+                    if 0 <= i < self.cave_size[0] and 0 <= j < self.cave_size[1]:
+                        if self.agent_maps[agent][i, j] == self.unvisited_value:
+                            self.agent_maps[agent][i, j] = -1
+                        if self.global_map[i, j] == self.res:
+                            new_resources += 1
+                            self.agent_maps[agent][i, j] = self.res
+                            # Also update the global map.
+                        if self.global_map[i, j] == self.unvisited_value:
+                            self.global_map[i, j] = -1
+                            new_explorations += 1
+            # Data collection and power cost for exploration sensing.
+            if new_explorations == 0:
+                rewards[agent] -= 1
+            else:
+                lidar_cost = 0.025
+                self.power_levels[agent] -= lidar_cost
+                self.data_collected[agent] += new_explorations
+                self.energy_consumption_record[agent]['lidar_working_cost'] += lidar_cost
 
-                if new_explorations > 0:
-                    self.power_levels[agent] -= 0.025
-                    self.energy_consumption_record[agent]['lidar_working_cost'] += 0.025
-                    self.data_collected[agent] += new_explorations
+            if (np.linalg.norm(self.positions[agent] - base_station <=0.5)) and agent=='agent_3' and action[1]==1:
+                self.base_resources += self.resources[agent]
+                self.resources[agent] =0
 
-                # Reward for approaching the base station.
-                new_distance = np.linalg.norm(base_station - self.positions[agent])
-                if new_distance < old_distance and self.data_collected[agent] > 0:
-                    rewards[agent] += 0.5
-                else:
-                    rewards[agent] -= 0.05
-
-            # Deliver data for agents near the base.
-            for agent in self.possible_agents:
-                if (np.linalg.norm(self.positions[agent] - base_station) <= self.communication_ranges[agent] and 
-                    self.data_collected[agent] > 0):
-                    rewards[agent] += self.data_collected[agent] * 0.03
-                    self.base_info += self.data_collected[agent]
-                    data_delivery_cost = self.data_collected[agent] * 0.01
-                    self.power_levels[agent] -= data_delivery_cost
-                    self.energy_consumption_record[agent]['data_relay_cost'] += data_delivery_cost
-                    self.data_collected[agent] = 0
-
-            # Relay data among agents in the network.
-            self.update_communication_graph()
-            energy_cost_rate = 0.01
-            relay_reward_rate = 0.001
-            for agent in self.possible_agents:
-                if self.data_collected[agent] > 0:
-                    agent_dist = np.linalg.norm(self.positions[agent] - base_station)
-                    candidates = []
-                    for other_agent in self.possible_agents:
-                        if other_agent != agent:
-                            other_dist = np.linalg.norm(self.positions[other_agent] - base_station)
-                            if other_dist < agent_dist:
-                                path = self.bfs_find_path(agent, other_agent)
-                                if path:
-                                    candidates.append((other_agent, path))
-                    if candidates:
-                        candidate, path = min(candidates,
-                                              key=lambda x: (np.linalg.norm(self.positions[agent] - self.positions[x[0]]),
-                                                             len(x[1])))
-                        for i in range(len(path) - 1):
-                            transmitter = path[i]
-                            receiver = path[i + 1]
-                            info_to_send = self.data_collected[transmitter]
-                            if info_to_send > 0:
-                                max_transfer_tx = self.power_levels[transmitter] / energy_cost_rate
-                                max_transfer_rx = self.power_levels[receiver] / energy_cost_rate
-                                transferable = min(info_to_send, max_transfer_tx, max_transfer_rx)
-                                if transferable <= 0:
-                                    transferable = 0
-                                self.power_levels[transmitter] -= transferable * energy_cost_rate
-                                self.power_levels[receiver] -= transferable * energy_cost_rate
-                                self.energy_consumption_record[transmitter]['data_relay_cost'] += transferable * energy_cost_rate
-                                self.energy_consumption_record[receiver]['data_relay_cost'] += transferable * energy_cost_rate
-                                rewards[transmitter] += relay_reward_rate * transferable
-                                rewards[receiver] += relay_reward_rate * transferable
-                                self.data_collected[transmitter] -= transferable
-                                self.data_collected[receiver] += transferable
-
-            # Final check again for base station delivery.
-            for agent in self.possible_agents:
-                if (np.linalg.norm(self.positions[agent] - base_station) <= self.communication_ranges[agent] and 
-                    self.data_collected[agent] > 0):
-                    rewards[agent] += self.data_collected[agent] * 0.03
-                    self.base_info += self.data_collected[agent]
-                    data_delivery_cost = self.data_collected[agent] * 0.01
-                    self.power_levels[agent] -= data_delivery_cost
-                    self.energy_consumption_record[agent]['data_relay_cost'] += data_delivery_cost
-                    self.data_collected[agent] = 0
+        
 
         # Check for simulation stop conditions.
         if self.step_count >= self.stop:
@@ -479,7 +316,7 @@ class CustomEnvironment(ParallelEnv):
             self.render()
             self.plot_energy_consumption("energy_consumption.png")
         self.merge_agent_maps()
-        self.update_mode()
+        
 
         obs = {agent: self.observe(agent) for agent in self.possible_agents}
         return obs, rewards, self.dones, self.truncs, infos
@@ -493,6 +330,7 @@ class CustomEnvironment(ParallelEnv):
         # print(f"Step {self.step_count}: Exploration Proportion: {self.calculate_exploration_proportion():.2f}")
         # print(f"Info Collected Proportion: {self.calculate_collectedinfo_proportion():.2f}")
         # print(f"Total Score: {self.score:.2f}")
+        self.base_resources = 0
         np.random.seed(30)
         self.step_count = 0
         self.ospro = 0.1
