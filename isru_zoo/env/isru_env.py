@@ -339,9 +339,13 @@ class parallel_env(ParallelEnv):
             if agent in action_dict:
                 # Parse the action.
                 action = spaces.unflatten(self.action_space(agent), action_dict[agent])
+                agent.last_action = action
 
                 # Move the agent.                
                 agent.position += action["movement"].astype(np.int32)
+
+                # Ensure the agent stays within bounds.
+                agent.position = np.clip(agent.position, [0, 0], self.world_dims - 1)
 
                 # Handle the resource actions.
                 # TODO: Implement resource pickup/dropoff using the action["resources"] values.
@@ -375,7 +379,18 @@ class parallel_env(ParallelEnv):
     def get_reward(self, agent, end_truncate, end_done):
         ''' Returns the reward for the given agent. '''
 
-        return 0.0
+        # Provide reward for the agent to be in proximity of (30, 30).
+        target_position = np.array([30, 30], dtype=np.float32)
+        distance = np.linalg.norm(agent.position - target_position)
+        reward = -distance / np.linalg.norm(self.world_dims)  # Normalize by world size.
+
+        # Provide a bonus reward if the resource actions are both 1.
+        if agent.last_action is not None:
+            resource_actions = agent.last_action["resources"]
+            if np.allclose(resource_actions, 1.0, atol=0.1):
+                reward += 1.0
+
+        return reward
 
 
     def _getAvailableActions(self, agent):
