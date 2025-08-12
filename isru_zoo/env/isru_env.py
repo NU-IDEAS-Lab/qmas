@@ -418,47 +418,45 @@ class parallel_env(ParallelEnv):
         # Perform agent actions.
         for agent in self.agents:
             if agent in action_dict:
-                action = action_dict[agent]
+                # Parse the action.
+                action = spaces.unflatten(self.action_space(agent), action_dict[agent])
 
-                # Increment the agent state.                
-                agent.position += action
+                # Move the agent.                
+                agent.position += action["movement"].astype(np.int32)
 
-                self.state_history[agent].append(agent.position.copy())
+                # Handle the resource actions.
+                # TODO: Implement resource pickup/dropoff using the action["resources"] values.
 
-        # Perform adversary actions.
-        for adversary in self.adversaries:
-            self._update_adversary_velocity(adversary)
-            adversary.position += adversary.velocity
-            self.state_history[adversary].append(adversary.position.copy())
+        # Check termination conditions.
+        end_truncate = lastStep or (self.max_cycles >= 0 and self.step_count >= self.max_cycles)
+        end_done = False  # No done conditions for now.
 
-        # Assign per-agent reward based on distance to assigned adversary (by index).
-        for i, agent in enumerate(self.agents):
-            if i < len(self.adversaries):
-                assigned_adv = self.adversaries[i]
-                distance = np.linalg.norm(agent.position - assigned_adv.position)
-                reward_dict[agent] = -distance
-            else:
-                reward_dict[agent] = 0.0  # No assigned adversary
-
-        # Perform observations.
+        # Perform post-step calculations.
         for agent in self.possible_agents:
             agent_observation, obs_mask = self.observe(agent)
             obs_dict[agent] = agent_observation
             info_dict[agent]["visibility_mask"] = obs_mask
 
-        # Check truncation conditions.
-        if lastStep or (self.max_cycles >= 0 and self.step_count >= self.max_cycles):
+            # Get the reward for the agent.
+            reward_dict[agent] = self.get_reward(agent, end_truncate, end_done)
+
+        # Handle end of episode.
+        if end_truncate or end_done:
             for agent in self.agents:
-                info_dict[agent]["ready"] = True
+                info_dict[agent.id]["ready"] = True
                 truncated_dict[agent] = True
             self.agents = []
         
-        done_dict = {agent: self.dones[agent] for agent in self.possible_agents}
-
         # Set available actions.
         self.available_actions_dict = {agent: self._getAvailableActions(agent) for agent in self.possible_agents}
 
-        return obs_dict, reward_dict, done_dict, truncated_dict, info_dict
+        return obs_dict, reward_dict, self.dones, truncated_dict, info_dict
+
+
+    def get_reward(self, agent, end_truncate, end_done):
+        ''' Returns the reward for the given agent. '''
+        
+        return 0.0
 
 
     def _getAvailableActions(self, agent):
