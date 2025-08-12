@@ -403,7 +403,7 @@ class parallel_env(ParallelEnv):
         ''' Returns the reward for the given agent. '''
 
         # Provide reward for the agent to be in proximity of (30, 30).
-        target_position = np.array([0, 0], dtype=np.float32)
+        target_position = np.array([2, 2], dtype=np.float32)
         distance = np.linalg.norm(agent.position - target_position)
         reward = -distance
 
