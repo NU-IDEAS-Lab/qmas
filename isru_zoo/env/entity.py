@@ -68,6 +68,12 @@ class Entity():
         self._velocity = vel
     
 
+    @property
+    def id(self):
+        ''' Returns the entity ID. '''
+        return self.entity_id
+    
+
     def __repr__(self):
         ''' Returns a string representation of the entity. '''
         return self.name
