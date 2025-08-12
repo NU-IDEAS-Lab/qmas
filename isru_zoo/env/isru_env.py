@@ -443,7 +443,7 @@ class parallel_env(ParallelEnv):
         # Handle end of episode.
         if end_truncate or end_done:
             for agent in self.agents:
-                info_dict[agent.id]["ready"] = True
+                info_dict[agent]["ready"] = True
                 truncated_dict[agent] = True
             self.agents = []
         
@@ -455,7 +455,7 @@ class parallel_env(ParallelEnv):
 
     def get_reward(self, agent, end_truncate, end_done):
         ''' Returns the reward for the given agent. '''
-        
+
         return 0.0
 
 
