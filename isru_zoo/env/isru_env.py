@@ -20,6 +20,8 @@ def add_args(parser):
                         help="The number of obstacles to place in the world.")
     parser.add_argument("--world_size", type=int, default=50,
                         help="The size of the world. The world is a square with side length `world_size`.")
+    parser.add_argument("--observation_radius", type=int, default=10,
+                        help="The radius within which agents can observe each other and resources.")
     parser.add_argument("--render_mode", type=str, default="human",
                         choices=parallel_env.metadata["render_modes"],
                         help="The rendering mode for the environment.")
@@ -53,8 +55,9 @@ class parallel_env(ParallelEnv):
     def __init__(self,
             num_agents = 1,
             max_cycles: int = -1,
-            world_size: int = 50,
             num_obstacles: int = 10,
+            world_size: int = 50,
+            observation_radius: int = 10,
             render_mode: str = "human",
         ):
         """
@@ -67,11 +70,13 @@ class parallel_env(ParallelEnv):
         self.world_dims = np.array([world_size, world_size], dtype=np.int32)
         self.num_obstacles = num_obstacles
         self.render_mode = render_mode
+        self.default_observation_radius = observation_radius
 
         # Set up entities.
         self.possible_agents = [
             Agent(
                 position=self.get_random_position(),
+                observation_radius=self.default_observation_radius,
             ) for i in range(num_agents)
         ]
 
@@ -144,7 +149,7 @@ class parallel_env(ParallelEnv):
             for _ in range(r.quantity):
                 idx = np.random.randint(positions_available.shape[0])
                 pos = positions_available[idx]
-                self.map_resources[r][*pos] += 1.0
+                self.map_resources[r][pos[0], pos[1]] += 1.0
 
         # Reset other state.
         self.step_count = 0
@@ -265,6 +270,9 @@ class parallel_env(ParallelEnv):
             # The agent can only move one space at a time.
             "movement": spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32),
 
+            # Communication is a simple boolean flag.
+            "communication": spaces.Box(low=0, high=1, shape=(1,), dtype=np.int32),
+
             # Resource actions are represented as a floating point value for each resource type.
             # To pick up resources, the agent uses a positive number.
             # To drop resources, the agent uses a negative number.
@@ -329,8 +337,16 @@ class parallel_env(ParallelEnv):
 
         obs_mask = {
             "id": True,
-            "map": np.ones_like(map_combined, dtype=bool)
+            "map": np.ones(self.world_dims, dtype=bool)
         }
+
+        # Set everything outside the observation radius to be invisible.
+        if not force_visible:
+            radius = agent.observation_radius
+            pos = agent.position.astype(np.int32)
+            obs_mask["map"] = np.zeros(self.world_dims, dtype=bool)
+            obs_mask["map"][max(0, pos[0] - radius):min(self.world_dims[0], pos[0] + radius + 1),
+                            max(0, pos[1] - radius):min(self.world_dims[1], pos[1] + radius + 1)] = True
         
         return obs, obs_mask
     
