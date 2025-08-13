@@ -22,9 +22,9 @@ def add_args(parser):
     ''' Adds environment arguments. '''
     
     import argparse
-    parser.add_argument("--num_obstacles", type=int, default=0,
+    parser.add_argument("--num_obstacles", type=int, default=20,
                         help="The number of obstacles to place in the world.")
-    parser.add_argument("--world_size", type=int, default=5,
+    parser.add_argument("--world_size", type=int, default=50,
                         help="The size of the world. The world is a square with side length `world_size`.")
     
 
@@ -110,21 +110,15 @@ class parallel_env(ParallelEnv):
         # Create the state space.
         # The state space is a complete observation of the environment.
         # This is not part of the standard PettingZoo API, but is useful for centralized training.
-        # self.state_space = spaces.Dict({
-        #     "id": spaces.Discrete(len(self.possible_agents)),
-        #     "map": spaces.Box(
-        #         low=-np.inf,
-        #         high=np.inf,
-        #         shape=(*self.world_dims, num_layers),
-        #         dtype=np.float32
-        #     )
-        # })
-        self.state_space = spaces.Box(
-            low=-np.inf,
-            high=np.inf,
-            shape=(*self.world_dims, num_layers),
-            dtype=np.float32
-        )
+        self.state_space = spaces.Dict({
+            "id": spaces.Discrete(len(self.possible_agents)),
+            "map": spaces.Box(
+                low=-np.inf,
+                high=np.inf,
+                shape=(*self.world_dims, num_layers),
+                dtype=np.float32
+            )
+        })
 
         # Set up observation spaces. These are just the state space.
         obs_space = self.state_space
@@ -176,7 +170,7 @@ class parallel_env(ParallelEnv):
             for _ in range(r.quantity):
                 idx = np.random.randint(positions_available.shape[0])
                 pos = positions_available[idx]
-                self.map_resources[r][pos[0], pos[1]] += 1.0
+                self.map_resources[r][pos] += 1.0
 
         # Reset other state.
         self.step_count = 0
@@ -224,10 +218,9 @@ class parallel_env(ParallelEnv):
             p = spaces.unflatten(self.observation_spaces, pred[i].flatten())
             pred_unflattened.append(p)
 
-        # Get the true environment state.
-        state = self.state()
+        # print(f"Prediction: {pred}")
 
-        # Plot state as a grid using matplotlib.
+        # Plot as a line graph using matplotlib.
         plt.figure(figsize=figsize)
 
         # Plot the map layers.
@@ -306,22 +299,63 @@ class parallel_env(ParallelEnv):
         map_combined = np.stack(layers, axis=-1)
 
         # Create the observation.
-        # obs = {
-        #     "id": self.possible_agents.index(agent),
-        #     "map": map_combined
-        # }
-        obs = map_combined
+        obs = {
+            "id": self.possible_agents.index(agent),
+            "map": map_combined
+        }
 
-        # Create the observation visibility mask.
-        # obs_mask = {
-        #     "id": True,
-        #     "map": np.ones_like(map_combined, dtype=bool)
-        # }
-        obs_mask = np.ones_like(map_combined, dtype=bool)
+        obs_mask = {
+            "id": True,
+            "map": np.ones_like(map_combined, dtype=bool)
+        }
         
+        # # Create a visibility mask for the agents.
+        # def visible(entity):
+        #     if force_visible:
+        #         return True
+        #     if entity == agent:
+        #         return True
+        #     if random.random() < self.observation_probability:
+        #         return True
+        #     return False
+        # obs_mask = {
+        #     "adversaries": {},
+        #     "agents": {},
+        #     "id": True
+        # }
+        # for a in self.possible_adversaries:
+        #     vis = visible(a)
+        #     obs_mask["adversaries"][a] = {
+        #         "position": np.array([vis] * self.num_dimensions, dtype=bool),
+        #         "velocity": np.array([vis] * self.num_dimensions, dtype=bool),
+        #     }
+        # for a in self.possible_agents:
+        #     vis = visible(a)
+        #     obs_mask["agents"][a] = {
+        #         "position": np.array([vis] * self.num_dimensions, dtype=bool),
+        #         "velocity": np.array([vis] * self.num_dimensions, dtype=bool),
+        #     }
+
         return obs, obs_mask
     
+    def _update_adversary_velocity(self, adversary):
+        """
+        Update velocity based on the step count to create a more complex pattern.
+        This function creates a time-varying velocity that follows different patterns.
+        """
+        if random.random() < 0.3:
+            # Randomly change velocity to create a new pattern
+            adversary.velocity += np.random.normal(0, 0.3, size=self.num_dimensions)
+                
+        # # Add some random noise to make the trajectory more natural
+        noise_magnitude = 0.05 * min(1.0, self.step_count / 50.0)  # Gradually increase noise
+        adversary.velocity += np.random.normal(0, noise_magnitude, size=self.num_dimensions)
 
+        # Normalize velocity to keep it within a reasonable range.
+        norm = np.linalg.norm(adversary.velocity)
+        if norm > 1.0:
+            adversary.velocity = adversary.velocity / norm
+                
     def step(self, action_dict={}, lastStep=False):
         ''''
         Perform a step in the environment based on the given action dictionary.
@@ -425,6 +459,5 @@ class parallel_env(ParallelEnv):
 
     def _getAvailableActions(self, agent):
         ''' Returns the available actions for the given agent. '''
-
 
         return None

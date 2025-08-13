@@ -79,6 +79,7 @@ class Entity():
         return self.name
 
 
+
 class Agent(Entity):
     ''' This base class stores all generic agent state. '''
 
@@ -87,10 +88,38 @@ class Agent(Entity):
     def __init__(self, *args, speed_max = 1.0, **kwargs):
         super().__init__(*args, **kwargs)
         self.speed_max = speed_max
-
+        # Ensure all agents have a capabilities dict by default
+        self.capabilities = {}
 
     def reset(self, *args, **kwargs):
         super().reset(*args, **kwargs)
+
+
+# --- New agent Type subclasses ---
+class Prospector(Agent):
+    """Prospector: observe resources.
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.role = "prospector"
+        # Defaults specific to prospector
+        self.capabilities.update({"see_resources": True})
+
+
+class Extractor(Agent):
+    """Extractor: excavates resources."""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.role = "extractor"
+        self.capabilities.update({"excavate": True})
+
+
+class Hauler(Agent):
+    """Hauler: transports resources to depots."""
+    def __init__(self, *args, carry_capacity=1.0, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.role = "hauler"
+        self.capabilities.update({"carry": True, "carry_capacity": carry_capacity})
 
 
 class Depot(Entity):
