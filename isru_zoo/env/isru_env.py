@@ -309,33 +309,6 @@ class parallel_env(ParallelEnv):
             "map": np.ones_like(map_combined, dtype=bool)
         }
         
-        # # Create a visibility mask for the agents.
-        # def visible(entity):
-        #     if force_visible:
-        #         return True
-        #     if entity == agent:
-        #         return True
-        #     if random.random() < self.observation_probability:
-        #         return True
-        #     return False
-        # obs_mask = {
-        #     "adversaries": {},
-        #     "agents": {},
-        #     "id": True
-        # }
-        # for a in self.possible_adversaries:
-        #     vis = visible(a)
-        #     obs_mask["adversaries"][a] = {
-        #         "position": np.array([vis] * self.num_dimensions, dtype=bool),
-        #         "velocity": np.array([vis] * self.num_dimensions, dtype=bool),
-        #     }
-        # for a in self.possible_agents:
-        #     vis = visible(a)
-        #     obs_mask["agents"][a] = {
-        #         "position": np.array([vis] * self.num_dimensions, dtype=bool),
-        #         "velocity": np.array([vis] * self.num_dimensions, dtype=bool),
-        #     }
-
         return obs, obs_mask
     
     def _update_adversary_velocity(self, adversary):
