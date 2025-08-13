@@ -24,7 +24,7 @@ def add_args(parser):
     import argparse
     parser.add_argument("--num_obstacles", type=int, default=0,
                         help="The number of obstacles to place in the world.")
-    parser.add_argument("--world_size", type=float, default=5.0,
+    parser.add_argument("--world_size", type=int, default=5,
                         help="The size of the world. The world is a square with side length `world_size`.")
     
 
@@ -56,7 +56,7 @@ class parallel_env(ParallelEnv):
     def __init__(self,
                  num_agents = 1,
                  max_cycles: int = -1,
-                 world_size: float = 50.0,
+                 world_size: int = 50,
                  num_obstacles: int = 10,
                 ):
         """
@@ -231,13 +231,16 @@ class parallel_env(ParallelEnv):
         plt.figure(figsize=figsize)
 
         # Plot the map layers.
-        map_layers = state
+        map_layers = state["map"]
         num_layers = map_layers.shape[-1]
         for i in range(num_layers):
             plt.subplot(1, num_layers, i + 1)
             plt.imshow(map_layers[:, :, i], cmap="gray", origin="lower")
             plt.title(f"Layer {i}")
             plt.axis("off")
+        
+        # Display the total reward for this step. Position this text below the subplots. Do not use suptitle.
+        plt.figtext(0.5, 0.01, f"Step: {self.step_count}, Total Reward: {sum([self.get_reward(agent, False, False) for agent in self.agents]):.2f}", ha="center", fontsize=8)
 
 
         # Show the plot.
@@ -295,7 +298,8 @@ class parallel_env(ParallelEnv):
         # Load agent data into a map.
         map_agents = np.zeros(self.world_dims, dtype=np.int32)
         for i, a in enumerate(self.agents):
-            map_agents[a.position[0], a.position[1]] = i + 1  # Start from 1 to avoid confusion with empty space.
+            pos = a.position.astype(np.int32)
+            map_agents[pos[0], pos[1]] = i + 1  # Start from 1 to avoid confusion with empty space.
 
         # Build the combined map.
         layers = [self.map_obstacles, map_agents, self.map_depots, *self.map_resources.values()]
@@ -351,26 +355,29 @@ class parallel_env(ParallelEnv):
 
                 # Set agent velocity.
                 agent.velocity = action["movement"].astype(np.int32)
-                agent.velocity = np.clip(agent.velocity, -1, 1)
+                agent.velocity = np.clip(agent.velocity, -1.0, 1.0)
 
                 # Move the agent.
                 raw_position=agent.position + agent.velocity
-                new_position = np.clip(raw_position, 0, [self.world_dims[0] - 1, self.world_dims[1] - 1])
-                if self.map_obstacles[new_position[0], new_position[1]] == 0:
+                pos_min = np.array([0.0, 0.0], dtype=np.float32)
+                pos_max = self.world_dims.astype(np.float32) - 1.0
+                new_position = np.clip(raw_position, pos_min, pos_max)
+                new_position_int = new_position.astype(np.int32)
+                if self.map_obstacles[new_position_int[0], new_position_int[1]] == 0:
                     agent.position = new_position
                 # Handle the resource actions.
                 # TODO: Implement resource pickup/dropoff using the action["resources"] values.
-                for r in self.map_resources.keys():
-                    if self.map_resources[r][*agent.position]==1 and isinstance(agent, Extractor):
-                        if action['resources']==0:
-                            agent.resources[r]+=1
-                            self.map_resources[r][*agent.position]=0
+                # for r in self.map_resources.keys():
+                #     if self.map_resources[r][agent.position[0], agent.position[1]]==1 and isinstance(agent, Extractor):
+                #         if action['resources']==0:
+                #             agent.resources[r]+=1
+                #             self.map_resources[r][agent.position[0], agent.position[1]]=0
                 
-                for depot in self.possible_depots: 
-                    if self.map_depots[*agent.position]==depot.resource_id and isinstance(agent, Hauler):
-                        if action['resources']==1:
-                            depot.resources[depot.resource_id]=agent.resources[depot.resource_id]
-                            agent.resources[depot.resource_id]=0
+                # for depot in self.possible_depots: 
+                #     if self.map_depots[agent.position[0], agent.position[1]]==depot.resource_id and isinstance(agent, Hauler):
+                #         if action['resources']==1:
+                #             depot.resources[depot.resource_id]=agent.resources[depot.resource_id]
+                #             agent.resources[depot.resource_id]=0
 
 
         # Check termination conditions.
