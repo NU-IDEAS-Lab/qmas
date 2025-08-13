@@ -11,19 +11,22 @@ from onpolicy.utils.util import flatten_mask
 class PettingzooEnv(object):
     ''' Wrapper to make Pettingzoo environments compatible with the onpolicy algorithms. '''
 
-    def __init__(self, environment_class, args):
+    def __init__(self, environment_class, args, rank=0):
         self.args = args
         self.num_agents = args.num_agents
         
         if "args" in environment_class.__init__.__code__.co_varnames:
-            print("PettingzooEnv: Attempting to pass argparse namespace directly to environment.")
+            if rank == 0:
+                print("PettingzooEnv: Attempting to pass argparse namespace directly to environment.")
             self.env = environment_class(
                 args=args
             )
         else:
-            print("PettingzooEnv: Attempting to pass unpacked argparse namespace to environment.")
+            if rank == 0:
+                print("PettingzooEnv: Attempting to pass unpacked argparse namespace to environment.")
             args_dict = self._get_matching_arg_dict(environment_class.__init__, vars(args))
-            print(f"PettingzooEnv: Passing the following arguments to the environment: {args_dict}")
+            if rank == 0:
+                print(f"PettingzooEnv: Passing the following arguments to the environment: {args_dict}")
             self.env = environment_class(
                 **args_dict
             )

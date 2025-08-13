@@ -1,18 +1,12 @@
 from pettingzoo import ParallelEnv
 from pettingzoo.utils import parallel_to_aec
 
-import os
+import functools
 from gymnasium import spaces
 import random
 import numpy as np
-import math
-from copy import deepcopy
 from matplotlib import pyplot as plt
-import networkx as nx
 from copy import copy
-from enum import IntEnum
-from torch_geometric.utils.convert import from_networkx
-from torch_geometric.data import Data
 
 from isru_zoo.env.entity import ENTITY_TYPE, Agent, Depot
 from isru_zoo.env.resource import TestResource1, TestResource2
@@ -24,8 +18,11 @@ def add_args(parser):
     import argparse
     parser.add_argument("--num_obstacles", type=int, default=20,
                         help="The number of obstacles to place in the world.")
-    parser.add_argument("--world_size", type=float, default=50.0,
+    parser.add_argument("--world_size", type=int, default=50,
                         help="The size of the world. The world is a square with side length `world_size`.")
+    parser.add_argument("--render_mode", type=str, default="human",
+                        choices=parallel_env.metadata["render_modes"],
+                        help="The rendering mode for the environment.")
     
 
 
@@ -54,11 +51,12 @@ class parallel_env(ParallelEnv):
 
 
     def __init__(self,
-                 num_agents = 1,
-                 max_cycles: int = -1,
-                 world_size: float = 50.0,
-                 num_obstacles: int = 10,
-                ):
+            num_agents = 1,
+            max_cycles: int = -1,
+            world_size: int = 50,
+            num_obstacles: int = 10,
+            render_mode: str = "human",
+        ):
         """
         Initialize the environment.
         """
@@ -68,6 +66,7 @@ class parallel_env(ParallelEnv):
         self.max_cycles = max_cycles
         self.world_dims = np.array([world_size, world_size], dtype=np.int32)
         self.num_obstacles = num_obstacles
+        self.render_mode = render_mode
 
         # Set up entities.
         self.possible_agents = [
@@ -90,40 +89,15 @@ class parallel_env(ParallelEnv):
             ) for r in self.possible_resources
         ]
 
-        # Create the action space.
-        action_space = spaces.Dict({
-            # Movement is specified by relative motion in two dimensions.
-            # The agent can only move one space at a time.
-            "movement": spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32),
-
-            # Resource actions are represented as a floating point value for each resource type.
-            # To pick up resources, the agent uses a positive number.
-            # To drop resources, the agent uses a negative number.
-            "resources": spaces.Box(low=-np.inf, high=np.inf, shape=(len(self.possible_resources),), dtype=np.float32),
+        # Set up spaces.
+        self.observation_spaces = spaces.Dict({
+            agent: self.observation_space(agent) for agent in self.possible_agents
         })
-        self.action_spaces = spaces.Dict({agent: action_space for agent in self.possible_agents}) # type: ignore
+        self.action_spaces = spaces.Dict({
+            agent: self.action_space(agent) for agent in self.possible_agents
+        })
         
-        # Determine number of layers in the map.
-        # Layers are: obstacles, agents, depots, resources.
-        num_layers = 1 + 1 + 1 + len(self.possible_resources)
-
-        # Create the state space.
-        # The state space is a complete observation of the environment.
-        # This is not part of the standard PettingZoo API, but is useful for centralized training.
-        self.state_space = spaces.Dict({
-            "id": spaces.Discrete(len(self.possible_agents)),
-            "map": spaces.Box(
-                low=-np.inf,
-                high=np.inf,
-                shape=(*self.world_dims, num_layers),
-                dtype=np.float32
-            )
-        })
-
-        # Set up observation spaces. These are just the state space.
-        obs_space = self.state_space
-        self.observation_spaces = spaces.Dict({agent: obs_space for agent in self.possible_agents}) # type: ignore
-
+        # Reset the environment.
         self.reset()
 
 
@@ -218,75 +192,87 @@ class parallel_env(ParallelEnv):
             p = spaces.unflatten(self.observation_spaces, pred[i].flatten())
             pred_unflattened.append(p)
 
-        # print(f"Prediction: {pred}")
+        # Get the true environment state.
+        state = self.state()
 
-        # Plot as a line graph using matplotlib.
+        # Plot state as a grid using matplotlib.
         plt.figure(figsize=figsize)
 
-        # Set the axis limits.
-        plt.xlim(-self.world_dims[0], self.world_dims[0])
-        plt.ylim(-self.world_dims[1], self.world_dims[1])
-        plt.gca().set_aspect('equal', adjustable='box')
-        plt.axhline(0, color='black', lw=0.5)
-        plt.axvline(0, color='black', lw=0.5)
-        plt.title("2D Leader-Follower Environment")
-        plt.grid()
+        # Plot the map layers.
+        map_layers = state["map"]
+        num_layers = map_layers.shape[-1]
+        for i in range(num_layers):
+            plt.subplot(1, num_layers, i + 1)
+            plt.imshow(map_layers[:, :, i], cmap="gray", origin="lower")
+            plt.title(f"Layer {i}")
+            plt.axis("off")
         
-        # Plot the agent positions.
-        positions = [a.position for a in self.possible_agents]
-        plt.plot([p[0] for p in positions], [p[1] for p in positions], 'bo', label='Followers')
-        for i, agent in enumerate(self.agents):
-            plt.annotate(f"{agent}", (positions[i][0] + 1, positions[i][1]), fontsize=8, color='blue')
+        # Display the total reward for this step. Position this text below the subplots. Do not use suptitle.
+        plt.figtext(0.5, 0.01, f"Step: {self.step_count}, Total Reward: {sum([self.get_reward(agent, False, False) for agent in self.agents]):.2f}", ha="center", fontsize=8)
 
-            # Plot actual history for the agent.
-            history = self.state_history[agent]
-            plt.plot([h[0] for h in history], [h[1] for h in history], 'b', alpha=0.5, linewidth=0.5, label=f"{agent} actual")            
-        
-        # Plot the adversary positions.
-        positions = [a.position for a in self.possible_adversaries]
-        plt.plot([p[0] for p in positions], [p[1] for p in positions], 'ro', label='Leaders')
-        for i, adversary in enumerate(self.adversaries):
-            plt.annotate(f"{adversary}", (positions[i][0] + 1, positions[i][1]), fontsize=8, color='red')        
+        if self.render_mode == "human":
+            # Show the plot.
+            plt.show()
+            return None
+        elif self.render_mode == "rgb_array":
+            # Save the plot to a buffer and return it as an RGB array.
+            from io import BytesIO
+            io_buf = BytesIO()
+            plt.savefig(io_buf, format='raw')
+            io_buf.seek(0)
+            img_arr = np.reshape(np.frombuffer(io_buf.getvalue(), dtype=np.uint8),
+                                newshape=(int(plt.bbox.bounds[3]), int(plt.bbox.bounds[2]), -1))
+            io_buf.close()
+            plt.close()
+            return img_arr
 
-            # Plot actual history for the adversary.
-            history = self.state_history[adversary]
-            plt.plot([h[0] for h in history], [h[1] for h in history], 'r', alpha=0.5, linewidth=0.5, label=f"{adversary} actual")
+    @property
+    @functools.cache
+    def state_space(self):
+        ''' Returns the state space of the environment. '''
 
+        # Determine number of layers in the map.
+        # Layers are: obstacles, agents, depots, resources.
+        num_layers = 1 + 1 + 1 + len(self.possible_resources)
 
-        # Plot history of predictions from the perspective of agent 0.
-        if len(pred_unflattened) > 0:
-            agent_preds = [pred_unflattened[i][self.possible_agents[0]]["agents"] for i in range(len(pred_unflattened))]
-            for i, agent in enumerate(self.possible_agents):
-                # Get the history of predictions for this agent.
-                history = [p[agent]["position"] for p in agent_preds]
-                plt.plot([h[0] for h in history], [h[1] for h in history], 'b--', alpha=0.5, linewidth=1.5)            
-                plt.annotate(f"Pred {agent}", (history[-1][0] + 1, history[-1][1]), fontsize=8, color='blue')
-            
-            adversary_preds = [pred_unflattened[i][self.possible_agents[0]]["adversaries"] for i in range(len(pred_unflattened))]
-            for i, adversary in enumerate(self.possible_adversaries):
-                # Get the history of predictions for this adversary.
-                history = [p[adversary]["position"] for p in adversary_preds]
-                plt.plot([h[0] for h in history], [h[1] for h in history], 'r--', alpha=0.5, linewidth=1.5)            
-                plt.annotate(f"Pred {adversary}", (history[-1][0] + 1, history[-1][1]), fontsize=8, color='red')
-
-        # Add legend outside the plot.
-        plt.legend(loc='upper left', bbox_to_anchor=(1, 1), fontsize=8)
-        plt.tight_layout()
-
-        # Show the plot.
-        plt.show()      
+        # Create the state space.
+        # The state space is a complete observation of the environment.
+        # This is not part of the standard PettingZoo API, but is useful for centralized training.
+        return spaces.Dict({
+            "id": spaces.Discrete(len(self.possible_agents)),
+            "map": spaces.Box(
+                low=-np.inf,
+                high=np.inf,
+                shape=(*self.world_dims, num_layers),
+                dtype=np.float32
+            )
+        })
 
 
+    @functools.cache
     def observation_space(self, agent):
         ''' Returns the observation space for the given agent. '''
-        return self.observation_spaces[agent]
+
+        return self.state_space
 
 
+    @functools.cache
     def action_space(self, agent):
         ''' Returns the action space for the given agent. '''
-        return self.action_spaces[agent]
+        
+        return spaces.Dict({
+            # Movement is specified by relative motion in two dimensions.
+            # The agent can only move one space at a time.
+            "movement": spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32),
+
+            # Resource actions are represented as a floating point value for each resource type.
+            # To pick up resources, the agent uses a positive number.
+            # To drop resources, the agent uses a negative number.
+            "resources": spaces.Box(low=-np.inf, high=np.inf, shape=(len(self.possible_resources),), dtype=np.float32),
+        })
 
 
+    @functools.cache
     def available_actions_space(self, agent):
         ''' Generate a Space for the available actions, given the action space. '''
 
@@ -327,7 +313,9 @@ class parallel_env(ParallelEnv):
 
         # Load agent data into a map.
         map_agents = np.zeros(self.world_dims, dtype=np.int32)
-        # TODO: Insert agents/entities at their positions.
+        for i, a in enumerate(self.agents):
+            pos = a.position.astype(np.int32)
+            map_agents[pos[0], pos[1]] = i + 1  # Start from 1 to avoid confusion with empty space.
 
         # Build the combined map.
         layers = [self.map_obstacles, map_agents, self.map_depots, *self.map_resources.values()]
@@ -344,33 +332,6 @@ class parallel_env(ParallelEnv):
             "map": np.ones_like(map_combined, dtype=bool)
         }
         
-        # # Create a visibility mask for the agents.
-        # def visible(entity):
-        #     if force_visible:
-        #         return True
-        #     if entity == agent:
-        #         return True
-        #     if random.random() < self.observation_probability:
-        #         return True
-        #     return False
-        # obs_mask = {
-        #     "adversaries": {},
-        #     "agents": {},
-        #     "id": True
-        # }
-        # for a in self.possible_adversaries:
-        #     vis = visible(a)
-        #     obs_mask["adversaries"][a] = {
-        #         "position": np.array([vis] * self.num_dimensions, dtype=bool),
-        #         "velocity": np.array([vis] * self.num_dimensions, dtype=bool),
-        #     }
-        # for a in self.possible_agents:
-        #     vis = visible(a)
-        #     obs_mask["agents"][a] = {
-        #         "position": np.array([vis] * self.num_dimensions, dtype=bool),
-        #         "velocity": np.array([vis] * self.num_dimensions, dtype=bool),
-        #     }
-
         return obs, obs_mask
     
     def _update_adversary_velocity(self, adversary):
@@ -420,25 +381,34 @@ class parallel_env(ParallelEnv):
             if agent in action_dict:
                 # Parse the action.
                 action = spaces.unflatten(self.action_space(agent), action_dict[agent])
+                agent.last_action = action
 
-                # Move the agent.                
-                raw_position=agent.position + action["movement"].astype(np.int32)
-                new_position = np.clip(raw_position, 0, [self.world_dims[0] - 1, self.world_dims[1] - 1])
-                if self.map_obstacles[new_position[0], new_position[1]] == 0:
+                # Set agent velocity.
+                agent.velocity = action["movement"].astype(np.int32)
+                agent.velocity = np.clip(agent.velocity, -1.0, 1.0)
+
+                # Move the agent.
+                raw_position=agent.position + agent.velocity
+                pos_min = np.array([0.0, 0.0], dtype=np.float32)
+                pos_max = self.world_dims.astype(np.float32) - 1.0
+                new_position = np.clip(raw_position, pos_min, pos_max)
+                new_position_int = new_position.astype(np.int32)
+                if self.map_obstacles[new_position_int[0], new_position_int[1]] == 0:
                     agent.position = new_position
                 # Handle the resource actions.
                 # TODO: Implement resource pickup/dropoff using the action["resources"] values.
-                for r in self.map_resources.keys():
-                    if self.map_resources[r][*agent.position]==1 and isinstance(agent, Extractor):
-                        if action['resources']==0:
-                            agent.resources[r]+=1
-                            self.map_resources[r][*agent.position]=0
+                # for r in self.map_resources.keys():
+                #     if self.map_resources[r][agent.position[0], agent.position[1]]==1 and isinstance(agent, Extractor):
+                #         if action['resources']==0:
+                #             agent.resources[r]+=1
+                #             self.map_resources[r][agent.position[0], agent.position[1]]=0
                 
-                for depot in self.possible_depots: 
-                    if self.map_depots[*agent.position]==depot.resource_id and isinstance(agent, Hauler):
-                        if action['resources']==1:
-                            depot.resources[depot.resource_id]=agent.resources[depot.resource_id]
-                            agent.resources[depot.resource_id]=0
+                # for depot in self.possible_depots: 
+                #     if self.map_depots[agent.position[0], agent.position[1]]==depot.resource_id and isinstance(agent, Hauler):
+                #         if action['resources']==1:
+                #             depot.resources[depot.resource_id]=agent.resources[depot.resource_id]
+                #             agent.resources[depot.resource_id]=0
+
 
         # Check termination conditions.
         end_truncate = lastStep or (self.max_cycles >= 0 and self.step_count >= self.max_cycles)
@@ -469,7 +439,18 @@ class parallel_env(ParallelEnv):
     def get_reward(self, agent, end_truncate, end_done):
         ''' Returns the reward for the given agent. '''
 
-        return 0.0
+        # Provide reward for the agent to be in proximity of (30, 30).
+        target_position = np.array([2, 2], dtype=np.float32)
+        distance = np.linalg.norm(agent.position - target_position)
+        reward = -distance
+
+        # Provide a bonus reward if the resource actions are both 1.
+        # if agent.last_action is not None:
+        #     resource_actions = agent.last_action["resources"]
+        #     if np.allclose(resource_actions, 1.0, atol=0.1):
+        #         reward += 1.0
+
+        return reward
 
 
     def _getAvailableActions(self, agent):
