@@ -95,8 +95,6 @@ class PettingzooRunner(Runner):
                 self.log_env(self.env_infos, total_num_steps)
                 self.env_infos = defaultdict(list)
 
-            if episode == 0:
-                print("\n\n\nTraining Progress:") #give some space for the progress bar
             progress_bar.set_postfix({
                 "exp": self.experiment_name,
                 "timesteps": f"{total_num_steps}/{self.num_env_steps}",
