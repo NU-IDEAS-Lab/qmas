@@ -20,6 +20,9 @@ def add_args(parser):
                         help="The number of obstacles to place in the world.")
     parser.add_argument("--world_size", type=int, default=50,
                         help="The size of the world. The world is a square with side length `world_size`.")
+    parser.add_argument("--render_mode", type=str, default="human",
+                        choices=parallel_env.metadata["render_modes"],
+                        help="The rendering mode for the environment.")
     
 
 
@@ -48,11 +51,12 @@ class parallel_env(ParallelEnv):
 
 
     def __init__(self,
-                 num_agents = 1,
-                 max_cycles: int = -1,
-                 world_size: int = 50,
-                 num_obstacles: int = 10,
-                ):
+            num_agents = 1,
+            max_cycles: int = -1,
+            world_size: int = 50,
+            num_obstacles: int = 10,
+            render_mode: str = "human",
+        ):
         """
         Initialize the environment.
         """
@@ -62,6 +66,7 @@ class parallel_env(ParallelEnv):
         self.max_cycles = max_cycles
         self.world_dims = np.array([world_size, world_size], dtype=np.int32)
         self.num_obstacles = num_obstacles
+        self.render_mode = render_mode
 
         # Set up entities.
         self.possible_agents = [
@@ -205,10 +210,21 @@ class parallel_env(ParallelEnv):
         # Display the total reward for this step. Position this text below the subplots. Do not use suptitle.
         plt.figtext(0.5, 0.01, f"Step: {self.step_count}, Total Reward: {sum([self.get_reward(agent, False, False) for agent in self.agents]):.2f}", ha="center", fontsize=8)
 
-
-        # Show the plot.
-        plt.show()      
-
+        if self.render_mode == "human":
+            # Show the plot.
+            plt.show()
+            return None
+        elif self.render_mode == "rgb_array":
+            # Save the plot to a buffer and return it as an RGB array.
+            from io import BytesIO
+            io_buf = BytesIO()
+            plt.savefig(io_buf, format='raw')
+            io_buf.seek(0)
+            img_arr = np.reshape(np.frombuffer(io_buf.getvalue(), dtype=np.uint8),
+                                newshape=(int(plt.bbox.bounds[3]), int(plt.bbox.bounds[2]), -1))
+            io_buf.close()
+            plt.close()
+            return img_arr
 
     @property
     @functools.cache
