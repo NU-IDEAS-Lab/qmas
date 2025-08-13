@@ -68,7 +68,7 @@ def make_train_env(all_args):
 
     def get_env_fn(rank):
         def init_env():
-            env = PettingzooEnv(env_class, all_args)
+            env = PettingzooEnv(env_class, all_args, rank)
             env.seed(all_args.seed + rank * 1000)
             return env
         return init_env
