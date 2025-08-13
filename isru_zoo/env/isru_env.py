@@ -1,18 +1,12 @@
 from pettingzoo import ParallelEnv
 from pettingzoo.utils import parallel_to_aec
 
-import os
+import functools
 from gymnasium import spaces
 import random
 import numpy as np
-import math
-from copy import deepcopy
 from matplotlib import pyplot as plt
-import networkx as nx
 from copy import copy
-from enum import IntEnum
-from torch_geometric.utils.convert import from_networkx
-from torch_geometric.data import Data
 
 from isru_zoo.env.entity import ENTITY_TYPE, Agent, Depot
 from isru_zoo.env.resource import TestResource1, TestResource2
@@ -90,40 +84,15 @@ class parallel_env(ParallelEnv):
             ) for r in self.possible_resources
         ]
 
-        # Create the action space.
-        action_space = spaces.Dict({
-            # Movement is specified by relative motion in two dimensions.
-            # The agent can only move one space at a time.
-            "movement": spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32),
-
-            # Resource actions are represented as a floating point value for each resource type.
-            # To pick up resources, the agent uses a positive number.
-            # To drop resources, the agent uses a negative number.
-            "resources": spaces.Box(low=-np.inf, high=np.inf, shape=(len(self.possible_resources),), dtype=np.float32),
+        # Set up spaces.
+        self.observation_spaces = spaces.Dict({
+            agent: self.observation_space(agent) for agent in self.possible_agents
         })
-        self.action_spaces = spaces.Dict({agent: action_space for agent in self.possible_agents}) # type: ignore
+        self.action_spaces = spaces.Dict({
+            agent: self.action_space(agent) for agent in self.possible_agents
+        })
         
-        # Determine number of layers in the map.
-        # Layers are: obstacles, agents, depots, resources.
-        num_layers = 1 + 1 + 1 + len(self.possible_resources)
-
-        # Create the state space.
-        # The state space is a complete observation of the environment.
-        # This is not part of the standard PettingZoo API, but is useful for centralized training.
-        self.state_space = spaces.Dict({
-            "id": spaces.Discrete(len(self.possible_agents)),
-            "map": spaces.Box(
-                low=-np.inf,
-                high=np.inf,
-                shape=(*self.world_dims, num_layers),
-                dtype=np.float32
-            )
-        })
-
-        # Set up observation spaces. These are just the state space.
-        obs_space = self.state_space
-        self.observation_spaces = spaces.Dict({agent: obs_space for agent in self.possible_agents}) # type: ignore
-
+        # Reset the environment.
         self.reset()
 
 
@@ -240,16 +209,53 @@ class parallel_env(ParallelEnv):
         plt.show()      
 
 
+    @property
+    @functools.cache
+    def state_space(self):
+        ''' Returns the state space of the environment. '''
+
+        # Determine number of layers in the map.
+        # Layers are: obstacles, agents, depots, resources.
+        num_layers = 1 + 1 + 1 + len(self.possible_resources)
+
+        # Create the state space.
+        # The state space is a complete observation of the environment.
+        # This is not part of the standard PettingZoo API, but is useful for centralized training.
+        return spaces.Dict({
+            "id": spaces.Discrete(len(self.possible_agents)),
+            "map": spaces.Box(
+                low=-np.inf,
+                high=np.inf,
+                shape=(*self.world_dims, num_layers),
+                dtype=np.float32
+            )
+        })
+
+
+    @functools.cache
     def observation_space(self, agent):
         ''' Returns the observation space for the given agent. '''
-        return self.observation_spaces[agent]
+
+        return self.state_space
 
 
+    @functools.cache
     def action_space(self, agent):
         ''' Returns the action space for the given agent. '''
-        return self.action_spaces[agent]
+        
+        return spaces.Dict({
+            # Movement is specified by relative motion in two dimensions.
+            # The agent can only move one space at a time.
+            "movement": spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32),
+
+            # Resource actions are represented as a floating point value for each resource type.
+            # To pick up resources, the agent uses a positive number.
+            # To drop resources, the agent uses a negative number.
+            "resources": spaces.Box(low=-np.inf, high=np.inf, shape=(len(self.possible_resources),), dtype=np.float32),
+        })
 
 
+    @functools.cache
     def available_actions_space(self, agent):
         ''' Generate a Space for the available actions, given the action space. '''
 
