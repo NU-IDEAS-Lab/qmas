@@ -187,9 +187,10 @@ class parallel_env(ParallelEnv):
             p = spaces.unflatten(self.observation_spaces, pred[i].flatten())
             pred_unflattened.append(p)
 
-        # print(f"Prediction: {pred}")
+        # Get the true environment state.
+        state = self.state()
 
-        # Plot as a line graph using matplotlib.
+        # Plot state as a grid using matplotlib.
         plt.figure(figsize=figsize)
 
         # Plot the map layers.
