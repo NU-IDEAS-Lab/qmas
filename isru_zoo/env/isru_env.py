@@ -8,7 +8,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from copy import copy
 
-from isru_zoo.env.entity import ENTITY_TYPE, Agent, Depot
+from isru_zoo.env.entity import *
 from isru_zoo.env.resource import TestResource1, TestResource2
 
 
@@ -395,19 +395,22 @@ class parallel_env(ParallelEnv):
                 new_position_int = new_position.astype(np.int32)
                 if self.map_obstacles[new_position_int[0], new_position_int[1]] == 0:
                     agent.position = new_position
-                # Handle the resource actions.
-                # TODO: Implement resource pickup/dropoff using the action["resources"] values.
-                # for r in self.map_resources.keys():
-                #     if self.map_resources[r][agent.position[0], agent.position[1]]==1 and isinstance(agent, Extractor):
-                #         if action['resources']==0:
-                #             agent.resources[r]+=1
-                #             self.map_resources[r][agent.position[0], agent.position[1]]=0
+                else:
+                    agent.reward-=2
+
+                for r in self.map_resources.keys():
+                    if self.map_resources[r][agent.position[0], agent.position[1]]==1 and isinstance(agent, Extractor):
+                        if action['resources']==0:            # 0 for pick up the resources
+                            agent.resources[r]+=1
+                            agent.reward+=agent.reward_type[r]  # this should be a relative small number compared to drop reward
+                            self.map_resources[r][agent.position[0], agent.position[1]]=0
                 
-                # for depot in self.possible_depots: 
-                #     if self.map_depots[agent.position[0], agent.position[1]]==depot.resource_id and isinstance(agent, Hauler):
-                #         if action['resources']==1:
-                #             depot.resources[depot.resource_id]=agent.resources[depot.resource_id]
-                #             agent.resources[depot.resource_id]=0
+                for depot in self.possible_depots: 
+                    if self.map_depots[agent.position[0], agent.position[1]]==depot.resource_id and isinstance(agent, Hauler):
+                        if action['resources']==1:           # 1 for drop the resources
+                            depot.resources[depot.resource_id]=agent.resources[depot.resource_id]
+                            agent.reward+=agent.resources[depot.resource_id]*agent.reward_type[depot]   # amount*corresponding coefficient
+                            agent.resources[depot.resource_id]=0
 
 
         # Check termination conditions.
@@ -419,7 +422,7 @@ class parallel_env(ParallelEnv):
             agent_observation, obs_mask = self.observe(agent)
             obs_dict[agent] = agent_observation
             info_dict[agent]["visibility_mask"] = obs_mask
-
+            reward_dict[agent]=0
             # Get the reward for the agent.
             reward_dict[agent] = self.get_reward(agent, end_truncate, end_done)
 
@@ -438,19 +441,10 @@ class parallel_env(ParallelEnv):
 
     def get_reward(self, agent, end_truncate, end_done):
         ''' Returns the reward for the given agent. '''
+        
+   
 
-        # Provide reward for the agent to be in proximity of (30, 30).
-        target_position = np.array([2, 2], dtype=np.float32)
-        distance = np.linalg.norm(agent.position - target_position)
-        reward = -distance
-
-        # Provide a bonus reward if the resource actions are both 1.
-        # if agent.last_action is not None:
-        #     resource_actions = agent.last_action["resources"]
-        #     if np.allclose(resource_actions, 1.0, atol=0.1):
-        #         reward += 1.0
-
-        return reward
+        return agent.reward
 
 
     def _getAvailableActions(self, agent):
