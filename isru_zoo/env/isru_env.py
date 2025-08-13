@@ -144,7 +144,7 @@ class parallel_env(ParallelEnv):
             for _ in range(r.quantity):
                 idx = np.random.randint(positions_available.shape[0])
                 pos = positions_available[idx]
-                self.map_resources[r][*pos] += 1.0
+                self.map_resources[r][pos[0], pos[1]] += 1.0
 
         # Reset other state.
         self.step_count = 0
