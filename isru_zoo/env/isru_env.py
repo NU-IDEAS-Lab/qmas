@@ -87,9 +87,19 @@ class parallel_env(ParallelEnv):
 
         # Set up entities.
         self.possible_agents = \
-            [Extractor(position=self.get_random_position()) for _ in range(num_extractors)] + \
-            [Hauler(position=self.get_random_position(), carry_capacity=10.0) for _ in range(num_haulers)] + \
-            [Prospector(position=self.get_random_position()) for _ in range(num_prospectors)]
+            [Extractor(
+                position=self.get_random_position(),
+                observation_radius=self.default_observation_radius
+            ) for _ in range(num_extractors)] + \
+            [Hauler(
+                position=self.get_random_position(),
+                carry_capacity=10.0,
+                observation_radius=self.default_observation_radius
+            ) for _ in range(num_haulers)] + \
+            [Prospector(
+                position=self.get_random_position(),
+                observation_radius=self.default_observation_radius
+            ) for _ in range(num_prospectors)]
 
         # Set up the possible resources.
         self.possible_resources = [
@@ -173,12 +183,14 @@ class parallel_env(ParallelEnv):
 
         # Reset resources.
         self.map_resources = {}
+        self.mask_map_resources_discovered = {}
         for r in self.possible_resources:
             self.map_resources[r] = np.zeros(self.world_dims, dtype=np.float32)
             for _ in range(r.quantity):
                 idx = np.random.randint(positions_available.shape[0])
                 pos = positions_available[idx]
                 self.map_resources[r][pos[0], pos[1]] += 1.0
+            self.mask_map_resources_discovered[r] = np.zeros(self.world_dims, dtype=bool)
 
         # Reset other state.
         self.step_count = 0
@@ -242,7 +254,7 @@ class parallel_env(ParallelEnv):
             plt.axis("off")
         
         # Display the total reward for this step. Position this text below the subplots. Do not use suptitle.
-        plt.figtext(0.5, 0.01, f"Step: {self.step_count}, Total Reward: {sum([self.get_reward(agent, False, False) for agent in self.agents]):.2f}", ha="center", fontsize=8)
+        plt.figtext(0.5, 0.01, f"Step: {self.step_count}, Total Reward: {sum([self.get_reward(agent, False, False, {}) for agent in self.agents]):.2f}", ha="center", fontsize=8)
 
         if self.render_mode == "human":
             # Show the plot.
@@ -384,24 +396,25 @@ class parallel_env(ParallelEnv):
             "id": self.possible_agents.index(agent),
             "map": map_combined
         }
-
         obs_mask = {
             "id": True,
             "map": np.ones(self.world_dims, dtype=bool)
         }
 
-        # Set everything outside the observation radius to be invisible.
-        if not force_visible:
+        # Calculate the visible area based on a circular observation radius.
+        if not force_visible or True:
             radius = agent.observation_radius
             pos = agent.position.astype(np.int32)
-            x_min = max(0, pos[0] - radius)
-            x_max = min(self.world_dims[0], pos[0] + radius + 1)
-            y_min = max(0, pos[1] - radius)
-            y_max = min(self.world_dims[1], pos[1] + radius + 1)
-            obs_mask["map"][:x_min, :, :] = False
-            obs_mask["map"][x_max:, :, :] = False
-            obs_mask["map"][:, :y_min, :] = False
-            obs_mask["map"][:, y_max:, :] = False
+            visible = (np.arange(self.world_dims[0])[:, None] - pos[0]) ** 2 + \
+                (np.arange(self.world_dims[1])[None, :] - pos[1]) ** 2 <= radius ** 2
+            # obs["map"][visible, 0] += 0.2 # testing - show the visible area in the obstacle layer
+            
+            obs_mask["map"] = visible
+
+        # Update the discovered resources mask.
+        if isinstance(agent, Prospector) and not force_visible:
+            for r in self.possible_resources:
+                self.mask_map_resources_discovered[r] |= (self.map_resources[r] > 0) & obs_mask["map"]
         
         return obs, obs_mask
     
