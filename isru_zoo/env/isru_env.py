@@ -8,7 +8,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from copy import copy
 
-from isru_zoo.env.entity import *
+from isru_zoo.env.entity import ENTITY_TYPE, Agent, Depot, Extractor, Hauler, Prospector
 from isru_zoo.env.resource import TestResource1, TestResource2
 
 
@@ -16,6 +16,12 @@ def add_args(parser):
     ''' Adds environment arguments. '''
     
     import argparse
+    parser.add_argument("--num_extractors", type=int, default=2,
+                        help="The number of extractor vehicles to place in the world.")
+    parser.add_argument("--num_haulers", type=int, default=2,
+                        help="The number of hauler vehicles to place in the world.")
+    parser.add_argument("--num_prospectors", type=int, default=1,
+                        help="The number of prospector vehicles to place in the world.")
     parser.add_argument("--num_obstacles", type=int, default=20,
                         help="The number of obstacles to place in the world.")
     parser.add_argument("--world_size", type=int, default=50,
@@ -30,7 +36,12 @@ def add_args(parser):
 
 def validate_args(parsed_args):
     ''' Validates the arguments. '''
-    pass
+    
+    # Set the number of agents based on the number of each type.
+    parsed_args.num_agents = \
+        parsed_args.num_extractors + \
+        parsed_args.num_haulers + \
+        parsed_args.num_prospectors
 
 
 def env(*args, **kwargs):
@@ -53,8 +64,9 @@ class parallel_env(ParallelEnv):
 
 
     def __init__(self,
-            num_agents = 1,
-            num_haulers = 1,
+            num_extractors: int = 2,
+            num_haulers: int = 2,
+            num_prospectors: int = 1,
             max_cycles: int = -1,
             num_obstacles: int = 10,
             world_size: int = 50,
@@ -74,18 +86,10 @@ class parallel_env(ParallelEnv):
         self.default_observation_radius = observation_radius
 
         # Set up entities.
-        self.possible_agents = []
-        for i in range(num_agents):
-            self.possible_agents.append(
-                Agent(position=self.get_random_position(),
-                    observation_radius=self.default_observation_radius)
-            )
-        for i in range(num_haulers):
-            self.possible_agents.append(
-                Hauler(position=self.get_random_position(),
-                    observation_radius=self.default_observation_radius,
-                    carry_capacity=10.0)
-            )
+        self.possible_agents = \
+            [Extractor(position=self.get_random_position()) for _ in range(num_extractors)] + \
+            [Hauler(position=self.get_random_position(), carry_capacity=10.0) for _ in range(num_haulers)] + \
+            [Prospector(position=self.get_random_position()) for _ in range(num_prospectors)]
 
         # Set up the possible resources.
         self.possible_resources = [
@@ -100,6 +104,9 @@ class parallel_env(ParallelEnv):
                 resource = r
             ) for r in self.possible_resources
         ]
+
+        # Record the map shape.
+        self.map_shape = (*self.world_dims, len(self.possible_resources) + 3)  # +3 for obstacles, agents, depots
 
         # Set up spaces.
         self.observation_spaces = spaces.Dict({
@@ -258,10 +265,6 @@ class parallel_env(ParallelEnv):
     def state_space(self):
         ''' Returns the state space of the environment. '''
 
-        # Determine number of layers in the map.
-        # Layers are: obstacles, agents, depots, resources.
-        num_layers = 1 + 1 + 1 + len(self.possible_resources)
-
         # Create the state space.
         # The state space is a complete observation of the environment.
         # This is not part of the standard PettingZoo API, but is useful for centralized training.
@@ -270,7 +273,7 @@ class parallel_env(ParallelEnv):
             "map": spaces.Box(
                 low=-np.inf,
                 high=np.inf,
-                shape=(*self.world_dims, num_layers),
+                shape=self.map_shape,
                 dtype=np.float32
             )
         })
@@ -326,10 +329,35 @@ class parallel_env(ParallelEnv):
         return self._populateStateSpace(self.possible_agents[0], force_visible=True)[0]
 
 
-    def observe(self, agent, radius=None, allow_done_agents=False):
+    def observe(self, agent, senders=set()):
         ''' Returns the observation for the given agent.'''
 
-        return self._populateStateSpace(agent)
+        # Collect local data.
+        local_obs, local_obs_mask = self._populateStateSpace(agent)
+        local_visible = local_obs_mask["map"] == True
+
+        # Set up the matrices.
+        map = np.empty_like(local_obs["map"], dtype=np.float32)
+        map_mask = np.zeros_like(local_obs_mask["map"], dtype=bool)
+
+        # Handle communicated data.
+        for sender in senders:
+            sender_obs, sender_obs_mask = self._populateStateSpace(sender)
+            sender_visible = sender_obs_mask["map"] == True
+            map[sender_visible] = sender_obs["map"][sender_visible]
+            map_mask[sender_visible] = True
+        
+        # Apply local observations (overwrite any communicated data).
+        map[local_visible] = local_obs["map"][local_visible]
+        map_mask[local_visible] = True
+
+        # Update the local observation.
+        obs = local_obs
+        obs["map"] = map
+        obs_mask = local_obs_mask
+        obs_mask["map"] = map_mask
+
+        return obs, obs_mask
 
 
     def available_actions(self, agent):
@@ -366,9 +394,14 @@ class parallel_env(ParallelEnv):
         if not force_visible:
             radius = agent.observation_radius
             pos = agent.position.astype(np.int32)
-            obs_mask["map"] = np.zeros(self.world_dims, dtype=bool)
-            obs_mask["map"][max(0, pos[0] - radius):min(self.world_dims[0], pos[0] + radius + 1),
-                            max(0, pos[1] - radius):min(self.world_dims[1], pos[1] + radius + 1)] = True
+            x_min = max(0, pos[0] - radius)
+            x_max = min(self.world_dims[0], pos[0] + radius + 1)
+            y_min = max(0, pos[1] - radius)
+            y_max = min(self.world_dims[1], pos[1] + radius + 1)
+            obs_mask["map"][:x_min, :, :] = False
+            obs_mask["map"][x_max:, :, :] = False
+            obs_mask["map"][:, :y_min, :] = False
+            obs_mask["map"][:, y_max:, :] = False
         
         return obs, obs_mask
     
@@ -410,9 +443,13 @@ class parallel_env(ParallelEnv):
         truncated_dict = {agent: False for agent in self.possible_agents}
         info_dict = {
             agent: {
-                "ready": True
+                "ready": True,
+                "resources_deposited": {
+                    r: 0.0 for r in self.possible_resources
+                },
             } for agent in self.possible_agents
         }
+        senders = set()
 
         # Perform agent actions.
         for agent in self.agents:
@@ -433,8 +470,10 @@ class parallel_env(ParallelEnv):
                 new_position_int = new_position.astype(np.int32)
                 if self.map_obstacles[new_position_int[0], new_position_int[1]] == 0:
                     agent.position = new_position
-                else:
-                    agent.reward-=2
+
+                # Handle communication.
+                if action["communication"][0] >= 0.5:
+                    senders.add(agent)
 
                 # Corrected resource handling for Hauler agents
                 if isinstance(agent, Hauler):
@@ -467,8 +506,8 @@ class parallel_env(ParallelEnv):
                                         depot.stock += drop
                                         break
                                 agent.cargo[r.resource_id] -= drop
-                                agent.reward += 1.0 * drop  # delivery reward
-
+                                # Record the resources deposited.
+                                info_dict[agent]["resources_deposited"][r] += drop
 
         # Check termination conditions.
         end_truncate = lastStep or (self.max_cycles >= 0 and self.step_count >= self.max_cycles)
@@ -476,12 +515,16 @@ class parallel_env(ParallelEnv):
 
         # Perform post-step calculations.
         for agent in self.possible_agents:
-            agent_observation, obs_mask = self.observe(agent)
+            # Perform observation.
+            agent_observation, obs_mask = self.observe(
+                agent,
+                senders = senders - {agent}
+            )
             obs_dict[agent] = agent_observation
             info_dict[agent]["visibility_mask"] = obs_mask
-            reward_dict[agent]=0
-            # Get the reward for the agent.
-            reward_dict[agent] = self.get_reward(agent, end_truncate, end_done)
+
+            # Calculate reward.
+            reward_dict[agent] += self.get_reward(agent, end_truncate, end_done, info_dict[agent])
 
         # Handle end of episode.
         if end_truncate or end_done:
@@ -496,12 +539,17 @@ class parallel_env(ParallelEnv):
         return obs_dict, reward_dict, self.dones, truncated_dict, info_dict
 
 
-    def get_reward(self, agent, end_truncate, end_done):
+    def get_reward(self, agent, end_truncate, end_done, info):
         ''' Returns the reward for the given agent. '''
         
-   
+        reward = 0.0
 
-        return agent.reward
+        # Reward for depositing resources.
+        if "resources_deposited" in info:
+            for r, amount in info["resources_deposited"].items():
+                reward += r.reward_deposit * amount
+
+        return reward
 
 
     def _getAvailableActions(self, agent):
