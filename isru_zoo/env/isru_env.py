@@ -8,7 +8,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from copy import copy
 
-from isru_zoo.env.entity import ENTITY_TYPE, Agent, Depot, Hauler
+from isru_zoo.env.entity import ENTITY_TYPE, Agent, Depot, Extractor, Hauler, Prospector
 from isru_zoo.env.resource import TestResource1, TestResource2
 
 
@@ -16,6 +16,12 @@ def add_args(parser):
     ''' Adds environment arguments. '''
     
     import argparse
+    parser.add_argument("--num_extractors", type=int, default=2,
+                        help="The number of extractor vehicles to place in the world.")
+    parser.add_argument("--num_haulers", type=int, default=2,
+                        help="The number of hauler vehicles to place in the world.")
+    parser.add_argument("--num_prospectors", type=int, default=1,
+                        help="The number of prospector vehicles to place in the world.")
     parser.add_argument("--num_obstacles", type=int, default=20,
                         help="The number of obstacles to place in the world.")
     parser.add_argument("--world_size", type=int, default=50,
@@ -30,7 +36,12 @@ def add_args(parser):
 
 def validate_args(parsed_args):
     ''' Validates the arguments. '''
-    pass
+    
+    # Set the number of agents based on the number of each type.
+    parsed_args.num_agents = \
+        parsed_args.num_extractors + \
+        parsed_args.num_haulers + \
+        parsed_args.num_prospectors
 
 
 def env(*args, **kwargs):
@@ -53,8 +64,9 @@ class parallel_env(ParallelEnv):
 
 
     def __init__(self,
-            num_agents = 1,
-            num_hualers = 1,
+            num_extractors: int = 2,
+            num_haulers: int = 2,
+            num_prospectors: int = 1,
             max_cycles: int = -1,
             num_obstacles: int = 10,
             world_size: int = 50,
@@ -74,10 +86,10 @@ class parallel_env(ParallelEnv):
         self.default_observation_radius = observation_radius
 
         # Set up entities.
-        self.possible_agents = (
-            [Agent(position=self.get_random_position()) for _ in range(num_agents)]
-            + [Hauler(position=self.get_random_position(), carry_capacity=10.0) for _ in range(num_hualers)]
-        )
+        self.possible_agents = \
+            [Extractor(position=self.get_random_position()) for _ in range(num_extractors)] + \
+            [Hauler(position=self.get_random_position(), carry_capacity=10.0) for _ in range(num_haulers)] + \
+            [Prospector(position=self.get_random_position()) for _ in range(num_prospectors)]
 
         # Set up the possible resources.
         self.possible_resources = [
@@ -416,7 +428,10 @@ class parallel_env(ParallelEnv):
         truncated_dict = {agent: False for agent in self.possible_agents}
         info_dict = {
             agent: {
-                "ready": True
+                "ready": True,
+                "resources_deposited": {
+                    r: 0.0 for r in self.possible_resources
+                },
             } for agent in self.possible_agents
         }
         senders = set()
@@ -480,8 +495,8 @@ class parallel_env(ParallelEnv):
                             if drop > 0:
                                 agent.cargo[i] = have - drop
                                 depot_here.stock += drop
-                                # Immediate delivery reward
-                                reward_dict[agent] += drop
+                                # Record the resources deposited.
+                                info_dict[agent]["resources_deposited"][r] += drop
 
         # Check termination conditions.
         end_truncate = lastStep or (self.max_cycles >= 0 and self.step_count >= self.max_cycles)
@@ -497,8 +512,8 @@ class parallel_env(ParallelEnv):
             obs_dict[agent] = agent_observation
             info_dict[agent]["visibility_mask"] = obs_mask
 
-            # Get the reward for the agent.
-            reward_dict[agent] = self.get_reward(agent, end_truncate, end_done)
+            # Calculate reward.
+            reward_dict[agent] += self.get_reward(agent, end_truncate, end_done, info_dict[agent])
 
         # Handle end of episode.
         if end_truncate or end_done:
@@ -513,12 +528,17 @@ class parallel_env(ParallelEnv):
         return obs_dict, reward_dict, self.dones, truncated_dict, info_dict
 
 
-    def get_reward(self, agent, end_truncate, end_done):
+    def get_reward(self, agent, end_truncate, end_done, info):
         ''' Returns the reward for the given agent. '''
         
-   
+        reward = 0.0
 
-        return agent.reward
+        # Reward for depositing resources.
+        if "resources_deposited" in info:
+            for r, amount in info["resources_deposited"].items():
+                reward += r.reward_deposit * amount
+
+        return reward
 
 
     def _getAvailableActions(self, agent):
