@@ -8,7 +8,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from copy import copy
 
-from isru_zoo.env.entity import *
+from isru_zoo.env.entity import ENTITY_TYPE, Agent, Depot, Hauler
 from isru_zoo.env.resource import TestResource1, TestResource2
 
 
@@ -54,6 +54,7 @@ class parallel_env(ParallelEnv):
 
     def __init__(self,
             num_agents = 1,
+            num_hualers = 1,
             max_cycles: int = -1,
             num_obstacles: int = 10,
             world_size: int = 50,
@@ -73,12 +74,10 @@ class parallel_env(ParallelEnv):
         self.default_observation_radius = observation_radius
 
         # Set up entities.
-        self.possible_agents = [
-            Agent(
-                position=self.get_random_position(),
-                observation_radius=self.default_observation_radius,
-            ) for i in range(num_agents)
-        ]
+        self.possible_agents = (
+            [Agent(position=self.get_random_position()) for _ in range(num_agents)]
+            + [Hauler(position=self.get_random_position(), carry_capacity=10.0) for _ in range(num_hualers)]
+        )
 
         # Set up the possible resources.
         self.possible_resources = [
@@ -142,7 +141,7 @@ class parallel_env(ParallelEnv):
         self.map_depots = np.zeros(self.world_dims, dtype=np.float32)
         for depot in self.possible_depots:
             idx = np.random.randint(positions_available.shape[0])
-            depot.position = positions_available[idx]
+            depot.reset(reset_start_position=True, position=positions_available[idx])
             self.map_depots[depot.position[0], depot.position[1]] = depot.resource_id
         
         # Reset resources.
@@ -441,27 +440,48 @@ class parallel_env(ParallelEnv):
                 new_position_int = new_position.astype(np.int32)
                 if self.map_obstacles[new_position_int[0], new_position_int[1]] == 0:
                     agent.position = new_position
-                else:
-                    agent.reward-=2
 
                 # Handle communication.
                 if action["communication"][0] >= 0.5:
                     senders.add(agent)
 
-                for r in self.map_resources.keys():
-                    if self.map_resources[r][agent.position[0], agent.position[1]]==1 and isinstance(agent, Extractor):
-                        if action['resources']==0:            # 0 for pick up the resources
-                            agent.resources[r]+=1
-                            agent.reward+=agent.reward_type[r]  # this should be a relative small number compared to drop reward
-                            self.map_resources[r][agent.position[0], agent.position[1]]=0
-                
-                for depot in self.possible_depots: 
-                    if self.map_depots[agent.position[0], agent.position[1]]==depot.resource_id and isinstance(agent, Hauler):
-                        if action['resources']==1:           # 1 for drop the resources
-                            depot.resources[depot.resource_id]=agent.resources[depot.resource_id]
-                            agent.reward+=agent.resources[depot.resource_id]*agent.reward_type[depot]   # amount*corresponding coefficient
-                            agent.resources[depot.resource_id]=0
+                # Handle the resource actions: pickup (positive) / dropoff (negative)
+                x, y = agent.position.astype(np.int32)
+                capacity = agent.capabilities.get("carry_capacity", 0.0)
+                current_load = sum(agent.cargo.values()) if hasattr(agent, "cargo") else 0.0
+                remaining_space = max(0.0, capacity - current_load)
+                # positive values mean “pick up this much”; negative values mean “drop this much”.
+                pick_up = action["resources"]
 
+                for i, r in enumerate(self.possible_resources):
+                    desired = float(pick_up[i])
+
+                    # PICKUP
+                    if desired > 0 and remaining_space > 0:
+                        remaining_capacity = self.map_resources[r][x, y]
+                        take = min(desired, remaining_capacity, remaining_space)
+                        if take > 0:
+                            self.map_resources[r][x, y] = remaining_capacity - take
+                            if hasattr(agent, "cargo"):
+                                agent.cargo[i] = agent.cargo.get(i, 0.0) + take
+                            remaining_space -= take
+
+                    # DROPOFF
+                    elif desired < 0:
+                        depot_here = None
+                        if self.map_depots[x, y] == r.resource_id:
+                            for depot in self.possible_depots:
+                                if int(depot.position[0]) == x and int(depot.position[1]) == y:
+                                    depot_here = depot
+                                    break
+                        if depot_here is not None and hasattr(agent, "cargo"):
+                            have = agent.cargo.get(i, 0.0)
+                            drop = min(-desired, have)
+                            if drop > 0:
+                                agent.cargo[i] = have - drop
+                                depot_here.stock += drop
+                                # Immediate delivery reward
+                                reward_dict[agent] += drop
 
         # Check termination conditions.
         end_truncate = lastStep or (self.max_cycles >= 0 and self.step_count >= self.max_cycles)
@@ -476,7 +496,7 @@ class parallel_env(ParallelEnv):
             )
             obs_dict[agent] = agent_observation
             info_dict[agent]["visibility_mask"] = obs_mask
-            reward_dict[agent]=0
+
             # Get the reward for the agent.
             reward_dict[agent] = self.get_reward(agent, end_truncate, end_done)
 
