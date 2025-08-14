@@ -408,8 +408,16 @@ class parallel_env(ParallelEnv):
             visible = (np.arange(self.world_dims[0])[:, None] - pos[0]) ** 2 + \
                 (np.arange(self.world_dims[1])[None, :] - pos[1]) ** 2 <= radius ** 2
             # obs["map"][visible, 0] += 0.2 # testing - show the visible area in the obstacle layer
-            
             obs_mask["map"] = visible
+
+        # Vehicle-class visibility: only Prospectors can directly observe resources.
+        # Layers are ordered as: 0=obstacles, 1=agents, 2=depots, 3+=resources
+        if not force_visible:
+            resource_layer = 3
+            if not isinstance(agent, Prospector):
+                # Mask out all resource layers for non-prospector local observations.
+                # (Communicated observations will still be merged in `observe()`)
+                obs_mask["map"][:, :, resource_layer:] = False
 
         # Update the discovered resources mask.
         if isinstance(agent, Prospector) and not force_visible:
