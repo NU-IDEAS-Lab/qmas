@@ -390,6 +390,15 @@ class parallel_env(ParallelEnv):
             "map": np.ones(self.world_dims, dtype=bool)
         }
 
+        # Vehicle-class visibility: only Prospectors can directly observe resources.
+        # Layers are ordered as: 0=obstacles, 1=agents, 2=depots, 3+=resources
+        if not force_visible:
+            resource_layer = 3
+            if not isinstance(agent, Prospector):
+                # Mask out all resource layers for non-prospector local observations.
+                # (Communicated observations will still be merged in `observe()`)
+                obs_mask["map"][:, :, resource_layer:] = False
+
         # Set everything outside the observation radius to be invisible.
         if not force_visible:
             radius = agent.observation_radius
