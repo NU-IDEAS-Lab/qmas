@@ -183,14 +183,13 @@ class parallel_env(ParallelEnv):
 
         # Reset resources.
         self.map_resources = {}
-        self.mask_map_resources_discovered = {}
+        self.mask_map_resources_discovered = np.zeros(self.world_dims, dtype=bool)
         for r in self.possible_resources:
             self.map_resources[r] = np.zeros(self.world_dims, dtype=np.float32)
             for _ in range(r.quantity):
                 idx = np.random.randint(positions_available.shape[0])
                 pos = positions_available[idx]
                 self.map_resources[r][pos[0], pos[1]] += 1.0
-            self.mask_map_resources_discovered[r] = np.zeros(self.world_dims, dtype=bool)
 
         # Reset other state.
         self.step_count = 0
@@ -240,6 +239,8 @@ class parallel_env(ParallelEnv):
 
         # Get the true environment state.
         state = self.state()
+        # Get the observation with respect to agent 0.
+        # state = self.observe(self.agents[0], senders=set())[0]
 
         # Plot state as a grid using matplotlib.
         plt.figure(figsize=figsize)
@@ -346,7 +347,6 @@ class parallel_env(ParallelEnv):
 
         # Collect local data.
         local_obs, local_obs_mask = self._populateStateSpace(agent)
-        local_visible = local_obs_mask["map"] == True
 
         # Set up the matrices.
         map = np.empty_like(local_obs["map"], dtype=np.float32)
@@ -360,14 +360,17 @@ class parallel_env(ParallelEnv):
             map_mask[sender_visible] = True
         
         # Apply local observations (overwrite any communicated data).
-        map[local_visible] = local_obs["map"][local_visible]
-        map_mask[local_visible] = True
+        map[local_obs_mask["map"] == True] = local_obs["map"][local_obs_mask["map"] == True]
+        map_mask |= local_obs_mask["map"]
 
         # Update the local observation.
         obs = local_obs
         obs["map"] = map
         obs_mask = local_obs_mask
         obs_mask["map"] = map_mask
+
+        # Debugging: highlight the visible area in the map.
+        # obs["map"][obs_mask["map"], :] += 0.2
 
         return obs, obs_mask
 
@@ -398,7 +401,7 @@ class parallel_env(ParallelEnv):
         }
         obs_mask = {
             "id": True,
-            "map": np.ones(self.world_dims, dtype=bool)
+            "map": np.ones_like(map_combined, dtype=bool)
         }
 
         # Calculate the visible area based on a circular observation radius.
@@ -408,12 +411,12 @@ class parallel_env(ParallelEnv):
             visible = (np.arange(self.world_dims[0])[:, None] - pos[0]) ** 2 + \
                 (np.arange(self.world_dims[1])[None, :] - pos[1]) ** 2 <= radius ** 2
             # obs["map"][visible, 0] += 0.2 # testing - show the visible area in the obstacle layer
-            obs_mask["map"] = visible
+            obs_mask["map"][~visible, :] = False
 
         # Vehicle-class visibility: only Prospectors can directly observe resources.
         # Layers are ordered as: 0=obstacles, 1=agents, 2=depots, 3+=resources
+        resource_layer = 3
         if not force_visible:
-            resource_layer = 3
             if not isinstance(agent, Prospector):
                 # Mask out all resource layers for non-prospector local observations.
                 # (Communicated observations will still be merged in `observe()`)
@@ -421,8 +424,8 @@ class parallel_env(ParallelEnv):
 
         # Update the discovered resources mask.
         if isinstance(agent, Prospector) and not force_visible:
-            for r in self.possible_resources:
-                self.mask_map_resources_discovered[r] |= (self.map_resources[r] > 0) & obs_mask["map"]
+            for i, r in enumerate(self.possible_resources):
+                self.mask_map_resources_discovered |= (self.map_resources[r] > 0) & obs_mask["map"][:, :, resource_layer + i]
         
         return obs, obs_mask
     
