@@ -147,15 +147,30 @@ class parallel_env(ParallelEnv):
                 reset_start_position=True,
                 position=start_position
             )
+            agent.reward = 0.0
+
+            # Haulers start empty: cargo per resource_id -> 0.0
+            if isinstance(agent, Hauler):
+                agent.cargo = {r.resource_id: 0.0 for r in self.possible_resources}
 
         # Reset depots.
         # Ensure they are placed in an available location.
         self.map_depots = np.zeros(self.world_dims, dtype=np.float32)
         for depot in self.possible_depots:
             idx = np.random.randint(positions_available.shape[0])
-            depot.reset(reset_start_position=True, position=positions_available[idx])
+            depot.position = positions_available[idx]
+            # reset per-episode depot accounting
+            if not hasattr(depot, "stock"):
+                depot.stock = 0.0
+            else:
+                depot.stock = 0.0
             self.map_depots[depot.position[0], depot.position[1]] = depot.resource_id
         
+        # Build stable resource index mappings for action vector <-> resource objects
+        self.resource_list = list(self.possible_resources)
+        self.rid_to_idx = {r.resource_id: i for i, r in enumerate(self.resource_list)}
+        self.idx_to_res = {i: r for i, r in enumerate(self.resource_list)}
+
         # Reset resources.
         self.map_resources = {}
         for r in self.possible_resources:
@@ -372,7 +387,7 @@ class parallel_env(ParallelEnv):
 
         obs_mask = {
             "id": True,
-            "map": np.ones_like(map_combined, dtype=bool)
+            "map": np.ones(self.world_dims, dtype=bool)
         }
 
         # Set everything outside the observation radius to be invisible.
@@ -460,41 +475,37 @@ class parallel_env(ParallelEnv):
                 if action["communication"][0] >= 0.5:
                     senders.add(agent)
 
-                # Handle the resource actions: pickup (positive) / dropoff (negative)
-                x, y = agent.position.astype(np.int32)
-                capacity = agent.capabilities.get("carry_capacity", 0.0)
-                current_load = sum(agent.cargo.values()) if hasattr(agent, "cargo") else 0.0
-                remaining_space = max(0.0, capacity - current_load)
-                # positive values mean “pick up this much”; negative values mean “drop this much”.
-                pick_up = action["resources"]
+                # Corrected resource handling for Hauler agents
+                if isinstance(agent, Hauler):
+                    action_vec = action["resources"]
+                    px, py = agent.position.astype(np.int32)
 
-                for i, r in enumerate(self.possible_resources):
-                    desired = float(pick_up[i])
+                    cap = agent.capabilities.get("carry_capacity", 0.0)
+                    current_load = sum(agent.cargo.values())
+                    free = max(0.0, cap - current_load)
 
-                    # PICKUP
-                    if desired > 0 and remaining_space > 0:
-                        remaining_capacity = self.map_resources[r][x, y]
-                        take = min(desired, remaining_capacity, remaining_space)
-                        if take > 0:
-                            self.map_resources[r][x, y] = remaining_capacity - take
-                            if hasattr(agent, "cargo"):
-                                agent.cargo[i] = agent.cargo.get(i, 0.0) + take
-                            remaining_space -= take
+                    for idx, val in enumerate(action_vec):
+                        if val > 0:
+                            r = self.idx_to_res[idx]
+                            available = self.map_resources[r][px, py]
+                            want = float(val)
+                            take = min(want, available, free)
+                            if take > 0:
+                                self.map_resources[r][px, py] -= take
+                                agent.cargo[r.resource_id] = agent.cargo.get(r.resource_id, 0.0) + take
+                                free -= take
+                        elif val < 0:
+                            r = self.idx_to_res[idx]
+                            want_drop = float(-val)
+                            have = agent.cargo.get(r.resource_id, 0.0)
+                            drop = min(want_drop, have)
 
-                    # DROPOFF
-                    elif desired < 0:
-                        depot_here = None
-                        if self.map_depots[x, y] == r.resource_id:
-                            for depot in self.possible_depots:
-                                if int(depot.position[0]) == x and int(depot.position[1]) == y:
-                                    depot_here = depot
-                                    break
-                        if depot_here is not None and hasattr(agent, "cargo"):
-                            have = agent.cargo.get(i, 0.0)
-                            drop = min(-desired, have)
-                            if drop > 0:
-                                agent.cargo[i] = have - drop
-                                depot_here.stock += drop
+                            if drop > 0 and self.map_depots[px, py] == r.resource_id:
+                                for depot in self.possible_depots:
+                                    if depot.resource_id == r.resource_id and np.all(depot.position == [px, py]):
+                                        depot.stock += drop
+                                        break
+                                agent.cargo[r.resource_id] -= drop
                                 # Record the resources deposited.
                                 info_dict[agent]["resources_deposited"][r] += drop
 
