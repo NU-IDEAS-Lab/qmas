@@ -120,6 +120,12 @@ class Hauler(Agent):
         super().__init__(*args, **kwargs)
         self.role = "hauler"
         self.capabilities.update({"carry": True, "carry_capacity": carry_capacity})
+        self.cargo = {}
+
+    def reset(self, *args, **kwargs):
+        super().reset(*args, **kwargs)
+        # Clear inventory at episode start
+        self.cargo = {}
 
 
 class Depot(Entity):
@@ -132,6 +138,7 @@ class Depot(Entity):
 
         # Store the resource associated with this depot.
         self.resource = resource
+        self.stock = 0.0
     
 
     @property
@@ -142,6 +149,8 @@ class Depot(Entity):
 
     def reset(self, *args, **kwargs):
         super().reset(*args, **kwargs)
+        # Clear delivered stock at episode start
+        self.stock = 0.0
 
 
 class CircularZone(Entity):
