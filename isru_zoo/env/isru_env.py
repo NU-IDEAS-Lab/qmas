@@ -8,7 +8,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from copy import copy
 
-from isru_zoo.env.entity import ENTITY_TYPE, Agent, Depot, Hauler
+from isru_zoo.env.entity import *
 from isru_zoo.env.resource import TestResource1, TestResource2
 
 
@@ -20,6 +20,8 @@ def add_args(parser):
                         help="The number of obstacles to place in the world.")
     parser.add_argument("--world_size", type=int, default=50,
                         help="The size of the world. The world is a square with side length `world_size`.")
+    parser.add_argument("--observation_radius", type=int, default=10,
+                        help="The radius within which agents can observe each other and resources.")
     parser.add_argument("--render_mode", type=str, default="human",
                         choices=parallel_env.metadata["render_modes"],
                         help="The rendering mode for the environment.")
@@ -52,10 +54,11 @@ class parallel_env(ParallelEnv):
 
     def __init__(self,
             num_agents = 1,
-            num_hualers = 1,
+            num_haulers = 1,
             max_cycles: int = -1,
-            world_size: int = 50,
             num_obstacles: int = 10,
+            world_size: int = 50,
+            observation_radius: int = 10,
             render_mode: str = "human",
         ):
         """
@@ -68,12 +71,21 @@ class parallel_env(ParallelEnv):
         self.world_dims = np.array([world_size, world_size], dtype=np.int32)
         self.num_obstacles = num_obstacles
         self.render_mode = render_mode
+        self.default_observation_radius = observation_radius
 
         # Set up entities.
-        self.possible_agents = (
-            [Agent(position=self.get_random_position()) for _ in range(num_agents)]
-            + [Hauler(position=self.get_random_position(), carry_capacity=10.0) for _ in range(num_hualers)]
-        )
+        self.possible_agents = []
+        for i in range(num_agents):
+            self.possible_agents.append(
+                Agent(position=self.get_random_position(),
+                    observation_radius=self.default_observation_radius)
+            )
+        for i in range(num_haulers):
+            self.possible_agents.append(
+                Hauler(position=self.get_random_position(),
+                    observation_radius=self.default_observation_radius,
+                    carry_capacity=10.0)
+            )
 
         # Set up the possible resources.
         self.possible_resources = [
@@ -128,15 +140,30 @@ class parallel_env(ParallelEnv):
                 reset_start_position=True,
                 position=start_position
             )
+            agent.reward = 0.0
+
+            # Haulers start empty: cargo per resource_id -> 0.0
+            if isinstance(agent, Hauler):
+                agent.cargo = {r.resource_id: 0.0 for r in self.possible_resources}
 
         # Reset depots.
         # Ensure they are placed in an available location.
         self.map_depots = np.zeros(self.world_dims, dtype=np.float32)
         for depot in self.possible_depots:
             idx = np.random.randint(positions_available.shape[0])
-            depot.reset(reset_start_position=True, position=positions_available[idx])
+            depot.position = positions_available[idx]
+            # reset per-episode depot accounting
+            if not hasattr(depot, "stock"):
+                depot.stock = 0.0
+            else:
+                depot.stock = 0.0
             self.map_depots[depot.position[0], depot.position[1]] = depot.resource_id
         
+        # Build stable resource index mappings for action vector <-> resource objects
+        self.resource_list = list(self.possible_resources)
+        self.rid_to_idx = {r.resource_id: i for i, r in enumerate(self.resource_list)}
+        self.idx_to_res = {i: r for i, r in enumerate(self.resource_list)}
+
         # Reset resources.
         self.map_resources = {}
         for r in self.possible_resources:
@@ -265,6 +292,9 @@ class parallel_env(ParallelEnv):
             # The agent can only move one space at a time.
             "movement": spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32),
 
+            # Communication is a simple boolean flag.
+            "communication": spaces.Box(low=0, high=1, shape=(1,), dtype=np.int32),
+
             # Resource actions are represented as a floating point value for each resource type.
             # To pick up resources, the agent uses a positive number.
             # To drop resources, the agent uses a negative number.
@@ -329,8 +359,16 @@ class parallel_env(ParallelEnv):
 
         obs_mask = {
             "id": True,
-            "map": np.ones_like(map_combined, dtype=bool)
+            "map": np.ones(self.world_dims, dtype=bool)
         }
+
+        # Set everything outside the observation radius to be invisible.
+        if not force_visible:
+            radius = agent.observation_radius
+            pos = agent.position.astype(np.int32)
+            obs_mask["map"] = np.zeros(self.world_dims, dtype=bool)
+            obs_mask["map"][max(0, pos[0] - radius):min(self.world_dims[0], pos[0] + radius + 1),
+                            max(0, pos[1] - radius):min(self.world_dims[1], pos[1] + radius + 1)] = True
         
         return obs, obs_mask
     
@@ -395,43 +433,41 @@ class parallel_env(ParallelEnv):
                 new_position_int = new_position.astype(np.int32)
                 if self.map_obstacles[new_position_int[0], new_position_int[1]] == 0:
                     agent.position = new_position
-                # Handle the resource actions: pickup (positive) / dropoff (negative)
-                x, y = agent.position.astype(np.int32)
-                capacity = agent.capabilities.get("carry_capacity", 0.0)
-                current_load = sum(agent.cargo.values()) if hasattr(agent, "cargo") else 0.0
-                remaining_space = max(0.0, capacity - current_load)
-                # positive values mean “pick up this much”; negative values mean “drop this much”.
-                pick_up = action["resources"]
+                else:
+                    agent.reward-=2
 
-                for i, r in enumerate(self.possible_resources):
-                    desired = float(pick_up[i])
+                # Corrected resource handling for Hauler agents
+                if isinstance(agent, Hauler):
+                    action_vec = action["resources"]
+                    px, py = agent.position.astype(np.int32)
 
-                    # PICKUP
-                    if desired > 0 and remaining_space > 0:
-                        remaining_capacity = self.map_resources[r][x, y]
-                        take = min(desired, remaining_capacity, remaining_space)
-                        if take > 0:
-                            self.map_resources[r][x, y] = remaining_capacity - take
-                            if hasattr(agent, "cargo"):
-                                agent.cargo[i] = agent.cargo.get(i, 0.0) + take
-                            remaining_space -= take
+                    cap = agent.capabilities.get("carry_capacity", 0.0)
+                    current_load = sum(agent.cargo.values())
+                    free = max(0.0, cap - current_load)
 
-                    # DROPOFF
-                    elif desired < 0:
-                        depot_here = None
-                        if self.map_depots[x, y] == r.resource_id:
-                            for depot in self.possible_depots:
-                                if int(depot.position[0]) == x and int(depot.position[1]) == y:
-                                    depot_here = depot
-                                    break
-                        if depot_here is not None and hasattr(agent, "cargo"):
-                            have = agent.cargo.get(i, 0.0)
-                            drop = min(-desired, have)
-                            if drop > 0:
-                                agent.cargo[i] = have - drop
-                                depot_here.stock += drop
-                                # Immediate delivery reward
-                                reward_dict[agent] += drop
+                    for idx, val in enumerate(action_vec):
+                        if val > 0:
+                            r = self.idx_to_res[idx]
+                            available = self.map_resources[r][px, py]
+                            want = float(val)
+                            take = min(want, available, free)
+                            if take > 0:
+                                self.map_resources[r][px, py] -= take
+                                agent.cargo[r.resource_id] = agent.cargo.get(r.resource_id, 0.0) + take
+                                free -= take
+                        elif val < 0:
+                            r = self.idx_to_res[idx]
+                            want_drop = float(-val)
+                            have = agent.cargo.get(r.resource_id, 0.0)
+                            drop = min(want_drop, have)
+
+                            if drop > 0 and self.map_depots[px, py] == r.resource_id:
+                                for depot in self.possible_depots:
+                                    if depot.resource_id == r.resource_id and np.all(depot.position == [px, py]):
+                                        depot.stock += drop
+                                        break
+                                agent.cargo[r.resource_id] -= drop
+                                agent.reward += 1.0 * drop  # delivery reward
 
 
         # Check termination conditions.
@@ -443,10 +479,9 @@ class parallel_env(ParallelEnv):
             agent_observation, obs_mask = self.observe(agent)
             obs_dict[agent] = agent_observation
             info_dict[agent]["visibility_mask"] = obs_mask
-
+            reward_dict[agent]=0
             # Get the reward for the agent.
-            rew = self.get_reward(agent, end_truncate, end_done)
-            reward_dict[agent] += rew
+            reward_dict[agent] = self.get_reward(agent, end_truncate, end_done)
 
         # Handle end of episode.
         if end_truncate or end_done:
@@ -463,19 +498,10 @@ class parallel_env(ParallelEnv):
 
     def get_reward(self, agent, end_truncate, end_done):
         ''' Returns the reward for the given agent. '''
+        
+   
 
-        # Provide reward for the agent to be in proximity of (30, 30).
-        target_position = np.array([2, 2], dtype=np.float32)
-        distance = np.linalg.norm(agent.position - target_position)
-        reward = -distance
-
-        # Provide a bonus reward if the resource actions are both 1.
-        # if agent.last_action is not None:
-        #     resource_actions = agent.last_action["resources"]
-        #     if np.allclose(resource_actions, 1.0, atol=0.1):
-        #         reward += 1.0
-
-        return reward
+        return agent.reward
 
 
     def _getAvailableActions(self, agent):
