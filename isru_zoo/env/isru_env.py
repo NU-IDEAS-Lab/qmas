@@ -94,6 +94,9 @@ class parallel_env(ParallelEnv):
             ) for r in self.possible_resources
         ]
 
+        # Record the map shape.
+        self.map_shape = (*self.world_dims, len(self.possible_resources) + 3)  # +3 for obstacles, agents, depots
+
         # Set up spaces.
         self.observation_spaces = spaces.Dict({
             agent: self.observation_space(agent) for agent in self.possible_agents
@@ -236,10 +239,6 @@ class parallel_env(ParallelEnv):
     def state_space(self):
         ''' Returns the state space of the environment. '''
 
-        # Determine number of layers in the map.
-        # Layers are: obstacles, agents, depots, resources.
-        num_layers = 1 + 1 + 1 + len(self.possible_resources)
-
         # Create the state space.
         # The state space is a complete observation of the environment.
         # This is not part of the standard PettingZoo API, but is useful for centralized training.
@@ -248,7 +247,7 @@ class parallel_env(ParallelEnv):
             "map": spaces.Box(
                 low=-np.inf,
                 high=np.inf,
-                shape=(*self.world_dims, num_layers),
+                shape=self.map_shape,
                 dtype=np.float32
             )
         })
@@ -304,10 +303,35 @@ class parallel_env(ParallelEnv):
         return self._populateStateSpace(self.possible_agents[0], force_visible=True)[0]
 
 
-    def observe(self, agent, radius=None, allow_done_agents=False):
+    def observe(self, agent, senders=set()):
         ''' Returns the observation for the given agent.'''
 
-        return self._populateStateSpace(agent)
+        # Collect local data.
+        local_obs, local_obs_mask = self._populateStateSpace(agent)
+        local_visible = local_obs_mask["map"] == True
+
+        # Set up the matrices.
+        map = np.empty_like(local_obs["map"], dtype=np.float32)
+        map_mask = np.zeros_like(local_obs_mask["map"], dtype=bool)
+
+        # Handle communicated data.
+        for sender in senders:
+            sender_obs, sender_obs_mask = self._populateStateSpace(sender)
+            sender_visible = sender_obs_mask["map"] == True
+            map[sender_visible] = sender_obs["map"][sender_visible]
+            map_mask[sender_visible] = True
+        
+        # Apply local observations (overwrite any communicated data).
+        map[local_visible] = local_obs["map"][local_visible]
+        map_mask[local_visible] = True
+
+        # Update the local observation.
+        obs = local_obs
+        obs["map"] = map
+        obs_mask = local_obs_mask
+        obs_mask["map"] = map_mask
+
+        return obs, obs_mask
 
 
     def available_actions(self, agent):
@@ -337,16 +361,21 @@ class parallel_env(ParallelEnv):
 
         obs_mask = {
             "id": True,
-            "map": np.ones(self.world_dims, dtype=bool)
+            "map": np.ones_like(map_combined, dtype=bool)
         }
 
         # Set everything outside the observation radius to be invisible.
         if not force_visible:
             radius = agent.observation_radius
             pos = agent.position.astype(np.int32)
-            obs_mask["map"] = np.zeros(self.world_dims, dtype=bool)
-            obs_mask["map"][max(0, pos[0] - radius):min(self.world_dims[0], pos[0] + radius + 1),
-                            max(0, pos[1] - radius):min(self.world_dims[1], pos[1] + radius + 1)] = True
+            x_min = max(0, pos[0] - radius)
+            x_max = min(self.world_dims[0], pos[0] + radius + 1)
+            y_min = max(0, pos[1] - radius)
+            y_max = min(self.world_dims[1], pos[1] + radius + 1)
+            obs_mask["map"][:x_min, :, :] = False
+            obs_mask["map"][x_max:, :, :] = False
+            obs_mask["map"][:, :y_min, :] = False
+            obs_mask["map"][:, y_max:, :] = False
         
         return obs, obs_mask
     
@@ -391,6 +420,7 @@ class parallel_env(ParallelEnv):
                 "ready": True
             } for agent in self.possible_agents
         }
+        senders = set()
 
         # Perform agent actions.
         for agent in self.agents:
@@ -411,6 +441,11 @@ class parallel_env(ParallelEnv):
                 new_position_int = new_position.astype(np.int32)
                 if self.map_obstacles[new_position_int[0], new_position_int[1]] == 0:
                     agent.position = new_position
+
+                # Handle communication.
+                if action["communication"][0] >= 0.5:
+                    senders.add(agent)
+
                 # Handle the resource actions.
                 # TODO: Implement resource pickup/dropoff using the action["resources"] values.
                 # for r in self.map_resources.keys():
@@ -432,7 +467,11 @@ class parallel_env(ParallelEnv):
 
         # Perform post-step calculations.
         for agent in self.possible_agents:
-            agent_observation, obs_mask = self.observe(agent)
+            # Perform observation.
+            agent_observation, obs_mask = self.observe(
+                agent,
+                senders = senders - {agent}
+            )
             obs_dict[agent] = agent_observation
             info_dict[agent]["visibility_mask"] = obs_mask
 
