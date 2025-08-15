@@ -13,12 +13,12 @@ Modify standard PyTorch distributions so they to make compatible with this codeb
 # Categorical
 class FixedCategorical(torch.distributions.Categorical):
     def sample(self):
-        return super().sample().unsqueeze(-1)
+        return super().sample(sample_shape=self.probs.shape[-1:]).T
 
     def log_probs(self, actions):
         return (
             super()
-            .log_prob(actions.squeeze(-1))
+            .log_prob(actions.T.squeeze(-1))
             .view(actions.size(0), -1)
             .sum(-1)
             .unsqueeze(-1)

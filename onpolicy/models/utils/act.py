@@ -24,14 +24,14 @@ class ACTLayer(nn.Module):
             elif action_space.__class__.__name__ == "Discrete":
                 action_dim = action_space.n
                 ao = Categorical(inputs_dim, action_dim, use_orthogonal, gain)
-                ao.action_dim = 1
+                ao.action_dim = action_dim
                 ao.available_action_dim = action_space.n
                 return [ao]
             
             elif action_space.__class__.__name__ == "Box" and np.issubdtype(action_space.dtype, np.integer):
-                action_dim = np.prod(action_space.high - action_space.low) + 1
+                action_dim = len(action_space.low)
                 ao = Categorical(inputs_dim, action_dim, use_orthogonal, gain)
-                ao.action_dim = 1
+                ao.action_dim = action_dim
                 ao.available_action_dim = np.prod(action_space.high - action_space.low) + 1
                 return [ao]
             
@@ -39,21 +39,23 @@ class ACTLayer(nn.Module):
                 action_outs = []
                 for n in action_space.nvec:
                     ao = Categorical(inputs_dim, n, use_orthogonal, gain)
-                    ao.action_dim = 1
+                    ao.action_dim = action_dim
                     ao.available_action_dim = n
                     action_outs.append(ao)
                 return action_outs
 
             elif action_space.__class__.__name__ == "Box":
-                ao = DiagGaussian(inputs_dim, action_space.shape[0], use_orthogonal, gain)
-                ao.action_dim = action_space.shape[0]
+                action_dim = np.prod(action_space.shape)
+                ao = DiagGaussian(inputs_dim, action_dim, use_orthogonal, gain)
+                ao.action_dim = action_dim
                 ao.available_action_dim = np.prod(action_space.high - action_space.low) + 1
                 return [ao]
 
             elif action_space.__class__.__name__ == "MultiBinary":
-                ao = Bernoulli(inputs_dim, action_space.shape[0], use_orthogonal, gain)
-                ao.action_dim = 1
-                ao.available_action_dim = 2
+                action_dim = np.prod(action_space.shape)
+                ao = Bernoulli(inputs_dim, action_dim, use_orthogonal, gain)
+                ao.action_dim = action_dim
+                ao.available_action_dim = action_dim
                 return [ao]
 
             else:
@@ -143,7 +145,7 @@ class ACTLayer(nn.Module):
         available_actions_idx = 0
 
         for module in self.action_outs:
-            if isinstance(module, DiagGaussian):
+            if isinstance(module, DiagGaussian) or available_actions is None:
                 action_logits = module(x)
             else:
                 aa = available_actions[:, available_actions_idx:available_actions_idx + module.available_action_dim]
