@@ -22,40 +22,51 @@ class ACTLayer(nn.Module):
                 return action_outs
 
             elif action_space.__class__.__name__ == "Discrete":
-                action_dim = action_space.n
-                ao = Categorical(inputs_dim, action_dim, use_orthogonal, gain)
-                ao.action_dim = action_dim
-                ao.available_action_dim = action_space.n
+                num_categories = action_space.n
+                ao = Categorical(inputs_dim, num_categories, use_orthogonal, gain)
+                ao.action_dim = 1
+                ao.available_action_dim = num_categories
                 return [ao]
             
             elif action_space.__class__.__name__ == "Box" and np.issubdtype(action_space.dtype, np.integer):
-                action_dim = len(action_space.low)
-                ao = Categorical(inputs_dim, action_dim, use_orthogonal, gain)
-                ao.action_dim = action_dim
-                ao.available_action_dim = np.prod(action_space.high - action_space.low) + 1
-                return [ao]
+                # If Box with integer values, treat it as a Discrete space
+                actions_outs = []
+                num_distributions = np.prod(action_space.shape)
+                num_categories = action_space.high[0] - action_space.low[0] + 1
+                for _ in range(num_distributions):
+                    ao = Categorical(inputs_dim, num_categories, use_orthogonal, gain)
+                    ao.action_dim = 1
+                    ao.available_action_dim = num_categories
+                    actions_outs.append(ao)
+                return actions_outs
+
+                # num_categories = np.prod(action_space.high - action_space.low) + 1
+                # ao = Categorical(inputs_dim, num_categories, use_orthogonal, gain)
+                # ao.action_dim = np.prod(action_space.shape)
+                # ao.available_action_dim = num_categories
+                # return [ao]
             
             elif action_space.__class__.__name__ == "MultiDiscrete":
                 action_outs = []
                 for n in action_space.nvec:
                     ao = Categorical(inputs_dim, n, use_orthogonal, gain)
-                    ao.action_dim = action_dim
+                    ao.action_dim = 1
                     ao.available_action_dim = n
                     action_outs.append(ao)
                 return action_outs
 
             elif action_space.__class__.__name__ == "Box":
-                action_dim = np.prod(action_space.shape)
-                ao = DiagGaussian(inputs_dim, action_dim, use_orthogonal, gain)
-                ao.action_dim = action_dim
+                num_outputs = np.prod(action_space.shape)
+                ao = DiagGaussian(inputs_dim, num_outputs, use_orthogonal, gain)
+                ao.action_dim = num_outputs
                 ao.available_action_dim = np.prod(action_space.high - action_space.low) + 1
                 return [ao]
 
             elif action_space.__class__.__name__ == "MultiBinary":
-                action_dim = np.prod(action_space.shape)
-                ao = Bernoulli(inputs_dim, action_dim, use_orthogonal, gain)
-                ao.action_dim = action_dim
-                ao.available_action_dim = action_dim
+                num_categories = np.prod(action_space.shape)
+                ao = Bernoulli(inputs_dim, num_categories, use_orthogonal, gain)
+                ao.action_dim = 1
+                ao.available_action_dim = num_categories
                 return [ao]
 
             else:
