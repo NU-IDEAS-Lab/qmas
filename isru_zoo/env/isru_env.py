@@ -306,7 +306,7 @@ class parallel_env(ParallelEnv):
         return spaces.Dict({
             # Movement is specified by relative motion in two dimensions.
             # The agent can only move one space at a time.
-            "movement": spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32),
+            "movement": spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.int32),
 
             # Communication is a simple boolean flag.
             "communication": spaces.Box(low=0, high=1, shape=(1,), dtype=np.int32),
@@ -314,7 +314,7 @@ class parallel_env(ParallelEnv):
             # Resource actions are represented as a floating point value for each resource type.
             # To pick up resources, the agent uses a positive number.
             # To drop resources, the agent uses a negative number.
-            "resources": spaces.Box(low=-np.inf, high=np.inf, shape=(len(self.possible_resources),), dtype=np.float32),
+            "resources": spaces.Box(low=-self.default_hauler_capacity, high=self.default_hauler_capacity, shape=(len(self.possible_resources),), dtype=np.int32),
         })
 
 
