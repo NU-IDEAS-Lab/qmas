@@ -48,7 +48,9 @@ class PettingzooRunner(Runner):
         start = time.time()
         episodes = int(self.num_env_steps) // self.episode_length // self.n_rollout_threads
 
-        for episode in (progress_bar := tqdm(range(episodes))):
+        for episode in (progress_bar := tqdm(range(episodes), dynamic_ncols=True)):
+            start_episode = time.time()
+
             if self.use_linear_lr_decay:
                 self.trainer.policy.lr_decay(episode, episodes)
             
@@ -90,7 +92,7 @@ class PettingzooRunner(Runner):
                 end = time.time()
                 
                 train_infos["average_episode_rewards"] = avg_episode_rewards
-                train_infos["fps"] = total_num_steps / (end - start)
+                train_infos["fps"] = self.episode_length * self.n_rollout_threads / (end - start_episode)
                 self.log_train(train_infos, total_num_steps)
                 self.log_env(self.env_infos, total_num_steps)
                 self.env_infos = defaultdict(list)
