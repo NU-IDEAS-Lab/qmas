@@ -244,6 +244,13 @@ class PettingzooRunner(Runner):
             #     wandb.log({k: v}, step=total_num_steps)
             # elif len(v) > 0:
             if len(v) > 0:
+                if isinstance(v[0], np.ndarray):
+                    v = np.array(v)
+                
+                    # Don't log large matrices.
+                    if v.ndim > 2:
+                        continue
+
                 if self.use_wandb:
                     wandb.log({k: np.mean(v, axis=0)}, step=total_num_steps)
                 else:
