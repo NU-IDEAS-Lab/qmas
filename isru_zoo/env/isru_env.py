@@ -259,7 +259,7 @@ class parallel_env(ParallelEnv):
             plt.axis("off")
         
         # Display the total reward for this step. Position this text below the subplots. Do not use suptitle.
-        plt.figtext(0.5, 0.01, f"Step: {self.step_count}, Total Reward: {sum([self.get_reward(agent, False, False, {}) for agent in self.agents]):.2f}", ha="center", fontsize=8)
+        plt.figtext(0.5, 0.01, f"Step: {self.step_count}, Total Reward: {sum([self.get_reward(agent, False, False) for agent in self.agents]):.2f}", ha="center", fontsize=8)
 
         if self.render_mode == "human":
             # Show the plot.
@@ -472,9 +472,11 @@ class parallel_env(ParallelEnv):
         info_dict = {
             agent: {
                 "ready": True,
-                "resources_deposited": {
-                    r: 0.0 for r in self.possible_resources
-                },
+            } for agent in self.possible_agents
+        }
+        resources_deposited = {
+            agent: {
+                r: 0.0 for r in self.possible_resources
             } for agent in self.possible_agents
         }
         senders = set()
@@ -535,7 +537,7 @@ class parallel_env(ParallelEnv):
                                         break
                                 agent.cargo[r.resource_id] -= drop
                                 # Record the resources deposited.
-                                info_dict[agent]["resources_deposited"][r] += drop
+                                resources_deposited[agent][r] += drop
 
         # Check termination conditions.
         end_truncate = lastStep or (self.max_cycles >= 0 and self.step_count >= self.max_cycles)
@@ -552,7 +554,7 @@ class parallel_env(ParallelEnv):
             info_dict[agent]["visibility_mask"] = obs_mask
 
             # Calculate reward.
-            reward_dict[agent] += self.get_reward(agent, end_truncate, end_done, info_dict[agent])
+            reward_dict[agent] += self.get_reward(agent, end_truncate, end_done, resources_deposited[agent])
 
         # Handle end of episode.
         if end_truncate or end_done:
@@ -567,14 +569,14 @@ class parallel_env(ParallelEnv):
         return obs_dict, reward_dict, self.dones, truncated_dict, info_dict
 
 
-    def get_reward(self, agent, end_truncate, end_done, info):
+    def get_reward(self, agent, end_truncate, end_done, resources_deposited=None):
         ''' Returns the reward for the given agent. '''
         
         reward = 0.0
 
         # Reward for depositing resources.
-        if "resources_deposited" in info:
-            for r, amount in info["resources_deposited"].items():
+        if "resources_deposited" is not None:
+            for r, amount in resources_deposited.items():
                 reward += r.reward_deposit * amount
 
         return reward
