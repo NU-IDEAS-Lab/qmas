@@ -349,7 +349,7 @@ class parallel_env(ParallelEnv):
         local_obs, local_obs_mask = self._populateStateSpace(agent)
 
         # Set up the matrices.
-        map = np.empty_like(local_obs["map"], dtype=np.float32)
+        map = np.copy(local_obs["map"])
         map_mask = np.zeros_like(local_obs_mask["map"], dtype=bool)
 
         # Handle communicated data.
@@ -364,15 +364,15 @@ class parallel_env(ParallelEnv):
         map_mask |= local_obs_mask["map"]
 
         # Update the local observation.
-        obs = local_obs
-        obs["map"] = map
-        obs_mask = local_obs_mask
-        obs_mask["map"] = map_mask
+        combined_obs = local_obs
+        combined_obs["map"] = map
+        combined_obs_mask = local_obs_mask
+        combined_obs_mask["map"] = map_mask
 
         # Debugging: highlight the visible area in the map.
         # obs["map"][obs_mask["map"], :] += 0.2
 
-        return obs, obs_mask
+        return combined_obs, combined_obs_mask
 
 
     def available_actions(self, agent):
