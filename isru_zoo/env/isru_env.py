@@ -28,6 +28,8 @@ def add_args(parser):
                         help="The size of the world. The world is a square with side length `world_size`.")
     parser.add_argument("--observation_radius", type=int, default=10,
                         help="The radius within which agents can observe each other and resources.")
+    parser.add_argument("--hauler_capacity", type=float, default=10.0,
+                        help="The maximum amount of resources a hauler can carry.")
     parser.add_argument("--render_mode", type=str, default="human",
                         choices=parallel_env.metadata["render_modes"],
                         help="The rendering mode for the environment.")
@@ -71,6 +73,7 @@ class parallel_env(ParallelEnv):
             num_obstacles: int = 10,
             world_size: int = 50,
             observation_radius: int = 10,
+            hauler_capacity: float = 10.0,
             render_mode: str = "human",
         ):
         """
@@ -84,6 +87,7 @@ class parallel_env(ParallelEnv):
         self.num_obstacles = num_obstacles
         self.render_mode = render_mode
         self.default_observation_radius = observation_radius
+        self.default_hauler_capacity = hauler_capacity
 
         # Set up entities.
         self.possible_agents = \
@@ -93,7 +97,7 @@ class parallel_env(ParallelEnv):
             ) for _ in range(num_extractors)] + \
             [Hauler(
                 position=self.get_random_position(),
-                carry_capacity=10.0,
+                carry_capacity=self.default_hauler_capacity,
                 observation_radius=self.default_observation_radius
             ) for _ in range(num_haulers)] + \
             [Prospector(
