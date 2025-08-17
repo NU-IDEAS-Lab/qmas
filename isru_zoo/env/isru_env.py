@@ -22,7 +22,7 @@ def add_args(parser):
                         help="The number of hauler vehicles to place in the world.")
     parser.add_argument("--num_prospectors", type=int, default=1,
                         help="The number of prospector vehicles to place in the world.")
-    parser.add_argument("--num_obstacles", type=int, default=20,
+    parser.add_argument("--num_obstacles", type=int, default=0,
                         help="The number of obstacles to place in the world.")
     parser.add_argument("--world_size", type=int, default=50,
                         help="The size of the world. The world is a square with side length `world_size`.")
@@ -581,7 +581,7 @@ class parallel_env(ParallelEnv):
         reward = 0.0
 
         # TEST: Provide reward based on distance of agent to specific location.
-        target_position = np.array([0.0, 0.0], dtype=np.float32)
+        target_position = np.array([2.0, 2.0], dtype=np.float32)
         dist = np.linalg.norm(agent.position.astype(np.float32) - target_position)
         reward = -dist
 
