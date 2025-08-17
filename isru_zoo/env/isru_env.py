@@ -310,7 +310,7 @@ class parallel_env(ParallelEnv):
         return spaces.Dict({
             # Movement is specified by relative motion in two dimensions.
             # The agent can only move one space at a time.
-            "movement": spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.int32),
+            "movement": spaces.Box(low=0, high=1, shape=(2,), dtype=np.int32),
 
             # Communication is a simple boolean flag.
             "communication": spaces.Box(low=0, high=1, shape=(1,), dtype=np.int32),
@@ -486,6 +486,12 @@ class parallel_env(ParallelEnv):
             if agent in action_dict:
                 # Parse the action.
                 action = spaces.unflatten(self.action_space(agent), action_dict[agent])
+
+                # Check for action validity.
+                if not self.action_space(agent).contains(action):
+                    raise ValueError(f"Invalid action for agent {agent}: {action}")
+
+                # Record the action.
                 agent.last_action = action
 
                 # Set agent velocity.
