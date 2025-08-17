@@ -310,7 +310,7 @@ class parallel_env(ParallelEnv):
         return spaces.Dict({
             # Movement is specified by relative motion in two dimensions.
             # The agent can only move one space at a time.
-            "movement": spaces.Box(low=0, high=1, shape=(2,), dtype=np.int32),
+            "movement": spaces.Box(low=-1, high=1, shape=(2,), dtype=np.int32),
 
             # Communication is a simple boolean flag.
             "communication": spaces.Box(low=0, high=1, shape=(1,), dtype=np.int32),
@@ -580,10 +580,15 @@ class parallel_env(ParallelEnv):
         
         reward = 0.0
 
-        # Reward for depositing resources.
-        if "resources_deposited" is not None:
-            for r, amount in resources_deposited.items():
-                reward += r.reward_deposit * amount
+        # TEST: Provide reward based on distance of agent to specific location.
+        target_position = np.array([0.0, 0.0], dtype=np.float32)
+        dist = np.linalg.norm(agent.position.astype(np.float32) - target_position)
+        reward = -dist
+
+        # # Reward for depositing resources.
+        # if "resources_deposited" is not None:
+        #     for r, amount in resources_deposited.items():
+        #         reward += r.reward_deposit * amount
 
         return reward
 
