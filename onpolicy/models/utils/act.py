@@ -41,12 +41,6 @@ class ACTLayer(nn.Module):
                     ao.start = action_space.low[i]
                     actions_outs.append(ao)
                 return actions_outs
-
-                # num_categories = np.prod(action_space.high - action_space.low) + 1
-                # ao = Categorical(inputs_dim, num_categories, use_orthogonal, gain)
-                # ao.action_dim = np.prod(action_space.shape)
-                # ao.available_action_dim = num_categories
-                # return [ao]
             
             elif action_space.__class__.__name__ == "MultiDiscrete":
                 action_outs = []
