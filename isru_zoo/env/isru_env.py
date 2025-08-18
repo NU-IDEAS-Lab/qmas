@@ -129,7 +129,8 @@ class parallel_env(ParallelEnv):
         self.action_spaces = spaces.Dict({
             agent: self.action_space(agent) for agent in self.possible_agents
         })
-        
+        self.nearest_tile=None
+        self.range=3
         # Reset the environment.
         self.reset()
 
@@ -221,7 +222,7 @@ class parallel_env(ParallelEnv):
     def get_random_position(self):
         ''' Returns a random position in the world. '''
 
-        return np.random.uniform(-self.world_dims / 2, self.world_dims / 2).astype(np.float32)
+        return np.random.uniform(0, self.world_dims).astype(np.float32)
 
 
     def render(self, pred=None, figsize=(9, 6), history_length=2):
@@ -491,6 +492,11 @@ class parallel_env(ParallelEnv):
                 # Set agent velocity.
                 agent.velocity = action["movement"].astype(np.int32)
                 agent.velocity = np.clip(agent.velocity, -1.0, 1.0)
+                if isinstance(agent, Prospector):
+                    relative_position=self.get_nearest_uncleaned(agent)
+                    old_distance = np.linalg.norm(relative_position)
+                    count=self.get_resources_discovered_count(agent)
+                    reward_dict[agent]+=0.1*count
 
                 # Move the agent.
                 raw_position=agent.position + agent.velocity
@@ -500,6 +506,15 @@ class parallel_env(ParallelEnv):
                 new_position_int = new_position.astype(np.int32)
                 if self.map_obstacles[new_position_int[0], new_position_int[1]] == 0:
                     agent.position = new_position
+                if isinstance(agent, Prospector):
+                    relative_position=self.get_nearest_uncleaned(agent)
+                    new_distance=np.linalg.norm(relative_position)
+                    count=self.get_resources_discovered_count(agent)
+                    reward_dict[agent]+=0.1*count
+                    if new_distance < old_distance:
+                        reward_dict[agent] += 0.2
+                    else:
+                        reward_dict[agent] -= 0.05
 
                 # Handle communication.
                 if action["communication"][0] >= 0.5:
@@ -575,12 +590,53 @@ class parallel_env(ParallelEnv):
         reward = 0.0
 
         # Reward for depositing resources.
-        if "resources_deposited" is not None:
+        if "resources_deposited" != None:
             for r, amount in resources_deposited.items():
                 reward += r.reward_deposit * amount
 
         return reward
 
+    def get_nearest_uncleaned(self, agent):
+        
+        pos = agent.position
+        # Get all indices where there has resources.
+        indices = np.argwhere(self.map_resources == 1)
+        if indices.size == 0:
+            return np.array([0, 0], dtype=np.float32)
+        
+        # Compute differences from pos and squared distances (avoid sqrt for performance)
+        diffs = indices - pos  # shape: (num_uncleaned, 2)
+        squared_distances = np.sum(diffs**2, axis=1)
+        
+        # Find the index of the minimum squared distance
+        min_idx = np.argmin(squared_distances)
+        self.nearest_tile = indices[min_idx]
+        
+        # Return the relative difference as float32.
+        return (self.nearest_tile - pos).astype(np.float32)
+    
+    def get_resources_discovered_count(self, agent):
+        ''' Returns the number of resource cells discovered within the agent's observation radius.
+            
+            Args:
+                agent: The agent to calculate discoveries for
+                
+            Returns:
+                int: The number of discovered resource cells within observation radius
+        '''
+        # Calculate the visible area based on a circular observation radius
+        radius = agent.observation_radius
+        pos = agent.position.astype(np.int32)
+        
+        # Create a visibility mask for the current agent position
+        visible = (np.arange(self.world_dims[0])[:, None] - pos[0]) ** 2 + \
+                 (np.arange(self.world_dims[1])[None, :] - pos[1]) ** 2 <= radius ** 2
+                 
+        # Count how many discovered resource cells are within the agent's current visibility
+        discovered_in_radius = np.logical_and(self.mask_map_resources_discovered, visible)
+        
+        # Return the total count of discovered resources within radius (regardless of type)
+        return np.sum(discovered_in_radius)
 
     def _getAvailableActions(self, agent):
         ''' Returns the available actions for the given agent. '''
