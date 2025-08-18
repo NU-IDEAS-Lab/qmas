@@ -107,8 +107,7 @@ class parallel_env(ParallelEnv):
 
         # Set up the possible resources.
         self.possible_resources = [
-            TestResource1(10),
-            TestResource2(5)
+            TestResource1(10)
         ]
 
         # Set up depots.
