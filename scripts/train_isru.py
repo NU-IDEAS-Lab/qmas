@@ -10,7 +10,7 @@ args = [
     "--user_name", "ideas-mas",
 
 	"--num_extractors", "1",
-    "--num_haulers", "0",
+    "--num_haulers", "1",
     "--num_prospectors", "1",
 
     "--hauler_capacity", "10",
@@ -19,11 +19,11 @@ args = [
     "--observation_radius", "10",
 
     "--num_env_steps", "1000000",
-    "--episode_length", "50",
-    "--max_cycles", "50",
+    "--episode_length", "200",
+    "--max_cycles", "200",
 
-    # "--algorithm_class", "qmas.variant_two_modules.algorithm.QmasAlgorithm",
-    # "--policy_class", "qmas.variant_two_modules.policy.QmasPolicy",
+    "--algorithm_class", "qmas.variant_two_modules.algorithm.QmasAlgorithm",
+    "--policy_class", "qmas.variant_two_modules.policy.QmasPolicy",
     "--algorithm_name", "mappo",
     "--use_centralized_V",
     "--use_gae",
@@ -41,7 +41,7 @@ args = [
 
     "--n_rollout_threads", "500",
     "--cuda",
-    "--cuda_idx", "6",
+    "--cuda_idx", "0",
 
     "--save_interval", "1000",
     "--results_dir", "/data/group/mas/qmas/results",
