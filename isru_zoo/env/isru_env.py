@@ -392,7 +392,12 @@ class parallel_env(ParallelEnv):
         map_agents = np.zeros(self.world_dims, dtype=np.int32)
         for i, a in enumerate(self.agents):
             pos = a.position.astype(np.int32)
-            map_agents[pos[0], pos[1]] = i + 1  # Start from 1 to avoid confusion with empty space.
+            if a == agent and not force_visible:
+                # Distinguish the agent in the map.
+                map_agents[pos[0], pos[1]] = 255
+            else:
+                # Index from 1 to avoid confusion with empty space.
+                map_agents[pos[0], pos[1]] = i + 1
 
         # Build the combined map.
         layers = [self.map_obstacles, map_agents, self.map_depots, *self.map_resources.values()]
