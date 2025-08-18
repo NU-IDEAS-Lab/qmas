@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.functional import scaled_dot_product_attention
+
 from onpolicy.models.utils.util import init, check
 from onpolicy.models.utils.cnn import CNNBase
 from onpolicy.models.utils.mlp import MLPBase, MLPLayer
@@ -16,6 +18,26 @@ from torch_geometric.utils import to_dense_batch
 
 import numpy as np
 
+
+class SelfAttention(nn.Module):
+    ''' Taken in large part from https://medium.com/@heyamit10/implement-self-attention-and-cross-attention-in-pytorch-cfe17ab0b3ee '''
+    def __init__(self, embed_size):
+        super(SelfAttention, self).__init__()
+        self.embed_size = embed_size
+        # Define linear transformations for Q, K, V
+        self.query = nn.Linear(embed_size, embed_size)
+        self.key = nn.Linear(embed_size, embed_size)
+        self.value = nn.Linear(embed_size, embed_size)
+
+    def forward(self, x, mask=None):
+        # Generate Q, K, V matrices
+        Q = self.query(x)
+        K = self.key(x)
+        V = self.value(x)
+        
+        # Calculate attention using our scaled dot-product function
+        out = scaled_dot_product_attention(Q, K, V, attn_mask=mask)
+        return out
 
 class R_Actor(nn.Module):
     """
@@ -41,6 +63,10 @@ class R_Actor(nn.Module):
         self.device = device
         self.MAX_NEIGHBORS = 15
         self.MAX_NODES = 50
+
+        obs_shape = get_shape_from_obs_space(obs_space)
+        self._use_cnn = len(obs_shape) == 3
+        self._use_mlp = not self._use_cnn
 
         if self._use_gnn:
             # Split up the graph and non-graph space.
@@ -71,12 +97,22 @@ class R_Actor(nn.Module):
                 self.mlp0 = MLPLayer(input_dim=input_dim, output_dim=self.hidden_size, hidden_size=self.hidden_size, layer_N=3, use_orthogonal=args.use_orthogonal, use_ReLU=args.use_ReLU)
                 input_dim = self.hidden_size
         else:
-            obs_shape = get_shape_from_obs_space(obs_space)
-            base = CNNBase if len(obs_shape) == 3 else MLPBase
-            self.base = base(args, obs_shape)
-            input_dim = self.hidden_size
+            input_dim = np.prod(obs_shape)
+
+            if self._use_cnn:
+                self.cnn = CNNBase(args, obs_shape)
+                input_dim = self.hidden_size
+
+            if self._use_mlp:
+                # Add self-attention mechanism.
+                self.attention = SelfAttention(input_dim)
+                input_dim = input_dim
+
+                self.mlp = MLPBase(args, input_dim)
+                input_dim = self.hidden_size
+
         
-        print(f"R_Actor: Using base type {self.base.__class__.__name__}.")
+        print(f"R_Actor: Use GNN: {self._use_gnn}, Use CNN: {self._use_cnn}, Use MLP: {self._use_mlp}")
 
         if self._use_naive_recurrent_policy or self._use_recurrent_policy:
             self.rnn = RNNLayer(input_dim, self.hidden_size, self._recurrent_N, self._use_orthogonal)
@@ -155,7 +191,14 @@ class R_Actor(nn.Module):
                 actor_features = self.mlp0(actor_features)
         else:
             obs = check(obs).to(**self.tpdv)
-            actor_features = self.base(obs)
+
+            actor_features = obs
+            if self._use_cnn:
+                actor_features = self.cnn(obs)
+            if self._use_mlp:
+                # Apply self-attention mechanism.
+                actor_features = self.attention(actor_features)
+                actor_features = self.mlp(actor_features)
 
         if self._use_naive_recurrent_policy or self._use_recurrent_policy:
             actor_features, rnn_states = self.rnn(actor_features, rnn_states, masks)
@@ -237,7 +280,14 @@ class R_Actor(nn.Module):
                 actor_features = self.mlp0(actor_features)
         else:
             obs = check(obs).to(**self.tpdv)
-            actor_features = self.base(obs)
+
+            actor_features = obs
+            if self._use_cnn:
+                actor_features = self.cnn(obs)
+            if self._use_mlp:
+                # Apply self-attention mechanism.
+                actor_features = self.attention(actor_features)
+                actor_features = self.mlp(actor_features)
 
         if self._use_naive_recurrent_policy or self._use_recurrent_policy:
             actor_features, rnn_states = self.rnn(actor_features, rnn_states, masks)
@@ -271,12 +321,26 @@ class R_Critic(nn.Module):
         self.tpdv = dict(dtype=torch.float32, device=device)
         init_method = [nn.init.xavier_uniform_, nn.init.orthogonal_][self._use_orthogonal]
 
+        obs_shape = get_shape_from_obs_space(cent_obs_space)
+        self._use_cnn = len(obs_shape) == 3
+        self._use_mlp = not self._use_cnn
+
         if self._use_gnn:
             raise NotImplementedError("GNN not implemented for R_Critic")
         else:
-            cent_obs_shape = get_shape_from_obs_space(cent_obs_space)
-            base = CNNBase if len(cent_obs_shape) == 3 else MLPBase
-            self.base = base(args, cent_obs_shape)
+            input_dim = np.prod(obs_shape)
+
+            if self._use_cnn:
+                self.cnn = CNNBase(args, obs_shape)
+                input_dim = self.hidden_size
+
+            if self._use_mlp:
+                # Add self-attention mechanism.
+                self.attention = SelfAttention(input_dim)
+                input_dim = input_dim
+
+                self.mlp = MLPBase(args, input_dim)
+                input_dim = self.hidden_size
 
         if self._use_naive_recurrent_policy or self._use_recurrent_policy:
             self.rnn = RNNLayer(self.hidden_size, self.hidden_size, self._recurrent_N, self._use_orthogonal)
@@ -305,7 +369,14 @@ class R_Critic(nn.Module):
         rnn_states = check(rnn_states).to(**self.tpdv)
         masks = check(masks).to(**self.tpdv)
 
-        critic_features = self.base(cent_obs)
+        critic_features = cent_obs
+        if self._use_cnn:
+            critic_features = self.cnn(cent_obs)
+        if self._use_mlp:
+            # Apply self-attention mechanism.
+            critic_features = self.attention(critic_features)
+            critic_features = self.mlp(critic_features)
+        
         if self._use_naive_recurrent_policy or self._use_recurrent_policy:
             critic_features, rnn_states = self.rnn(critic_features, rnn_states, masks)
         values = self.v_out(critic_features)
