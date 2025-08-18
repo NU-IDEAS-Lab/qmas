@@ -585,15 +585,10 @@ class parallel_env(ParallelEnv):
         
         reward = 0.0
 
-        # TEST: Provide reward based on distance of agent to specific location.
-        target_position = np.array([2.0, 2.0], dtype=np.float32)
-        dist = np.linalg.norm(agent.position.astype(np.float32) - target_position)
-        reward = -dist
-
-        # # Reward for depositing resources.
-        # if "resources_deposited" is not None:
-        #     for r, amount in resources_deposited.items():
-        #         reward += r.reward_deposit * amount
+        # Reward for depositing resources.
+        if "resources_deposited" is not None:
+            for r, amount in resources_deposited.items():
+                reward += r.reward_deposit * amount
 
         return reward
 
