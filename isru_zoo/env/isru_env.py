@@ -22,7 +22,7 @@ def add_args(parser):
                         help="The number of hauler vehicles to place in the world.")
     parser.add_argument("--num_prospectors", type=int, default=1,
                         help="The number of prospector vehicles to place in the world.")
-    parser.add_argument("--num_obstacles", type=int, default=20,
+    parser.add_argument("--num_obstacles", type=int, default=0,
                         help="The number of obstacles to place in the world.")
     parser.add_argument("--world_size", type=int, default=50,
                         help="The size of the world. The world is a square with side length `world_size`.")
@@ -311,7 +311,7 @@ class parallel_env(ParallelEnv):
         return spaces.Dict({
             # Movement is specified by relative motion in two dimensions.
             # The agent can only move one space at a time.
-            "movement": spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.int32),
+            "movement": spaces.Box(low=-1, high=1, shape=(2,), dtype=np.int32),
 
             # Communication is a simple boolean flag.
             "communication": spaces.Box(low=0, high=1, shape=(1,), dtype=np.int32),
@@ -393,7 +393,10 @@ class parallel_env(ParallelEnv):
         map_agents = np.zeros(self.world_dims, dtype=np.int32)
         for i, a in enumerate(self.agents):
             pos = a.position.astype(np.int32)
-            map_agents[pos[0], pos[1]] = i + 1  # Start from 1 to avoid confusion with empty space.
+            map_agents[pos[0], pos[1]] = 1 + a.entity_type.value
+            if a == agent and not force_visible:
+                # Distinguish the agent in the map.
+                map_agents[pos[0], pos[1]] += 255
 
         # Build the combined map.
         layers = [self.map_obstacles, map_agents, self.map_depots, *self.map_resources.values()]
@@ -487,6 +490,12 @@ class parallel_env(ParallelEnv):
             if agent in action_dict:
                 # Parse the action.
                 action = spaces.unflatten(self.action_space(agent), action_dict[agent])
+
+                # Check for action validity.
+                if not self.action_space(agent).contains(action):
+                    raise ValueError(f"Invalid action for agent {agent}: {action}")
+
+                # Record the action.
                 agent.last_action = action
 
                 # Set agent velocity.
@@ -590,7 +599,7 @@ class parallel_env(ParallelEnv):
         reward = 0.0
 
         # Reward for depositing resources.
-        if "resources_deposited" != None:
+        if resources_deposited != None:
             for r, amount in resources_deposited.items():
                 reward += r.reward_deposit * amount
 
