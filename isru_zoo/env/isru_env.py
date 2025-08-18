@@ -295,6 +295,13 @@ class parallel_env(ParallelEnv):
             )
         })
 
+        # return spaces.Box(
+        #     low=-np.inf,
+        #     high=np.inf,
+        #     shape=self.map_shape,
+        #     dtype=np.float32
+        # )
+
 
     @functools.cache
     def observation_space(self, agent):
@@ -352,6 +359,9 @@ class parallel_env(ParallelEnv):
         # Collect local data.
         local_obs, local_obs_mask = self._populateStateSpace(agent)
 
+        # TODO: Temp
+        return local_obs, local_obs_mask
+
         # Set up the matrices.
         map = np.copy(local_obs["map"])
         map_mask = np.zeros_like(local_obs_mask["map"], dtype=bool)
@@ -392,10 +402,20 @@ class parallel_env(ParallelEnv):
         map_agents = np.zeros(self.world_dims, dtype=np.int32)
         for i, a in enumerate(self.agents):
             pos = a.position.astype(np.int32)
-            map_agents[pos[0], pos[1]] = i + 1  # Start from 1 to avoid confusion with empty space.
+            if a == agent and not force_visible:
+                # Distinguish the agent in the map.
+                map_agents[pos[0], pos[1]] = 255
+            else:
+                # Index from 1 to avoid confusion with empty space.
+                map_agents[pos[0], pos[1]] = i + 1
+
+        # TODO: test
+        test = np.zeros_like(self.map_depots, dtype=np.float32)
+        test[2, 2] = 1.0
 
         # Build the combined map.
-        layers = [self.map_obstacles, map_agents, self.map_depots, *self.map_resources.values()]
+        # layers = [self.map_obstacles, map_agents, test]
+        layers = [self.map_obstacles, map_agents, test, *self.map_resources.values()]
         map_combined = np.stack(layers, axis=-1)
 
         # Create the observation.
@@ -427,11 +447,12 @@ class parallel_env(ParallelEnv):
                 obs_mask["map"][:, :, resource_layer:] = False
 
         # Update the discovered resources mask.
-        if isinstance(agent, Prospector) and not force_visible:
-            for i, r in enumerate(self.possible_resources):
-                self.mask_map_resources_discovered |= (self.map_resources[r] > 0) & obs_mask["map"][:, :, resource_layer + i]
+        # if isinstance(agent, Prospector) and not force_visible:
+        #     for i, r in enumerate(self.possible_resources):
+        #         self.mask_map_resources_discovered |= (self.map_resources[r] > 0) & obs_mask["map"][:, :, resource_layer + i]
         
         return obs, obs_mask
+        # return obs["map"], obs_mask["map"]
     
     def _update_adversary_velocity(self, adversary):
         """
@@ -506,6 +527,9 @@ class parallel_env(ParallelEnv):
                 new_position_int = new_position.astype(np.int32)
                 if self.map_obstacles[new_position_int[0], new_position_int[1]] == 0:
                     agent.position = new_position
+
+                # TODO: test
+                continue
 
                 # Handle communication.
                 if action["communication"][0] >= 0.5:
