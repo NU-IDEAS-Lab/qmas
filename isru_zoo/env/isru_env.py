@@ -393,7 +393,7 @@ class parallel_env(ParallelEnv):
         map_agents = np.zeros(self.world_dims, dtype=np.int32)
         for i, a in enumerate(self.agents):
             pos = a.position.astype(np.int32)
-            map_agents[pos[0], pos[1]] = 1 + a.entity_type.value
+            map_agents[pos[0], pos[1]] = 1 + a.role.value
             if a == agent and not force_visible:
                 # Distinguish the agent in the map.
                 map_agents[pos[0], pos[1]] += 255
