@@ -392,12 +392,10 @@ class parallel_env(ParallelEnv):
         map_agents = np.zeros(self.world_dims, dtype=np.int32)
         for i, a in enumerate(self.agents):
             pos = a.position.astype(np.int32)
+            map_agents[pos[0], pos[1]] = a.entity_type.value
             if a == agent and not force_visible:
                 # Distinguish the agent in the map.
-                map_agents[pos[0], pos[1]] = 255
-            else:
-                # Index from 1 to avoid confusion with empty space.
-                map_agents[pos[0], pos[1]] = i + 1
+                map_agents[pos[0], pos[1]] += 255
 
         # Build the combined map.
         layers = [self.map_obstacles, map_agents, self.map_depots, *self.map_resources.values()]
@@ -586,7 +584,7 @@ class parallel_env(ParallelEnv):
         reward = 0.0
 
         # Reward for depositing resources.
-        if "resources_deposited" is not None:
+        if resources_deposited != None:
             for r, amount in resources_deposited.items():
                 reward += r.reward_deposit * amount
 
