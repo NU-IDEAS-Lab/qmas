@@ -83,7 +83,7 @@ class QmasAlgorithm(R_MAPPO):
                 data_generator = buffer.sample_trajectories(self.num_mini_batch, self.prediction_horizon)
                 
                 for sample in data_generator:
-                    self.train_sample_diffuser(sample.to(self.device), train_info)
+                    self.train_sample_diffuser(sample, train_info)
                     num_diffusion_updates += 1
 
             # Average the diffusion losses
@@ -141,8 +141,8 @@ class QmasAlgorithm(R_MAPPO):
             agent_rewards_batch = rewards_batch[:, :, i]
 
             # Calculate trajectory returns.
-            discounts = torch.ones((agent_rewards_batch.shape[0], agent_rewards_batch.shape[1]), dtype=torch.float32, device=self.device) * 0.997 # TODO: This constant is from Janner et al. (2022).
-            discounts = torch.pow(discounts, torch.arange(1, rewards_batch.shape[1] + 1, dtype=torch.float32, device=self.device))
+            discounts = torch.ones((agent_rewards_batch.shape[0], agent_rewards_batch.shape[1]), dtype=torch.float32) * 0.997 # TODO: This constant is from Janner et al. (2022).
+            discounts = torch.pow(discounts, torch.arange(1, rewards_batch.shape[1] + 1, dtype=torch.float32))
             agent_returns_batch = torch.sum(agent_rewards_batch * discounts, dim=1).reshape((-1, 1))
 
             # Build trajectories.
@@ -150,6 +150,11 @@ class QmasAlgorithm(R_MAPPO):
 
             # Get the visibility mask for the current agent.
             agent_fix_mask = fix_mask_batch[:, :, i, :]
+
+            # Transfer tensors to the device.
+            trajectories = trajectories.to(self.device)
+            agent_returns_batch = agent_returns_batch.to(self.device)
+            agent_fix_mask = agent_fix_mask.to(self.device)
 
             # Update the fix_mask. This determines which parts of the trajectory are fixed and which are predicted.
             # This applies to both update_diffusion and update_classifier.
