@@ -30,6 +30,8 @@ def add_args(parser):
                         help="The radius within which agents can observe each other and resources.")
     parser.add_argument("--hauler_capacity", type=float, default=10.0,
                         help="The maximum amount of resources a hauler can carry.")
+    parser.add_argument("--hauler_pickup_threshold", type=float, default=1.5,
+                        help="Max Euclidean distance (in grid units) a Hauler must be within of any Extractor to pick up resources.")
     parser.add_argument("--render_mode", type=str, default="human",
                         choices=parallel_env.metadata["render_modes"],
                         help="The rendering mode for the environment.")
@@ -74,6 +76,7 @@ class parallel_env(ParallelEnv):
             world_size: int = 50,
             observation_radius: int = 10,
             hauler_capacity: float = 10.0,
+            hauler_pickup_threshold: float = 1.5,
             render_mode: str = "human",
         ):
         """
@@ -88,6 +91,21 @@ class parallel_env(ParallelEnv):
         self.render_mode = render_mode
         self.default_observation_radius = observation_radius
         self.default_hauler_capacity = hauler_capacity
+        self.hauler_pickup_threshold = hauler_pickup_threshold
+    def _nearest_extractor_distance(self, position):
+        """Return the minimum Euclidean distance from the given position to any Extractor.
+        If no Extractor exists, return np.inf.
+        """
+        if not any(isinstance(a, Extractor) for a in self.agents):
+            return np.inf
+        pos = np.asarray(position, dtype=np.float32)
+        dmin = np.inf
+        for a in self.agents:
+            if isinstance(a, Extractor):
+                d = np.linalg.norm(pos - a.position)
+                if d < dmin:
+                    dmin = d
+        return dmin
 
         # Set up entities.
         self.possible_agents = \
@@ -540,6 +558,10 @@ class parallel_env(ParallelEnv):
                     for idx, val in enumerate(action_vec):
                         if val > 0:
                             r = self.idx_to_res[idx]
+                            # Enforce proximity-to-extractor threshold for hauler pickups
+                            if self._nearest_extractor_distance(agent.position) > self.hauler_pickup_threshold:
+                                # Too far from any Extractor; skip pickup for this resource idx
+                                continue
                             available = self.map_resources[r][px, py]
                             want = float(val)
                             take = min(want, available, free)
