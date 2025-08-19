@@ -54,7 +54,7 @@ def raw_env(*args, **kwargs):
 
 class parallel_env(ParallelEnv):
     metadata = {
-        "name": "toy_problem_v0",
+        "name": "toy_problem_v1",
         "render_modes": ["human", "rgb_array"],
     }
 
