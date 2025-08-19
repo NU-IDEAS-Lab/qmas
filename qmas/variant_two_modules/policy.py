@@ -2,13 +2,9 @@ import torch
 import os.path
 from onpolicy.algorithms.r_mappo.rMAPPOPolicy import R_MAPPOPolicy
 from .actor_critic import QmasActor, QmasCritic
+from .predictor import Predictor
 
 from onpolicy.utils.util import get_shape_from_obs_space, get_shape_from_act_space
-
-from cleandiffuser.diffusion import DiscreteDiffusionSDE
-from cleandiffuser.classifier import OptimalityClassifier
-from cleandiffuser.nn_classifier import HalfDiT1d, HalfJannerUNet1d
-from cleandiffuser.nn_diffusion import DiT1d, JannerUNet1d
 
 
 class QmasPolicy(R_MAPPOPolicy):
@@ -38,74 +34,15 @@ class QmasPolicy(R_MAPPOPolicy):
                                                  eps=self.opti_eps,
                                                  weight_decay=self.weight_decay)
         
+        # Create the predictor / diffusion model.
         obs_dim = get_shape_from_obs_space(self.obs_space, flatten_dicts=False)[0] # observation space for one agent
         action_dim = get_shape_from_act_space(act_space) # action space for one agent
-        transition_dim = obs_dim + action_dim
-
-        self.prediction_horizon = args.diffusion_horizon
-
-        fix_mask = torch.zeros((self.prediction_horizon, transition_dim))
-
-        # Weight actions more heavily in the loss.
-        loss_weight = torch.ones((self.prediction_horizon, transition_dim))
-        loss_weight[:, :action_dim] = 1.0
-        
-        # Create Diffuser model.
-        print(f"QmasPolicy: Using diffusion model type {args.diffusion_model_type} with prediction horizon {self.prediction_horizon} and transition dimension {transition_dim}.")
-        if args.diffusion_model_type == "jannerunet":
-            diffuser_base = JannerUNet1d(
-                transition_dim, model_dim=32, emb_dim=32, dim_mult=(1, 2, 4, 8),
-                timestep_emb_type="positional",
-                attention=False, kernel_size=5
-            )
-            guide_base = HalfJannerUNet1d(
-                horizon=self.prediction_horizon,
-                in_dim=transition_dim,
-                out_dim=1,
-                model_dim=32,
-                emb_dim=32,
-                dim_mult=(1, 2, 4, 8),
-                timestep_emb_type="positional"
-            )
-        elif args.diffusion_model_type == "dit1d":
-            diffuser_base = DiT1d(
-                x_dim=transition_dim,
-                x_seq_len=self.prediction_horizon,
-                emb_dim=128,
-                d_model=256,
-                n_heads=8,
-                depth=4,
-                timestep_emb_type="untrainable_fourier",
-                timestep_emb_params={"scale": 0.02},
-            )
-            guide_base = HalfDiT1d(
-                x_dim=transition_dim,
-                out_dim=1,
-                x_seq_len=self.prediction_horizon,
-                emb_dim=128,
-                d_model=256,
-                n_heads=8,
-                depth=4,
-                timestep_emb_type="untrainable_fourier",
-                timestep_emb_params={"scale": 0.02},
-            )
-        else:
-            raise ValueError(f"Unknown diffusion model type: {args.diffusion_model_type}")
-        
-        # Create the guide and diffuser.
-        self.guide = OptimalityClassifier(guide_base).to(device)
-        self.diffuser = DiscreteDiffusionSDE(
-            diffuser_base,
-            None,
-            fix_mask,
-            loss_weight,
-            classifier=self.guide,
-            predict_noise=False
-        ).to(device)
-
-        # Update the diffuser optimizers.
-        self.diffuser.manual_optimizers = {}
-        self.diffuser.configure_manual_optimizers()
+        self.predictor = Predictor(
+            obs_dim,
+            action_dim,
+            args,
+            device=self.device
+        )
 
 
     def save(self, directory, episode):
@@ -113,8 +50,7 @@ class QmasPolicy(R_MAPPOPolicy):
 
         super().save(directory, episode)
 
-        torch.save(self.diffuser.state_dict(), os.path.join(directory, "diffuser.pt"))
-        torch.save(self.guide.state_dict(), os.path.join(directory, "guide.pt"))
+        torch.save(self.predictor.state_dict(), os.path.join(directory, "predictor.pt"))
 
 
     def restore(self, directory):
@@ -122,62 +58,10 @@ class QmasPolicy(R_MAPPOPolicy):
 
         super().restore(directory)
 
-        diffuser_state_dict = torch.load(os.path.join(directory, 'diffuser.pt'), map_location=self.device)
+        diffuser_state_dict = torch.load(os.path.join(directory, 'predictor.pt'), map_location=self.device)
 
         # This is hacky - reset the fix_mask here.
-        if 'fix_mask' in diffuser_state_dict:
-            diffuser_state_dict['fix_mask'] = self.diffuser.fix_mask
+        if 'diffuser.fix_mask' in diffuser_state_dict:
+            diffuser_state_dict['diffuser.fix_mask'] = self.predictor.diffuser.fix_mask
 
-        self.diffuser.load_state_dict(diffuser_state_dict)
-
-        guide_state_dict = torch.load(os.path.join(directory, 'guide.pt'), map_location=self.device)
-        self.guide.load_state_dict(guide_state_dict)
-
-
-    def get_prediction(self, trajectory, visibility_mask=None, prediction_prev=None):
-        ''' Get a prediction from the diffuser.
-            Args:
-                trajectory: A tensor of shape (T, D), where T is the trajectory length and D is the transition dimension (action + observation).
-                visibility_mask: A tensor of shape (T, D) indicating which parts of the observation are visible.
-                prediction_prev: A tensor of shape (1, T, D) for autoregression.
-            Returns:
-                prediction: A tensor of shape (1, T, D) containing the predicted trajectory.
-        '''
-
-        # Set up trajectory and visibility mask.
-        trajectory = trajectory.unsqueeze(0)  # Add sample dimension.
-        if visibility_mask == None:
-            visibility_mask = torch.ones_like(trajectory)  # Default to all visible.
-        else:
-            visibility_mask = visibility_mask.unsqueeze(0) # Add sample dimension.
-
-        # Apply the visibility mask to the trajectory.
-        trajectory = trajectory * visibility_mask
-
-        # Autoregression
-        if prediction_prev is not None and self.args.diffusion_autoregression_steps > 0:
-            k = self.args.diffusion_autoregression_steps
-            trajectory[:, :k] = torch.where(
-                visibility_mask[:, :k] == 0,
-                prediction_prev[:, -k:],
-                trajectory[:, :k]
-            )
-            visibility_mask[:, :k] = 1
-
-        # The trajectory and visibility_mask represent the known data and are applied as described by Janner et al.
-        # We set the fix_mask manually here as a workaround for CleanDiffuser not taking it as an input.
-        self.diffuser.fix_mask = torch.nn.Parameter(visibility_mask, requires_grad=False)
-
-        # Sample from the diffusion model.
-        prediction, log = self.diffuser.sample(
-            prior=trajectory,
-            solver="ddpm",
-            n_samples=1,
-            sample_steps=5,
-            condition_cg=trajectory,
-            condition_cg_mask=visibility_mask,
-            w_cg=0.1,
-            w_cfg=0.0
-        )
-
-        return prediction
+        self.predictor.load_state_dict(diffuser_state_dict)

@@ -17,7 +17,7 @@ class QmasAlgorithm(R_MAPPO):
 
         super().__init__(args, policy, env, device)
 
-        self.prediction_horizon = policy.prediction_horizon
+        self.prediction_horizon = policy.predictor.prediction_horizon
 
 
     def diffusion_update(self, diffusion_model, optimizer, loss_args, update_model):
@@ -158,15 +158,15 @@ class QmasAlgorithm(R_MAPPO):
 
             # Update the fix_mask. This determines which parts of the trajectory are fixed and which are predicted.
             # This applies to both update_diffusion and update_classifier.
-            self.policy.diffuser.fix_mask = torch.nn.Parameter(agent_fix_mask, requires_grad=False)
+            self.policy.predictor.diffuser.fix_mask = torch.nn.Parameter(agent_fix_mask, requires_grad=False)
 
             # Update diffuser model.
-            diffuser_loss = self.policy.diffuser.update_diffusion(
+            diffuser_loss = self.policy.predictor.diffuser.update_diffusion(
                 x0=trajectories,
             )['diffusion_loss']
 
             # Update guide model.
-            guide_loss = self.policy.diffuser.update_classifier(
+            guide_loss = self.policy.predictor.diffuser.update_classifier(
                 x0=trajectories,
                 condition_cg=agent_returns_batch
             )['classifier_loss']
@@ -177,11 +177,8 @@ class QmasAlgorithm(R_MAPPO):
 
     def prep_training(self):
         super().prep_training()
-        self.policy.diffuser.train()
-        self.policy.guide.train()
-    
+        self.policy.predictor.train()    
 
     def prep_rollout(self):
         super().prep_rollout()
-        self.policy.diffuser.eval()
-        self.policy.guide.eval()
+        self.policy.predictor.eval()
