@@ -92,43 +92,6 @@ class parallel_env(ParallelEnv):
         self.default_observation_radius = observation_radius
         self.default_hauler_capacity = hauler_capacity
         self.hauler_pickup_threshold = hauler_pickup_threshold
-    def _nearest_extractor_distance(self, position):
-        """Return the minimum Euclidean distance from the given position to any Extractor.
-        If no Extractor exists, return np.inf.
-        """
-        if not any(isinstance(a, Extractor) for a in self.agents):
-            return np.inf
-        pos = np.asarray(position, dtype=np.float32)
-        dmin = np.inf
-        for a in self.agents:
-            if isinstance(a, Extractor):
-                d = np.linalg.norm(pos - a.position)
-                if d < dmin:
-                    dmin = d
-        return dmin
-
-    def _find_extractor_over_resource(self, hauler_pos, resource):
-        """Return (extractor, extractor_pos_int) if there exists an Extractor that is
-        standing on a cell containing the given resource and is within the
-        hauler_pickup_threshold of the given hauler position. Otherwise (None, None).
-        """
-        if not any(isinstance(a, Extractor) for a in self.agents):
-            return None, None
-        pos = np.asarray(hauler_pos, dtype=np.float32)
-        best_extractor = None
-        best_pos_int = None
-        best_d = np.inf
-        for a in self.agents:
-            if isinstance(a, Extractor):
-                ex_pos_int = a.position.astype(np.int32)
-                # Extractor must be standing on a cell that actually has this resource
-                if self.map_resources[resource][ex_pos_int[0], ex_pos_int[1]] > 0:
-                    d = np.linalg.norm(pos - a.position)
-                    if d <= self.hauler_pickup_threshold and d < best_d:
-                        best_d = d
-                        best_extractor = a
-                        best_pos_int = ex_pos_int
-        return best_extractor, best_pos_int
 
         # Set up entities.
         self.possible_agents = \
@@ -173,6 +136,41 @@ class parallel_env(ParallelEnv):
         self.range=3
         # Reset the environment.
         self.reset()
+    def _nearest_extractor_distance(self, position):
+        """Return the minimum Euclidean distance from the given position to any Extractor.
+        If no Extractor exists, return np.inf.
+        """
+        if not any(isinstance(a, Extractor) for a in self.agents):
+            return np.inf
+        pos = np.asarray(position, dtype=np.float32)
+        dmin = np.inf
+        for a in self.agents:
+            if isinstance(a, Extractor):
+                d = np.linalg.norm(pos - a.position)
+                if d < dmin:
+                    dmin = d
+        return dmin
+
+    def _find_extractor_over_resource(self, hauler_pos, resource):
+        """Return (extractor, extractor_pos_int) if there exists an Extractor that is
+        standing on a cell containing the given resource and is within the
+        hauler_pickup_threshold of the given hauler position. Otherwise (None, None).
+        """
+        if not any(isinstance(a, Extractor) for a in self.agents):
+            return None, None
+        pos = np.asarray(hauler_pos, dtype=np.float32)
+        
+        for a in self.agents:
+            if isinstance(a, Extractor):
+                ex_pos_int = a.position.astype(np.int32)
+                # Extractor must be standing on a cell that actually has this resource
+                if self.map_resources[resource][ex_pos_int[0], ex_pos_int[1]] > 0:
+                    d = np.linalg.norm(pos - a.position)
+                    if d <= self.hauler_pickup_threshold:
+                        return a, ex_pos_int
+        return None, None
+
+        # Removed misplaced environment setup block from class scope.
 
 
     def reset(self, seed=None, options=None):
@@ -574,7 +572,13 @@ class parallel_env(ParallelEnv):
                     action_vec = action["resources"]
                     px, py = agent.position.astype(np.int32)
 
-                    cap = agent.capabilities.get("carry_capacity", 0.0)
+                    cap = (
+                        getattr(agent, "capabilities", {}).get("carry_capacity")
+                        if hasattr(agent, "capabilities") and isinstance(agent.capabilities, dict)
+                        else None
+                    )
+                    if cap is None:
+                        cap = getattr(agent, "carry_capacity", 0.0)
                     current_load = sum(agent.cargo.values())
                     free = max(0.0, cap - current_load)
 
