@@ -112,8 +112,6 @@ class PettingzooRunner(Runner):
         # Reset environment.
         obs, share_obs, available_actions = self.envs.reset()
 
-        
-
         # Get the shape of the action space.
         act_shape = get_shape_from_act_space(self.buffer.act_space)
         if isinstance(act_shape, Iterable):
@@ -123,7 +121,6 @@ class PettingzooRunner(Runner):
         
         # Get the shape of action log probabilities from the policy.
         action_log_prob_shape = (self.n_rollout_threads, self.num_agents, self.policy.actor.act.log_prob_dim)
-        
 
         # Initialize buffer.
         self.buffer.insert(

@@ -169,23 +169,26 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
             ))
 
         # Create a tensordict of all the data.
-        data = TensorDict({
-            'share_obs': share_obs, #+1
-            'obs': obs, #+1
-            'rnn_states_actor': rnn_states_actor, #+1
-            'rnn_states_critic': rnn_states_critic, #+1
-            'actions': actions,
-            'action_log_probs': action_log_probs,
-            'value_preds': value_preds,
-            'rewards': rewards,
-            'returns': np.zeros_like(rewards),
-            'masks': masks, #+1
-            'bad_masks': bad_masks, #+1
-            'active_masks': active_masks, #+1
-            'delta_steps': delta_steps,
-            'available_actions': available_actions, #+1
-            'visibility_mask': visibility_mask, #+1
-        })
+        data = TensorDict(
+            source={
+                'share_obs': share_obs, #+1
+                'obs': obs, #+1
+                'rnn_states_actor': rnn_states_actor, #+1
+                'rnn_states_critic': rnn_states_critic, #+1
+                'actions': actions,
+                'action_log_probs': action_log_probs,
+                'value_preds': value_preds,
+                'rewards': rewards,
+                'returns': np.zeros_like(rewards),
+                'masks': masks, #+1
+                'bad_masks': bad_masks, #+1
+                'active_masks': active_masks, #+1
+                'delta_steps': delta_steps,
+                'available_actions': available_actions, #+1
+                'visibility_mask': visibility_mask, #+1
+            },
+            device='cpu',
+        )
 
         # In legacy mode, some data is added for timestep t, others for timestep t+1.
         if legacy_mode:
