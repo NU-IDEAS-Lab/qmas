@@ -24,7 +24,7 @@ def make_render_env(all_args):
 
     def get_env_fn(rank):
         def init_env():
-            env = PettingzooEnv(env_class, all_args)
+            env = PettingzooEnv(env_class, all_args, rank)
             env.seed(all_args.seed + rank * 1000)
             return env
         return init_env
@@ -54,7 +54,7 @@ def main(args):
     # cuda
     if all_args.cuda and torch.cuda.is_available():
         print("choose to use gpu...")
-        device = torch.device("cuda:0")
+        device = torch.device(f"cuda:{all_args.cuda_idx}")
         torch.set_num_threads(all_args.n_training_threads)
         if all_args.cuda_deterministic:
             torch.backends.cudnn.benchmark = False

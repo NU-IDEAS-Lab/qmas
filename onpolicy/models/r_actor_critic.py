@@ -75,6 +75,8 @@ class R_Actor(nn.Module):
             base = CNNBase if len(obs_shape) == 3 else MLPBase
             self.base = base(args, obs_shape)
             input_dim = self.hidden_size
+        
+        print(f"R_Actor: Using base type {self.base.__class__.__name__}.")
 
         if self._use_naive_recurrent_policy or self._use_recurrent_policy:
             self.rnn = RNNLayer(input_dim, self.hidden_size, self._recurrent_N, self._use_orthogonal)

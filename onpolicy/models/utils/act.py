@@ -22,18 +22,25 @@ class ACTLayer(nn.Module):
                 return action_outs
 
             elif action_space.__class__.__name__ == "Discrete":
-                action_dim = action_space.n
-                ao = Categorical(inputs_dim, action_dim, use_orthogonal, gain)
+                num_categories = action_space.n
+                ao = Categorical(inputs_dim, num_categories, use_orthogonal, gain)
                 ao.action_dim = 1
-                ao.available_action_dim = action_space.n
+                ao.available_action_dim = num_categories
+                ao.start = action_space.start
                 return [ao]
             
             elif action_space.__class__.__name__ == "Box" and np.issubdtype(action_space.dtype, np.integer):
-                action_dim = np.prod(action_space.high - action_space.low) + 1
-                ao = Categorical(inputs_dim, action_dim, use_orthogonal, gain)
-                ao.action_dim = 1
-                ao.available_action_dim = np.prod(action_space.high - action_space.low) + 1
-                return [ao]
+                # If Box with integer values, treat it as a Discrete space
+                actions_outs = []
+                num_distributions = np.prod(action_space.shape)
+                for i in range(num_distributions):
+                    num_categories = action_space.high[i] - action_space.low[i] + 1
+                    ao = Categorical(inputs_dim, num_categories, use_orthogonal, gain)
+                    ao.action_dim = 1
+                    ao.available_action_dim = num_categories
+                    ao.start = action_space.low[i]
+                    actions_outs.append(ao)
+                return actions_outs
             
             elif action_space.__class__.__name__ == "MultiDiscrete":
                 action_outs = []
@@ -41,19 +48,22 @@ class ACTLayer(nn.Module):
                     ao = Categorical(inputs_dim, n, use_orthogonal, gain)
                     ao.action_dim = 1
                     ao.available_action_dim = n
+                    ao.start = action_space.start[n]
                     action_outs.append(ao)
                 return action_outs
 
             elif action_space.__class__.__name__ == "Box":
-                ao = DiagGaussian(inputs_dim, action_space.shape[0], use_orthogonal, gain)
-                ao.action_dim = action_space.shape[0]
+                num_outputs = np.prod(action_space.shape)
+                ao = DiagGaussian(inputs_dim, num_outputs, use_orthogonal, gain)
+                ao.action_dim = num_outputs
                 ao.available_action_dim = np.prod(action_space.high - action_space.low) + 1
                 return [ao]
 
             elif action_space.__class__.__name__ == "MultiBinary":
-                ao = Bernoulli(inputs_dim, action_space.shape[0], use_orthogonal, gain)
+                num_categories = np.prod(action_space.shape)
+                ao = Bernoulli(inputs_dim, num_categories, use_orthogonal, gain)
                 ao.action_dim = 1
-                ao.available_action_dim = 2
+                ao.available_action_dim = num_categories
                 return [ao]
 
             else:
@@ -61,6 +71,7 @@ class ACTLayer(nn.Module):
         
         action_outs = get_action_out(action_space)
         self.action_outs = nn.ModuleList(action_outs)
+        self.log_prob_dim = len(action_outs)
     
 
     def forward(self, x, available_actions=None, deterministic=False):
@@ -90,6 +101,11 @@ class ACTLayer(nn.Module):
                     action_logit = module(x, aa)
             action = action_logit.mode() if deterministic else action_logit.sample()
             action_log_prob = action_logit.log_probs(action)
+
+            # If the module is a Categorical distribution, shift by the start value.
+            if hasattr(module, 'start'):
+                action = action + module.start
+
             actions.append(action)
             action_log_probs.append(action_log_prob)
         
@@ -142,13 +158,18 @@ class ACTLayer(nn.Module):
         available_actions_idx = 0
 
         for module in self.action_outs:
-            if isinstance(module, DiagGaussian):
+            if isinstance(module, DiagGaussian) or available_actions is None:
                 action_logits = module(x)
             else:
                 aa = available_actions[:, available_actions_idx:available_actions_idx + module.available_action_dim]
                 available_actions_idx += module.available_action_dim
                 action_logits = module(x, aa)
             a = action[:, action_idx:action_idx + module.action_dim]
+
+            # If the module is a Categorical distribution, shift by the start value.
+            if hasattr(module, 'start'):
+                a = a - module.start
+
             action_idx += module.action_dim
             action_log_probs.append(action_logits.log_probs(a))
             if active_masks is not None:

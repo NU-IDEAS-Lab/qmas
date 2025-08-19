@@ -48,7 +48,9 @@ class PettingzooRunner(Runner):
         start = time.time()
         episodes = int(self.num_env_steps) // self.episode_length // self.n_rollout_threads
 
-        for episode in (progress_bar := tqdm(range(episodes))):
+        for episode in (progress_bar := tqdm(range(episodes), dynamic_ncols=True)):
+            start_episode = time.time()
+
             if self.use_linear_lr_decay:
                 self.trainer.policy.lr_decay(episode, episodes)
             
@@ -90,13 +92,11 @@ class PettingzooRunner(Runner):
                 end = time.time()
                 
                 train_infos["average_episode_rewards"] = avg_episode_rewards
-                train_infos["fps"] = total_num_steps / (end - start)
+                train_infos["fps"] = self.episode_length * self.n_rollout_threads / (end - start_episode)
                 self.log_train(train_infos, total_num_steps)
                 self.log_env(self.env_infos, total_num_steps)
                 self.env_infos = defaultdict(list)
 
-            if episode == 0:
-                print("\n\n\nTraining Progress:") #give some space for the progress bar
             progress_bar.set_postfix({
                 "exp": self.experiment_name,
                 "timesteps": f"{total_num_steps}/{self.num_env_steps}",
@@ -112,14 +112,15 @@ class PettingzooRunner(Runner):
         # Reset environment.
         obs, share_obs, available_actions = self.envs.reset()
 
-        
-
         # Get the shape of the action space.
         act_shape = get_shape_from_act_space(self.buffer.act_space)
         if isinstance(act_shape, Iterable):
             actions_shape = (self.n_rollout_threads, self.num_agents, *act_shape)
         else:
             actions_shape = (self.n_rollout_threads, self.num_agents, act_shape)
+        
+        # Get the shape of action log probabilities from the policy.
+        action_log_prob_shape = (self.n_rollout_threads, self.num_agents, self.policy.actor.act.log_prob_dim)
 
         # Initialize buffer.
         self.buffer.insert(
@@ -128,7 +129,7 @@ class PettingzooRunner(Runner):
             rnn_states_actor=np.zeros((self.n_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=np.float32),
             rnn_states_critic=np.zeros((self.n_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=np.float32),
             actions=np.zeros(actions_shape, dtype=np.float32),
-            action_log_probs=np.zeros(actions_shape, dtype=np.float32),
+            action_log_probs=np.zeros(action_log_prob_shape, dtype=np.float32),
 
             # Although there is actually only one value per thread, we store it as if there were one per agent.
             # Each agent will have the same value.
@@ -242,6 +243,13 @@ class PettingzooRunner(Runner):
             #     wandb.log({k: v}, step=total_num_steps)
             # elif len(v) > 0:
             if len(v) > 0:
+                if isinstance(v[0], np.ndarray):
+                    v = np.array(v)
+                
+                    # Don't log large matrices.
+                    if v.ndim > 2:
+                        continue
+
                 if self.use_wandb:
                     wandb.log({k: np.mean(v, axis=0)}, step=total_num_steps)
                 else:
@@ -394,7 +402,7 @@ class PettingzooRunner(Runner):
             masks = np.ones((self.n_render_rollout_threads, self.num_agents, 1), dtype=np.float32)
 
             for i in range(self.num_agents):
-                transition = np.concatenate((np.zeros(act_size, dtype=np.float32), obs[0][i]), axis=0)
+                transition = np.concatenate((np.zeros(act_size, dtype=np.float32), obs[0][i].flatten()), axis=0)
                 buffer[i].append({
                     "transition": torch.from_numpy(transition).to(self.device),
                     "visibility_mask": torch.ones(transition.shape, dtype=torch.float32, device=self.device)
@@ -463,9 +471,9 @@ class PettingzooRunner(Runner):
                 obs, share_obs, render_rewards, dones, infos, available_actions = render_env.step(actions_env)
                 viz_mask_obs = np.expand_dims(infos[0]["visibility_mask"], 0) if "visibility_mask" in infos[0] else np.ones_like(obs)
                 viz_mask_actions = np.ones(actions.shape, dtype=np.float32)  # Assuming actions are fully visible.
-                viz_mask = np.concatenate([viz_mask_actions, viz_mask_obs], axis=-1)
+                viz_mask = np.concatenate([viz_mask_actions, viz_mask_obs.reshape(self.n_render_rollout_threads, self.num_agents, -1)], axis=-1)
                 for i in range(self.num_agents):
-                    transition = np.concatenate((actions[0][i].float(), obs[0][i]), axis=0)
+                    transition = np.concatenate((actions[0][i].float(), obs[0][i].flatten()), axis=0)
                     agent_viz_mask = viz_mask[0, i]
                     buffer[i].append({
                         "transition": torch.from_numpy(transition).to(self.device),
