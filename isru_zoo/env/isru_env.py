@@ -558,14 +558,14 @@ class parallel_env(ParallelEnv):
                     agent.position=new_position
 
                 if isinstance(agent, Prospector):
-                    relative_position=agent.position-self.nearest_tile
-                    new_distance=np.linalg.norm(relative_position)
+                    # relative_position=agent.position-self.nearest_tile
+                    # new_distance=np.linalg.norm(relative_position)
                     count=self.get_resources_discovered_count(agent)
                     reward_dict[agent]+=0.1*count
-                    if new_distance < old_distance:
-                        reward_dict[agent] += 0.2
-                    else:
-                        reward_dict[agent] -= 0.05
+                    # if new_distance < old_distance:
+                    #     reward_dict[agent] += 0.2
+                    # else:
+                    #     reward_dict[agent] -= 0.05
 
                 # Handle communication.
                 if action["communication"][0] >= 0.5:
