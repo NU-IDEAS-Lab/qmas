@@ -512,7 +512,7 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
         active_masks_batch = sample["active_masks"].reshape(*index_shape, 1)
         old_action_log_probs_batch = sample["action_log_probs"].reshape(*index_shape, sample["action_log_probs"].shape[-1])
         adv_targ = sample["advantages"].reshape(*index_shape, 1)
-        if np.any(sample["available_actions"] == None):
+        if None in sample["available_actions"]:
             available_actions_batch = None
         else:
             available_actions_batch = sample["available_actions"].reshape(*index_shape, sample["available_actions"].shape[-1])
