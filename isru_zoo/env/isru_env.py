@@ -136,6 +136,41 @@ class parallel_env(ParallelEnv):
         
         # Reset the environment.
         self.reset()
+    def _nearest_extractor_distance(self, position):
+        """Return the minimum Euclidean distance from the given position to any Extractor.
+        If no Extractor exists, return np.inf.
+        """
+        if not any(isinstance(a, Extractor) for a in self.agents):
+            return np.inf
+        pos = np.asarray(position, dtype=np.float32)
+        dmin = np.inf
+        for a in self.agents:
+            if isinstance(a, Extractor):
+                d = np.linalg.norm(pos - a.position)
+                if d < dmin:
+                    dmin = d
+        return dmin
+
+    def _find_extractor_over_resource(self, hauler_pos, resource):
+        """Return (extractor, extractor_pos_int) if there exists an Extractor that is
+        standing on a cell containing the given resource and is within the
+        hauler_pickup_threshold of the given hauler position. Otherwise (None, None).
+        """
+        if not any(isinstance(a, Extractor) for a in self.agents):
+            return None, None
+        pos = np.asarray(hauler_pos, dtype=np.float32)
+        
+        for a in self.agents:
+            if isinstance(a, Extractor):
+                ex_pos_int = a.position.astype(np.int32)
+                # Extractor must be standing on a cell that actually has this resource
+                if self.map_resources[resource][ex_pos_int[0], ex_pos_int[1]] > 0:
+                    d = np.linalg.norm(pos - a.position)
+                    if d <= self.hauler_pickup_threshold:
+                        return a, ex_pos_int
+        return None, None
+
+        # Removed misplaced environment setup block from class scope.
 
 
     def reset(self, seed=None, options=None):
@@ -541,23 +576,35 @@ class parallel_env(ParallelEnv):
                     action_vec = action["resources"]
                     px, py = agent.position.astype(np.int32)
 
-                    cap = agent.capabilities.get("carry_capacity", 0.0)
+                    cap = (
+                        getattr(agent, "capabilities", {}).get("carry_capacity")
+                        if hasattr(agent, "capabilities") and isinstance(agent.capabilities, dict)
+                        else None
+                    )
+                    if cap is None:
+                        cap = getattr(agent, "carry_capacity", 0.0)
                     current_load = sum(agent.cargo.values())
                     free = max(0.0, cap - current_load)
 
                     for idx, val in enumerate(action_vec):
                         if val > 0:
+                            # PICKUP: Require an Extractor to be standing on a tile that contains
+                            # this resource type, and the Hauler must be within pickup threshold
+                            # of that Extractor. 
                             r = self.idx_to_res[idx]
-                            # Enforce proximity-to-extractor threshold for hauler pickups
-                            if self._nearest_extractor_distance(agent.position) > self.hauler_pickup_threshold:
-                                # Too far from any Extractor; skip pickup for this resource idx
+                            extractor, ex_pos_int = self._find_extractor_over_resource(agent.position, r)
+                            if extractor is None:
+                                # No eligible extractor-on-resource in range; cannot pick up
                                 reward_dict[agent] -= 0.001
                                 continue
-                            available = self.map_resources[r][px, py]
+
+                            available = self.map_resources[r][ex_pos_int[0], ex_pos_int[1]]
                             want = float(val)
                             take = min(want, available, free)
                             if take > 0:
-                                self.map_resources[r][px, py] -= take
+                                # Remove from the resource map at the extractor's tile
+                                self.map_resources[r][ex_pos_int[0], ex_pos_int[1]] -= take
+                                # Add to the hauler's cargo
                                 reward_dict[agent]+= 0.2*take
                                 agent.cargo[r.resource_id] = agent.cargo.get(r.resource_id, 0.0) + take
                                 free -= take
