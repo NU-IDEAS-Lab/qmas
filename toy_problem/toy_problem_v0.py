@@ -1,4 +1,4 @@
-from toy_problem.env.toy_problem import (
+from toy_problem.env.toy_problem_v0 import (
     env,
     parse_args,
     add_args,
