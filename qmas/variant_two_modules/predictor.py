@@ -9,6 +9,8 @@ from cleandiffuser.nn_diffusion import DiT1d, JannerUNet1d
 class Predictor(torch.nn.Module):
     def __init__(self, obs_dim, action_dim, args, device=None):
         super(Predictor, self).__init__()
+        self.args = args
+        self.device = device
 
         transition_dim = obs_dim + action_dim
 
