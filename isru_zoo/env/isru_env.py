@@ -620,7 +620,6 @@ class parallel_env(ParallelEnv):
                                         depot.stock += drop
                                         break
                                 agent.cargo[r.resource_id] -= drop
-                                reward_dict[agent]+=drop*1.5
                                 # Record the resources deposited.
                                 resources_deposited[agent][r] += drop
 

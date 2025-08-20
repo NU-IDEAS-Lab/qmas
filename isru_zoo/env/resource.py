@@ -16,10 +16,10 @@ class Resource:
 class TestResource1(Resource):
     ''' We are using this as the test resource during development. '''
     
-    reward_deposit = 5.0
+    reward_deposit = 1.5
 
 
 class TestResource2(Resource):
     ''' We are using this as the test resource during development. '''
 
-    reward_deposit = 7.0
+    reward_deposit = 3
