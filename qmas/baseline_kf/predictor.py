@@ -1,5 +1,4 @@
 import torch
-import numpy as np
 
 @torch.no_grad
 class Predictor:
@@ -7,25 +6,59 @@ class Predictor:
         Based on https://doi.org/10.1109/TAC.2004.834121 '''
 
     def __init__(self, obs_dim, action_dim, args, device=None):
-        # super().__init__()
+        self.args = args
+        self.device = device
 
-        transition_dim = obs_dim + action_dim
+        self.action_dim = action_dim
+        self.obs_dim = obs_dim
+        self.transition_dim = obs_dim + action_dim
         self.prediction_horizon = args.diffusion_horizon
 
+        if self.prediction_horizon != 1:
+            raise ValueError("Prediction horizon must be 1 for the Kalman Filter predictor.")
+
         # Initialize the Kalman Filter parameters.
-        # TODO: State transition matrix F and control input matrix B should only be True at the adversary's position.
         # TODO: Observation matrix H...
         # TODO: Noise matrices should be set correctly.
-        self.F = torch.eye(transition_dim, device=device)
-        self.B = torch.zeros((transition_dim, action_dim), device=device)
-        self.H = torch.eye(transition_dim, device=device)
-        self.Q = torch.eye(transition_dim, device=device) * 0.0 #args.kf_process_noise
-        self.R = torch.eye(transition_dim, device=device) * 0.0 #args.kf_measurement_noise
+        dt = 1.0
+        self.F = torch.tensor(
+            data=[
+                [1, 0, dt, 0, 0, 0, 0, 0, 0], #a0p0
+                [0, 1, 0, dt, 0, 0, 0, 0, 0], #a0p1
+                [0, 0, 1, 0, 0, 0, 0, 0, 0],  #a0v0
+                [0, 0, 0, 1, 0, 0, 0, 0, 0],  #a0v1
+                [0, 0, 0, 0, 1, 0, dt, 0, 0], #a1p0
+                [0, 0, 0, 0, 0, 1, 0, dt, 0], #a1p1
+                [0, 0, 0, 0, 0, 0, 1, 0, 0],  #a1v0
+                [0, 0, 0, 0, 0, 0, 0, 1, 0],  #a1v1
+                [0, 0, 0, 0, 0, 0, 0, 0, 1],  #id
+            ],
+            dtype=torch.float32,
+            device=device
+        )
+        self.B = torch.tensor(
+            data=[
+                [0, 0], #a0p0
+                [0, 0], #a0p1
+                [0, 0], #a0v0
+                [0, 0], #a0v1
+                [0, 0], #a1p0
+                [0, 0], #a1p1
+                [1, 0], #a1v0
+                [0, 1], #a1v1
+                [0, 0], #id
+            ],
+            dtype=torch.float32,
+            device=device
+        )
+        self.H = torch.eye(obs_dim, device=device)
+        self.Q = torch.eye(obs_dim, device=device) * 0.0 #args.kf_process_noise
+        self.R = torch.eye(obs_dim, device=device) * 0.0 #args.kf_measurement_noise
 
         # TODO: Should probably create a new `initialize` method to set these and create the Kalman Filter.
         # Initial state and covariance.
-        self.x0 = torch.zeros((transition_dim,), device=device)
-        self.P0 = torch.eye(transition_dim, device=device)
+        self.x0 = torch.zeros((obs_dim,), device=device)
+        self.P0 = torch.eye(obs_dim, device=device)
 
         # Initialize the Kalman Filter.
         self.kf = KalmanFilter(self.F, self.B, self.H, self.Q, self.R, self.x0, self.P0)
@@ -41,32 +74,15 @@ class Predictor:
                 prediction: A tensor of shape (1, T, D) containing the predicted trajectory.
         '''
 
-        # Set up trajectory and visibility mask.
-        trajectory = trajectory.unsqueeze(0)  # Add sample dimension.
-        if visibility_mask == None:
-            visibility_mask = torch.ones_like(trajectory)  # Default to all visible.
-        else:
-            visibility_mask = visibility_mask.unsqueeze(0) # Add sample dimension.
-
         # Apply the visibility mask to the trajectory.
         trajectory = trajectory * visibility_mask
 
-        # Initialize the prediction tensor.
-        prediction = torch.zeros((1, trajectory.shape[1], trajectory.shape[2]), device=trajectory.device)
+        # Get actions.
+        actions = trajectory[-1, :self.action_dim]
 
-        # If we have a previous prediction, use it for autoregression.
-        if prediction_prev is not None:
-            prediction[0, 0, :] = prediction_prev[0, 0, :]
-        else:
-            prediction[0, 0, :] = trajectory[0, 0, :]
-
-        # Iterate over the trajectory to get predictions.
-        for t in range(1, trajectory.shape[1]):
-            # Predict the next state using the Kalman Filter.
-            self.kf.predict(trajectory[0, t-1, -trajectory.shape[2]:])
-            predicted_state = self.kf.x
-            
-            # Update the Kalman Filter with
+        # Get prediction.
+        prediction = torch.zeros((1, self.prediction_horizon, self.transition_dim), device=self.device)
+        prediction[0, 0, self.action_dim:] = self.kf.predict(actions)
 
         return prediction
 
@@ -86,16 +102,16 @@ class KalmanFilter:
     
 
     def predict(self, u):
-        self.x = np.dot(self.F, self.x) + np.dot(self.B, u)
-        self.P = np.dot(self.F, np.dot(self.P, self.F.T)) + self.Q
+        self.x = self.F @ self.x + self.B @ u
+        self.P = self.F @ self.P @ self.F.T + self.Q
         return self.x
 
 
     def update(self, z):
-        S = np.dot(self.H, np.dot(self.P, self.H.T)) + self.R
-        K = np.dot(np.dot(self.P, self.H.T), np.linalg.inv(S))
-        y = z - np.dot(self.H, self.x)
-        self.x = self.x + np.dot(K, y)
-        I = np.eye(self.P.shape[0])
-        self.P = np.dot(I - np.dot(K, self.H), self.P)
+        S = torch.dot(self.H, torch.dot(self.P, self.H.T)) + self.R
+        K = torch.dot(torch.dot(self.P, self.H.T), torch.linalg.inv(S))
+        y = z - torch.dot(self.H, self.x)
+        self.x = self.x + torch.dot(K, y)
+        I = torch.eye(self.P.shape[0])
+        self.P = torch.dot(I - torch.dot(K, self.H), self.P)
         return self.x
