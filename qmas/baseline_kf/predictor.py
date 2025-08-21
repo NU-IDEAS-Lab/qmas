@@ -55,13 +55,12 @@ class Predictor:
         self.Q = torch.eye(obs_dim, device=device) * 0.1 #args.kf_process_noise
         self.R = torch.eye(obs_dim, device=device) * 0.0 #args.kf_measurement_noise
 
-        # TODO: Should probably create a new `initialize` method to set these and create the Kalman Filter.
-        # Initial state and covariance.
-        self.x0 = torch.zeros((obs_dim,), device=device)
-        self.P0 = torch.eye(obs_dim, device=device)
+        self.kf = None
 
-        # Initialize the Kalman Filter.
-        self.kf = KalmanFilter(self.F, self.B, self.H, self.Q, self.R, self.x0, self.P0)
+    def initialize(self, x0, P0):
+        ''' Initialize the Kalman Filter. '''
+
+        self.kf = KalmanFilter(self.F, self.B, self.H, self.Q, self.R, x0, P0)
 
 
     def get_prediction(self, trajectory, visibility_mask=None, prediction_prev=None):
@@ -76,6 +75,13 @@ class Predictor:
 
         # Apply the visibility mask to the trajectory.
         trajectory = trajectory * visibility_mask
+
+        # Check whether the filter is initialized.
+        if self.kf is None:
+            self.initialize(
+                x0=trajectory[-1, self.action_dim:],
+                P0=torch.eye(self.obs_dim, device=self.device)
+            )
 
         # Get actions.
         actions = trajectory[-1, :self.action_dim]
