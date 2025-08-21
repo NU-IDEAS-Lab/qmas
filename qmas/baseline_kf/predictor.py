@@ -52,7 +52,7 @@ class Predictor:
             device=device
         )
         self.H = torch.eye(obs_dim, device=device)
-        self.Q = torch.eye(obs_dim, device=device) * 0.0 #args.kf_process_noise
+        self.Q = torch.eye(obs_dim, device=device) * 0.1 #args.kf_process_noise
         self.R = torch.eye(obs_dim, device=device) * 0.0 #args.kf_measurement_noise
 
         # TODO: Should probably create a new `initialize` method to set these and create the Kalman Filter.
@@ -84,6 +84,9 @@ class Predictor:
         prediction = torch.zeros((1, self.prediction_horizon, self.transition_dim), device=self.device)
         prediction[0, 0, self.action_dim:] = self.kf.predict(actions)
 
+        # Update the Kalman Filter with the observation.
+        self.kf.update(trajectory[-1, self.action_dim:])
+
         return prediction
 
 
@@ -108,10 +111,10 @@ class KalmanFilter:
 
 
     def update(self, z):
-        S = torch.dot(self.H, torch.dot(self.P, self.H.T)) + self.R
-        K = torch.dot(torch.dot(self.P, self.H.T), torch.linalg.inv(S))
-        y = z - torch.dot(self.H, self.x)
-        self.x = self.x + torch.dot(K, y)
-        I = torch.eye(self.P.shape[0])
-        self.P = torch.dot(I - torch.dot(K, self.H), self.P)
+        S = self.H @ self.P @ self.H.T + self.R
+        K = self.P @ self.H.T @ torch.linalg.inv(S)
+        y = z - self.H @ self.x
+        self.x = self.x + K @ y
+        I = torch.eye(self.P.shape[0], device=self.P.device)
+        self.P = (I - K @ self.H) @ self.P
         return self.x
