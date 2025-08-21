@@ -12,7 +12,7 @@ class Predictor:
         self.action_dim = action_dim
         self.obs_dim = obs_dim
         self.transition_dim = obs_dim + action_dim
-        self.prediction_horizon = args.diffusion_horizon
+        self.prediction_horizon = args.prediction_history_window
 
         if self.prediction_horizon != 1:
             raise ValueError("Prediction horizon must be 1 for the Kalman Filter predictor.")

@@ -270,7 +270,7 @@ class PettingzooRunner(Runner):
         transition_size = obs_size + act_size
 
         # eval trajectory
-        HISTORY_LENGTH = self.all_args.diffusion_horizon
+        HISTORY_LENGTH = self.all_args.prediction_history_window
         buffer = [deque(maxlen=HISTORY_LENGTH) for _ in range(self.num_agents)]
         prediction = torch.zeros((HISTORY_LENGTH, self.num_agents, *obs_shape), dtype=torch.float32)
         
@@ -387,7 +387,7 @@ class PettingzooRunner(Runner):
         transition_size = obs_size + act_size
 
         # eval trajectory
-        HISTORY_LENGTH = self.all_args.diffusion_horizon
+        HISTORY_LENGTH = self.all_args.prediction_history_window
         buffer = [deque(maxlen=HISTORY_LENGTH) for _ in range(self.num_agents)]
         prediction = torch.zeros((HISTORY_LENGTH, self.num_agents, *obs_shape), dtype=torch.float32)
         
