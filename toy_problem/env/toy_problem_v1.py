@@ -112,7 +112,7 @@ class parallel_env(ParallelEnv):
                     "velocity": spaces.Box(low=-np.inf, high=np.inf, shape=(self.num_dimensions,), dtype=np.float32),
                 }) for a in self.possible_agents
             }),
-            "id": spaces.Discrete(len(self.possible_agents)),
+            "id": spaces.Box(low=0, high=len(self.possible_agents), dtype=np.int32),
         }
         obs_space = spaces.Dict(obs_space)
         self.observation_spaces = spaces.Dict({agent: obs_space for agent in self.possible_agents}) # type: ignore
@@ -346,7 +346,7 @@ class parallel_env(ParallelEnv):
         obs_mask = {
             "adversaries": {},
             "agents": {},
-            "id": True
+            "id": np.array([True], dtype=bool)
         }
         for a in self.possible_adversaries:
             vis = visible(a)
@@ -363,23 +363,27 @@ class parallel_env(ParallelEnv):
 
         return obs, obs_mask
     
-    def _update_adversary_velocity(self, adversary):
+    def _get_adversary_control(self, adversary):
         """
         Update velocity based on the step count to create a more complex pattern.
         This function creates a time-varying velocity that follows different patterns.
         """
+        velocity = adversary.velocity.copy()
+
         if random.random() < 0.3:
             # Randomly change velocity to create a new pattern
-            adversary.velocity += np.random.normal(0, 0.3, size=self.num_dimensions)
+            velocity += np.random.normal(0, 0.3, size=self.num_dimensions)
                 
         # # Add some random noise to make the trajectory more natural
         noise_magnitude = 0.05 * min(1.0, self.step_count / 50.0)  # Gradually increase noise
-        adversary.velocity += np.random.normal(0, noise_magnitude, size=self.num_dimensions)
+        velocity += np.random.normal(0.0, noise_magnitude, size=self.num_dimensions)
 
         # Normalize velocity to keep it within a reasonable range.
-        norm = np.linalg.norm(adversary.velocity)
+        norm = np.linalg.norm(velocity)
         if norm > 1.0:
-            adversary.velocity = adversary.velocity / norm
+            velocity = velocity / norm
+        
+        return velocity
                 
     def step(self, action_dict={}, lastStep=False):
         ''''
@@ -417,7 +421,7 @@ class parallel_env(ParallelEnv):
 
         # Perform adversary actions.
         for adversary in self.adversaries:
-            self._update_adversary_velocity(adversary)
+            adversary.velocity = self._get_adversary_control(adversary)
             adversary.position += adversary.velocity
             self.state_history[adversary].append(adversary.position.copy())
 
