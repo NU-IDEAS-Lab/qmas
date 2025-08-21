@@ -60,10 +60,10 @@ class Predictor:
     def initialize(self, x0, P0):
         ''' Initialize the Kalman Filter. '''
 
-        self.kf = KalmanFilter(self.F, self.B, self.H, self.Q, self.R, x0, P0)
+        self.kf = KalmanFilterIntermittenObservations(self.F, self.B, self.H, self.Q, self.R, x0, P0)
 
 
-    def get_prediction(self, trajectory, visibility_mask=None, prediction_prev=None):
+    def get_prediction(self, trajectory, visibility_mask, prediction_prev=None):
         ''' Get a prediction from the KF.
             Args:
                 trajectory: A tensor of shape (T, D), where T is the trajectory length and D is the transition dimension (action + observation).
@@ -90,8 +90,11 @@ class Predictor:
         prediction = torch.zeros((1, self.prediction_horizon, self.transition_dim), device=self.device)
         prediction[0, 0, self.action_dim:] = self.kf.predict(actions)
 
+        # Set up a diagonal visibility mask for the observation.
+        visibility_mask_diag = torch.diag(visibility_mask[-1, self.action_dim:])
+
         # Update the Kalman Filter with the observation.
-        self.kf.update(trajectory[-1, self.action_dim:])
+        self.kf.update(trajectory[-1, self.action_dim:], visibility_mask_diag)
 
         return prediction
 
@@ -100,6 +103,7 @@ class KalmanFilter:
     ''' This class implements a Kalman Filter for trajectory prediction.
         Implementation is based on: https://www.geeksforgeeks.org/python/kalman-filter-in-python/ '''
     
+    @torch.no_grad
     def __init__(self, F, B, H, Q, R, x0, P0):
         self.F = F  # State transition matrix
         self.B = B  # Control input matrix
@@ -123,4 +127,30 @@ class KalmanFilter:
         self.x = self.x + K @ y
         I = torch.eye(self.P.shape[0], device=self.P.device)
         self.P = (I - K @ self.H) @ self.P
+        return self.x
+
+
+class KalmanFilterIntermittenObservations(KalmanFilter):
+    ''' This class implements a Kalman Filter for trajectory prediction with intermittent observations.
+        It inherits from the KalmanFilter class.
+        It is based on work by Sinopoli et al. (2004) - https://doi.org/10.1109/TAC.2004.834121 '''
+
+    def predict(self, u):
+        return super().predict(u)
+
+    def update(self, z, gamma=None):
+        """
+        Measurement update with gamma in [0, 1].
+        gamma=0 -> no update (no measurement available at t)
+        gamma=1 -> standard KF update
+        """
+
+        if gamma is None:
+            gamma = torch.eye(z.shape[0], dtype=z.dtype, device=z.device)
+
+        S = self.H @ self.P @ self.H.T + self.R
+        K = self.P @ self.H.T @ torch.linalg.inv(S)
+        y = z - self.H @ self.x
+        self.x = self.x + K @ (gamma @ y)
+        self.P = self.P - K @ gamma @ self.H @ self.P
         return self.x
