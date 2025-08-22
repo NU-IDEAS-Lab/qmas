@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 import os.path
 from onpolicy.algorithms.r_mappo.rMAPPOPolicy import R_MAPPOPolicy
@@ -35,8 +36,8 @@ class QmasPolicy(R_MAPPOPolicy):
                                                  weight_decay=self.weight_decay)
         
         # Create the predictor / diffusion model.
-        obs_dim = get_shape_from_obs_space(self.obs_space, flatten_dicts=False)[0] # observation space for one agent
-        action_dim = get_shape_from_act_space(act_space) # action space for one agent
+        obs_dim = np.prod(get_shape_from_obs_space(self.obs_space, flatten_dicts=False)) # observation space for one agent
+        action_dim = np.prod(get_shape_from_act_space(act_space)) # action space for one agent
         self.predictor = Predictor(
             obs_dim,
             action_dim,

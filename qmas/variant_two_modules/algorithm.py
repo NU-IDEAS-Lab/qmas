@@ -110,12 +110,14 @@ class QmasAlgorithm(R_MAPPO):
         obs_batch = obs_batch.permute(1, 0, *range(2, obs_batch.ndim))
         obs_batch = obs_batch.flatten(start_dim=1, end_dim=2)
         obs_batch = obs_batch.permute(1, 0, *range(2, obs_batch.ndim))
+        obs_batch = obs_batch.reshape(*obs_batch.shape[:3], -1)
 
         # Process actions.
         actions_batch = sample["actions"]
         actions_batch = actions_batch.permute(1, 0, *range(2, actions_batch.ndim))
         actions_batch = actions_batch.flatten(start_dim=1, end_dim=2)
         actions_batch = actions_batch.permute(1, 0, *range(2, actions_batch.ndim))
+        actions_batch = actions_batch.reshape(*actions_batch.shape[:3], -1)
 
         # Process rewards.
         rewards_batch = sample["rewards"]
@@ -130,14 +132,15 @@ class QmasAlgorithm(R_MAPPO):
         visibility_mask_batch = visibility_mask_batch.permute(1, 0, *range(2, visibility_mask_batch.ndim))
         visibility_mask_batch = visibility_mask_batch.flatten(start_dim=1, end_dim=2)
         visibility_mask_batch = visibility_mask_batch.permute(1, 0, *range(2, visibility_mask_batch.ndim))
+        visibility_mask_batch = visibility_mask_batch.reshape(*visibility_mask_batch.shape[:3], -1)
         
         action_visibility = torch.ones_like(actions_batch)  # shape: (B, T, D_act)
         fix_mask_batch = torch.cat([action_visibility, visibility_mask_batch.float()], dim=-1)  # shape: (B, T, D_act + D_obs)
         
         # Perform optimization step for all agents.
         for i in range(actions_batch.shape[2]):
-            agent_obs_batch = obs_batch[:, :, i, :]
-            agent_actions_batch = actions_batch[:, :, i, :]
+            agent_obs_batch = obs_batch[:, :, i]
+            agent_actions_batch = actions_batch[:, :, i]
             agent_rewards_batch = rewards_batch[:, :, i]
 
             # Calculate trajectory returns.
@@ -149,7 +152,7 @@ class QmasAlgorithm(R_MAPPO):
             trajectories = torch.cat([agent_actions_batch, agent_obs_batch], dim=-1)
 
             # Get the visibility mask for the current agent.
-            agent_fix_mask = fix_mask_batch[:, :, i, :]
+            agent_fix_mask = fix_mask_batch[:, :, i]
 
             # Transfer tensors to the device.
             trajectories = trajectories.to(self.device)

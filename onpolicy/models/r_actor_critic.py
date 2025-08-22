@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
 from onpolicy.models.utils.util import init, check
 from onpolicy.models.utils.cnn import CNNBase
 from onpolicy.models.utils.mlp import MLPBase, MLPLayer
@@ -9,6 +10,7 @@ from onpolicy.models.utils.rnn import RNNLayer
 from onpolicy.models.utils.rnn import RNNLayer
 from onpolicy.models.utils.act import ACTLayer
 from onpolicy.models.utils.popart import PopArt
+from onpolicy.models.utils.attention import SelfAttention
 from onpolicy.utils.util import get_shape_from_obs_space, get_graph_obs_space, strip_graph_obs_space, get_graph_obs_space_idx
 
 from torch_geometric.data import Batch
@@ -42,6 +44,11 @@ class R_Actor(nn.Module):
         self.MAX_NEIGHBORS = 15
         self.MAX_NODES = 50
 
+        obs_shape = get_shape_from_obs_space(obs_space)
+        self._use_cnn = len(obs_shape) == 3
+        self._use_mlp = True
+        self._use_attention = False
+
         if self._use_gnn:
             # Split up the graph and non-graph space.
             obs_space_graph = get_graph_obs_space(obs_space)
@@ -62,8 +69,6 @@ class R_Actor(nn.Module):
                 jk=args.gnn_skip_connections
             )
 
-            
-
             self.neighbor_scorer = MLPLayer(input_dim=args.gnn_hidden_size, output_dim=1, hidden_size=self.hidden_size, layer_N=3, use_orthogonal=args.use_orthogonal, use_ReLU=args.use_ReLU, use_layer_norm=False)
             input_dim = self.MAX_NEIGHBORS + get_shape_from_obs_space(obs_space_nongraph)[0]
 
@@ -71,12 +76,22 @@ class R_Actor(nn.Module):
                 self.mlp0 = MLPLayer(input_dim=input_dim, output_dim=self.hidden_size, hidden_size=self.hidden_size, layer_N=3, use_orthogonal=args.use_orthogonal, use_ReLU=args.use_ReLU)
                 input_dim = self.hidden_size
         else:
-            obs_shape = get_shape_from_obs_space(obs_space)
-            base = CNNBase if len(obs_shape) == 3 else MLPBase
-            self.base = base(args, obs_shape)
-            input_dim = self.hidden_size
+            input_dim = np.prod(obs_shape)
+
+            if self._use_cnn:
+                self.cnn = CNNBase(args, obs_shape)
+                input_dim = self.hidden_size
+
+            if self._use_attention:            
+                self.attention = SelfAttention(input_dim)
+                input_dim = input_dim
+
+            if self._use_mlp:
+                self.mlp = MLPBase(args, input_dim)
+                input_dim = self.hidden_size
+
         
-        print(f"R_Actor: Using base type {self.base.__class__.__name__}.")
+        print(f"R_Actor: Use GNN: {self._use_gnn}, Use CNN: {self._use_cnn}, Use MLP: {self._use_mlp}")
 
         if self._use_naive_recurrent_policy or self._use_recurrent_policy:
             self.rnn = RNNLayer(input_dim, self.hidden_size, self._recurrent_N, self._use_orthogonal)
@@ -155,7 +170,14 @@ class R_Actor(nn.Module):
                 actor_features = self.mlp0(actor_features)
         else:
             obs = check(obs).to(**self.tpdv)
-            actor_features = self.base(obs)
+
+            actor_features = obs
+            if self._use_cnn:
+                actor_features = self.cnn(actor_features)
+            if self._use_attention:
+                actor_features = self.attention(actor_features)
+            if self._use_mlp:
+                actor_features = self.mlp(actor_features)
 
         if self._use_naive_recurrent_policy or self._use_recurrent_policy:
             actor_features, rnn_states = self.rnn(actor_features, rnn_states, masks)
@@ -237,7 +259,14 @@ class R_Actor(nn.Module):
                 actor_features = self.mlp0(actor_features)
         else:
             obs = check(obs).to(**self.tpdv)
-            actor_features = self.base(obs)
+
+            actor_features = obs
+            if self._use_cnn:
+                actor_features = self.cnn(actor_features)
+            if self._use_attention:
+                actor_features = self.attention(actor_features)
+            if self._use_mlp:
+                actor_features = self.mlp(actor_features)
 
         if self._use_naive_recurrent_policy or self._use_recurrent_policy:
             actor_features, rnn_states = self.rnn(actor_features, rnn_states, masks)
@@ -271,12 +300,27 @@ class R_Critic(nn.Module):
         self.tpdv = dict(dtype=torch.float32, device=device)
         init_method = [nn.init.xavier_uniform_, nn.init.orthogonal_][self._use_orthogonal]
 
+        obs_shape = get_shape_from_obs_space(cent_obs_space)
+        self._use_cnn = len(obs_shape) == 3
+        self._use_mlp = True
+        self._use_attention = False
+
         if self._use_gnn:
             raise NotImplementedError("GNN not implemented for R_Critic")
         else:
-            cent_obs_shape = get_shape_from_obs_space(cent_obs_space)
-            base = CNNBase if len(cent_obs_shape) == 3 else MLPBase
-            self.base = base(args, cent_obs_shape)
+            input_dim = np.prod(obs_shape)
+
+            if self._use_cnn:
+                self.cnn = CNNBase(args, obs_shape)
+                input_dim = self.hidden_size
+
+            if self._use_attention:            
+                self.attention = SelfAttention(input_dim)
+                input_dim = input_dim
+
+            if self._use_mlp:
+                self.mlp = MLPBase(args, input_dim)
+                input_dim = self.hidden_size
 
         if self._use_naive_recurrent_policy or self._use_recurrent_policy:
             self.rnn = RNNLayer(self.hidden_size, self.hidden_size, self._recurrent_N, self._use_orthogonal)
@@ -305,7 +349,14 @@ class R_Critic(nn.Module):
         rnn_states = check(rnn_states).to(**self.tpdv)
         masks = check(masks).to(**self.tpdv)
 
-        critic_features = self.base(cent_obs)
+        critic_features = cent_obs
+        if self._use_cnn:
+            critic_features = self.cnn(critic_features)
+        if self._use_attention:
+            critic_features = self.attention(critic_features)
+        if self._use_mlp:
+            critic_features = self.mlp(critic_features)
+        
         if self._use_naive_recurrent_policy or self._use_recurrent_policy:
             critic_features, rnn_states = self.rnn(critic_features, rnn_states, masks)
         values = self.v_out(critic_features)
