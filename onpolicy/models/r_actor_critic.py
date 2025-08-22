@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.nn.functional import scaled_dot_product_attention
 
 from onpolicy.models.utils.util import init, check
 from onpolicy.models.utils.cnn import CNNBase
@@ -11,6 +10,7 @@ from onpolicy.models.utils.rnn import RNNLayer
 from onpolicy.models.utils.rnn import RNNLayer
 from onpolicy.models.utils.act import ACTLayer
 from onpolicy.models.utils.popart import PopArt
+from onpolicy.models.utils.attention import SelfAttention
 from onpolicy.utils.util import get_shape_from_obs_space, get_graph_obs_space, strip_graph_obs_space, get_graph_obs_space_idx
 
 from torch_geometric.data import Batch
@@ -18,26 +18,6 @@ from torch_geometric.utils import to_dense_batch
 
 import numpy as np
 
-
-class SelfAttention(nn.Module):
-    ''' Taken in large part from https://medium.com/@heyamit10/implement-self-attention-and-cross-attention-in-pytorch-cfe17ab0b3ee '''
-    def __init__(self, embed_size):
-        super(SelfAttention, self).__init__()
-        self.embed_size = embed_size
-        # Define linear transformations for Q, K, V
-        self.query = nn.Linear(embed_size, embed_size)
-        self.key = nn.Linear(embed_size, embed_size)
-        self.value = nn.Linear(embed_size, embed_size)
-
-    def forward(self, x, mask=None):
-        # Generate Q, K, V matrices
-        Q = self.query(x)
-        K = self.key(x)
-        V = self.value(x)
-        
-        # Calculate attention using our scaled dot-product function
-        out = scaled_dot_product_attention(Q, K, V, attn_mask=mask)
-        return out
 
 class R_Actor(nn.Module):
     """
@@ -67,6 +47,7 @@ class R_Actor(nn.Module):
         obs_shape = get_shape_from_obs_space(obs_space)
         self._use_cnn = len(obs_shape) == 3
         self._use_mlp = not self._use_cnn
+        self._use_attention = False
 
         if self._use_gnn:
             # Split up the graph and non-graph space.
@@ -88,8 +69,6 @@ class R_Actor(nn.Module):
                 jk=args.gnn_skip_connections
             )
 
-            
-
             self.neighbor_scorer = MLPLayer(input_dim=args.gnn_hidden_size, output_dim=1, hidden_size=self.hidden_size, layer_N=3, use_orthogonal=args.use_orthogonal, use_ReLU=args.use_ReLU, use_layer_norm=False)
             input_dim = self.MAX_NEIGHBORS + get_shape_from_obs_space(obs_space_nongraph)[0]
 
@@ -103,11 +82,12 @@ class R_Actor(nn.Module):
                 self.cnn = CNNBase(args, obs_shape)
                 input_dim = self.hidden_size
 
-            if self._use_mlp:
+            if self._use_attention:            
                 # Add self-attention mechanism.
                 self.attention = SelfAttention(input_dim)
                 input_dim = input_dim
 
+            if self._use_mlp:
                 self.mlp = MLPBase(args, input_dim)
                 input_dim = self.hidden_size
 
@@ -194,10 +174,10 @@ class R_Actor(nn.Module):
 
             actor_features = obs
             if self._use_cnn:
-                actor_features = self.cnn(obs)
-            if self._use_mlp:
-                # Apply self-attention mechanism.
+                actor_features = self.cnn(actor_features)
+            if self._use_attention:
                 actor_features = self.attention(actor_features)
+            if self._use_mlp:
                 actor_features = self.mlp(actor_features)
 
         if self._use_naive_recurrent_policy or self._use_recurrent_policy:
@@ -283,10 +263,10 @@ class R_Actor(nn.Module):
 
             actor_features = obs
             if self._use_cnn:
-                actor_features = self.cnn(obs)
-            if self._use_mlp:
-                # Apply self-attention mechanism.
+                actor_features = self.cnn(actor_features)
+            if self._use_attention:
                 actor_features = self.attention(actor_features)
+            if self._use_mlp:
                 actor_features = self.mlp(actor_features)
 
         if self._use_naive_recurrent_policy or self._use_recurrent_policy:
@@ -324,6 +304,7 @@ class R_Critic(nn.Module):
         obs_shape = get_shape_from_obs_space(cent_obs_space)
         self._use_cnn = len(obs_shape) == 3
         self._use_mlp = not self._use_cnn
+        self._use_attention = False
 
         if self._use_gnn:
             raise NotImplementedError("GNN not implemented for R_Critic")
@@ -334,11 +315,11 @@ class R_Critic(nn.Module):
                 self.cnn = CNNBase(args, obs_shape)
                 input_dim = self.hidden_size
 
-            if self._use_mlp:
-                # Add self-attention mechanism.
+            if self._use_attention:            
                 self.attention = SelfAttention(input_dim)
                 input_dim = input_dim
 
+            if self._use_mlp:
                 self.mlp = MLPBase(args, input_dim)
                 input_dim = self.hidden_size
 
@@ -371,10 +352,10 @@ class R_Critic(nn.Module):
 
         critic_features = cent_obs
         if self._use_cnn:
-            critic_features = self.cnn(cent_obs)
-        if self._use_mlp:
-            # Apply self-attention mechanism.
+            critic_features = self.cnn(critic_features)
+        if self._use_attention:
             critic_features = self.attention(critic_features)
+        if self._use_mlp:
             critic_features = self.mlp(critic_features)
         
         if self._use_naive_recurrent_policy or self._use_recurrent_policy:
