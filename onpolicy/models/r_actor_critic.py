@@ -83,7 +83,6 @@ class R_Actor(nn.Module):
                 input_dim = self.hidden_size
 
             if self._use_attention:            
-                # Add self-attention mechanism.
                 self.attention = SelfAttention(input_dim)
                 input_dim = input_dim
 
