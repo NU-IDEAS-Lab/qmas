@@ -28,6 +28,8 @@ def add_args(parser):
                         help="The size of the world. The world is a square with side length `world_size`.")
     parser.add_argument("--observation_radius", type=int, default=10,
                         help="The radius within which agents can observe each other and resources.")
+    parser.add_argument("--observation_mask", action="store_true",
+                        help="Whether to apply visibility mask to returned observations.")
     parser.add_argument("--hauler_capacity", type=float, default=10.0,
                         help="The maximum amount of resources a hauler can carry.")
     parser.add_argument("--hauler_pickup_threshold", type=float, default=1.5,
@@ -75,6 +77,7 @@ class parallel_env(ParallelEnv):
             num_obstacles: int = 10,
             world_size: int = 50,
             observation_radius: int = 10,
+            observation_mask: bool = False,
             hauler_capacity: float = 10.0,
             hauler_pickup_threshold: float = 1.5,
             render_mode: str = "human",
@@ -89,6 +92,7 @@ class parallel_env(ParallelEnv):
         self.world_dims = np.array([world_size, world_size], dtype=np.int32)
         self.num_obstacles = num_obstacles
         self.render_mode = render_mode
+        self.mask_observations = observation_mask
         self.default_observation_radius = observation_radius
         self.default_hauler_capacity = hauler_capacity
         self.hauler_pickup_threshold = hauler_pickup_threshold
@@ -196,12 +200,10 @@ class parallel_env(ParallelEnv):
         self.map_depots = np.zeros(self.world_dims, dtype=np.float32)
         for depot in self.possible_depots:
             idx = np.random.randint(positions_available.shape[0])
-            depot.position = positions_available[idx]
-            # reset per-episode depot accounting
-            if not hasattr(depot, "stock"):
-                depot.stock = 0.0
-            else:
-                depot.stock = 0.0
+            depot.reset(
+                reset_start_position=True,
+                position=positions_available[idx]
+            )
             self.map_depots[depot.position[0], depot.position[1]] = depot.resource_id
         
         # Build stable resource index mappings for action vector <-> resource objects
@@ -412,8 +414,12 @@ class parallel_env(ParallelEnv):
         # Debugging: highlight the visible area in the map.
         # obs["map"][obs_mask["map"], :] += 0.2
 
-        # return combined_obs, combined_obs_mask
-        return combined_obs["map"], combined_obs_mask["map"]
+        if self.mask_observations:
+            result = combined_obs["map"] * combined_obs_mask["map"]
+            return result, combined_obs_mask["map"]
+        else:
+            # return combined_obs, combined_obs_mask
+            return combined_obs["map"], combined_obs_mask["map"]
 
 
     def available_actions(self, agent):
@@ -610,6 +616,21 @@ class parallel_env(ParallelEnv):
                                         break
                                 agent.cargo[r.resource_id] -= drop
                                 reward_dict[agent] += depot.resource.reward_deposit * drop
+                elif agent.capabilities[CAP.EXTRACT]:
+                    # Provide reward for Extractors that are sitting on a resource tile.
+                    px, py = agent.position.astype(np.int32)
+                    # Skip locations with depots.
+                    if self.map_depots[px, py] == 0 :
+                        # Check for resources at the extractor's position.
+                        for r in self.possible_resources:
+                            if self.map_resources[r][px, py] > 0:
+                                # Extractor is sitting on a resource tile.
+                                reward_dict[agent] += r.reward_extraction
+
+        # Calculate the percentage of resources deposited.
+        total_resources = sum(r.resource_count for r in self.possible_resources)
+        deposited_resources = sum(depot.stock for depot in self.possible_depots)
+        resource_deposit_percentage = deposited_resources / float(total_resources)
 
         # Check termination conditions.
         end_truncate = lastStep or (self.max_cycles >= 0 and self.step_count >= self.max_cycles)
@@ -632,6 +653,9 @@ class parallel_env(ParallelEnv):
             if agent.capabilities[CAP.PROSPECT]:
                 resources_discovered = self._get_num_resources_discovered()
                 reward_dict[agent] += 1.0 * (resources_discovered - resources_discovered_prev)
+
+            # Reward all agents for progress towards full resource deposit.
+            reward_dict[agent] += 5.0 * resource_deposit_percentage
 
         # Handle end of episode.
         if end_truncate or end_done:

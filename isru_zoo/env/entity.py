@@ -173,6 +173,11 @@ class Depot(Entity):
 
         # Store the resource associated with this depot.
         self.resource = resource
+    
+    def reset(self, *args, **kwargs):
+        ''' Resets the depot to its initial state. '''
+        super().reset(*args, **kwargs)
+        
         self.stock = 0.0
     
 
