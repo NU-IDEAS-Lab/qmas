@@ -549,11 +549,6 @@ class parallel_env(ParallelEnv):
                 # Set agent velocity.
                 agent.velocity = action["movement"].astype(np.int32)
                 agent.velocity = np.clip(agent.velocity, -1.0, 1.0)
-                if agent.capabilities[CAP.PROSPECT]:
-                    relative_position=self.get_nearest_uncleaned(agent)
-                    old_distance = np.linalg.norm(relative_position)
-                    count=self.get_resources_discovered_count(agent)
-                    reward_dict[agent]+=0.2*count
 
                 # Move the agent.
                 raw_position=agent.position + agent.velocity
@@ -563,19 +558,9 @@ class parallel_env(ParallelEnv):
                 new_position_int = new_position.astype(np.int32)
 
                 if self.map_obstacles[new_position_int[0], new_position_int[1]] == 1 or not np.array_equal(raw_position, new_position):
-                    reward_dict[agent] -= 2
+                    reward_dict[agent] -= 2.0
                 else:
                     agent.position=new_position
-
-                if agent.capabilities[CAP.PROSPECT]:
-                    # relative_position=agent.position-self.nearest_tile
-                    # new_distance=np.linalg.norm(relative_position)
-                    count=self.get_resources_discovered_count(agent)
-                    reward_dict[agent]+=0.1*count
-                    # if new_distance < old_distance:
-                    #     reward_dict[agent] += 0.2
-                    # else:
-                    #     reward_dict[agent] -= 0.05
 
                 # Handle communication.
                 if action["communication"][0] >= 0.5:
@@ -624,8 +609,7 @@ class parallel_env(ParallelEnv):
                                         depot.stock += drop
                                         break
                                 agent.cargo[r.resource_id] -= drop
-                                # Record the resources deposited.
-                                resources_deposited[agent][r] += drop
+                                reward_dict[agent] += depot.resource.reward_deposit * drop
 
         # Check termination conditions.
         end_truncate = lastStep or (self.max_cycles >= 0 and self.step_count >= self.max_cycles)
@@ -633,6 +617,9 @@ class parallel_env(ParallelEnv):
 
         # Perform post-step calculations.
         for agent in self.possible_agents:
+            # Calculate the previous number of resources discovered.
+            resources_discovered_prev = self._get_num_resources_discovered()
+
             # Perform observation.
             agent_observation, obs_mask = self.observe(
                 agent,
@@ -641,8 +628,10 @@ class parallel_env(ParallelEnv):
             obs_dict[agent] = agent_observation
             info_dict[agent]["visibility_mask"] = obs_mask
 
-            # Calculate reward.
-            reward_dict[agent] += self.get_reward(agent, end_truncate, end_done, resources_deposited[agent])
+            # Reward prospectors for new resources discovered.
+            if agent.capabilities[CAP.PROSPECT]:
+                resources_discovered = self._get_num_resources_discovered()
+                reward_dict[agent] += 1.0 * (resources_discovered - resources_discovered_prev)
 
         # Handle end of episode.
         if end_truncate or end_done:
@@ -658,19 +647,6 @@ class parallel_env(ParallelEnv):
         self.last_rewards = copy(reward_dict)
 
         return obs_dict, reward_dict, self.dones, truncated_dict, info_dict
-
-
-    def get_reward(self, agent, end_truncate, end_done, resources_deposited=None):
-        ''' Returns the reward for the given agent. '''
-        
-        reward = 0.0
-
-        # Reward for depositing resources.
-        if resources_deposited != None:
-            for r, amount in resources_deposited.items():
-                reward += r.reward_deposit * amount
-
-        return reward
 
 
     def get_nearest_uncleaned(self, agent):
@@ -693,28 +669,13 @@ class parallel_env(ParallelEnv):
         return (self.nearest_tile - pos).astype(np.float32)
 
 
-    def get_resources_discovered_count(self, agent):
-        ''' Returns the number of resource cells discovered within the agent's observation radius.
-            
-            Args:
-                agent: The agent to calculate discoveries for
-                
-            Returns:
-                int: The number of discovered resource cells within observation radius
+    def _get_num_resources_discovered(self):
         '''
-        # Calculate the visible area based on a circular observation radius
-        radius = agent.observation_radius
-        pos = agent.position.astype(np.int32)
+        Returns the total number of resource cells discovered.
+        '''
         
-        # Create a visibility mask for the current agent position
-        visible = (np.arange(self.world_dims[0])[:, None] - pos[0]) ** 2 + \
-                 (np.arange(self.world_dims[1])[None, :] - pos[1]) ** 2 <= radius ** 2
-                 
-        # Count how many discovered resource cells are within the agent's current visibility
-        discovered_in_radius = np.logical_and(self.mask_map_resources_discovered, visible)
-        
-        # Return the total count of discovered resources within radius (regardless of type)
-        return np.sum(discovered_in_radius)
+        mask = self.mask_map_resources_discovered
+        return np.sum([np.sum(self.map_resources[r][mask]) for r in self.possible_resources])
 
 
     def _nearest_extractor_distance(self, position):
