@@ -13,6 +13,13 @@ class AGENT_ROLE(IntEnum):
     HAULER = 2
 
 
+class CAP(IntEnum):
+    PROSPECT = 0
+    EXTRACT = 1
+    CARRY = 2
+    CARRY_CAPACITY = 3
+
+
 class Entity():
     ''' This base class stores all generic entity state. '''
 
@@ -96,8 +103,13 @@ class Agent(Entity):
         super().__init__(*args, **kwargs)
         self.speed_max = speed_max
         self.observation_radius = observation_radius
-        # Ensure all agents have a capabilities dict by default
-        self.capabilities = {}
+        self.capabilities = {
+            CAP.PROSPECT: False,
+            CAP.EXTRACT: False,
+            CAP.CARRY: False,
+            CAP.CARRY_CAPACITY: 0.0,
+        }
+
 
     def reset(self, *args, **kwargs):
         super().reset(*args, **kwargs)
@@ -110,11 +122,15 @@ class Prospector(Agent):
     """
 
     role = AGENT_ROLE.PROSPECTOR
-
+    
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Defaults specific to prospector
-        self.capabilities.update({"see_resources": True})
+        self.capabilities.update({
+            CAP.PROSPECT: True,
+            CAP.EXTRACT: False,
+            CAP.CARRY: False,
+            CAP.CARRY_CAPACITY: 0.0
+        })
 
 
 class Extractor(Agent):
@@ -124,7 +140,12 @@ class Extractor(Agent):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.capabilities.update({"excavate": True})
+        self.capabilities.update({
+            CAP.PROSPECT: False,
+            CAP.EXTRACT: True,
+            CAP.CARRY: False,
+            CAP.CARRY_CAPACITY: 0.0
+        })
 
 
 class Hauler(Agent):
@@ -134,10 +155,12 @@ class Hauler(Agent):
 
     def __init__(self, *args, carry_capacity=1.0, **kwargs):
         super().__init__(*args, **kwargs)
-        self.capabilities.update({"carry": True, "carry_capacity": carry_capacity})
-
-    def reset(self, *args, **kwargs):
-        super().reset(*args, **kwargs)
+        self.capabilities.update({
+            CAP.PROSPECT: False,
+            CAP.EXTRACT: False,
+            CAP.CARRY: True,
+            CAP.CARRY_CAPACITY: carry_capacity
+        })
 
 
 class Depot(Entity):

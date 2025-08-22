@@ -8,7 +8,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from copy import copy
 
-from isru_zoo.env.entity import ENTITY_TYPE, Agent, Depot, Extractor, Hauler, Prospector
+from isru_zoo.env.entity import ENTITY_TYPE, CAP, Agent, Depot, Extractor, Hauler, Prospector
 from isru_zoo.env.resource import TestResource1, TestResource2
 
 
@@ -136,32 +136,17 @@ class parallel_env(ParallelEnv):
         
         # Reset the environment.
         self.reset()
-    def _nearest_extractor_distance(self, position):
-        """Return the minimum Euclidean distance from the given position to any Extractor.
-        If no Extractor exists, return np.inf.
-        """
-        if not any(isinstance(a, Extractor) for a in self.agents):
-            return np.inf
-        pos = np.asarray(position, dtype=np.float32)
-        dmin = np.inf
-        for a in self.agents:
-            if isinstance(a, Extractor):
-                d = np.linalg.norm(pos - a.position)
-                if d < dmin:
-                    dmin = d
-        return dmin
+
 
     def _find_extractor_over_resource(self, hauler_pos, resource):
         """Return (extractor, extractor_pos_int) if there exists an Extractor that is
         standing on a cell containing the given resource and is within the
         hauler_pickup_threshold of the given hauler position. Otherwise (None, None).
         """
-        if not any(isinstance(a, Extractor) for a in self.agents):
-            return None, None
         pos = np.asarray(hauler_pos, dtype=np.float32)
         
         for a in self.agents:
-            if isinstance(a, Extractor):
+            if a.capabilities[CAP.EXTRACT]:
                 ex_pos_int = a.position.astype(np.int32)
                 # Extractor must be standing on a cell that actually has this resource
                 if self.map_resources[resource][ex_pos_int[0], ex_pos_int[1]] > 0:
@@ -203,7 +188,7 @@ class parallel_env(ParallelEnv):
             agent.reward = 0.0
 
             # Haulers start empty: cargo per resource_id -> 0.0
-            if isinstance(agent, Hauler):
+            if agent.capabilities[CAP.CARRY]:
                 agent.cargo = {r.resource_id: 0.0 for r in self.possible_resources}
 
         # Reset depots.
@@ -454,10 +439,9 @@ class parallel_env(ParallelEnv):
         for r in self.possible_resources:
             m = np.zeros(self.world_dims, dtype=np.float32)
             for a in self.agents:
-                if isinstance(a, Hauler):
-                    if r.resource_id in a.cargo:
-                        pos = a.position.astype(np.int32)
-                        m[pos[0], pos[1]] = a.cargo[r.resource_id]
+                if a.capabilities[CAP.CARRY] and r.resource_id in a.cargo:
+                    pos = a.position.astype(np.int32)
+                    m[pos[0], pos[1]] = a.cargo[r.resource_id]
             map_cargo.append(m)
 
         # Build the combined map.
@@ -487,18 +471,19 @@ class parallel_env(ParallelEnv):
         # Layers are ordered as: 0=obstacles, 1=agents, 2=depots, 3+=resources
         resource_layer = 3
         if not force_visible:
-            if not isinstance(agent, Prospector):
+            if not agent.capabilities[CAP.PROSPECT]:
                 # Mask out all resource layers for non-prospector local observations.
                 # (Communicated observations will still be merged in `observe()`)
                 obs_mask["map"][:, :, resource_layer:] = False
 
         # Update the discovered resources mask.
-        if isinstance(agent, Prospector) and not force_visible:
+        if agent.capabilities[CAP.PROSPECT] and not force_visible:
             for i, r in enumerate(self.possible_resources):
                 self.mask_map_resources_discovered |= (self.map_resources[r] > 0) & obs_mask["map"][:, :, resource_layer + i]
         
         return obs, obs_mask
-    
+
+
     def _update_adversary_velocity(self, adversary):
         """
         Update velocity based on the step count to create a more complex pattern.
@@ -516,7 +501,8 @@ class parallel_env(ParallelEnv):
         norm = np.linalg.norm(adversary.velocity)
         if norm > 1.0:
             adversary.velocity = adversary.velocity / norm
-                
+
+
     def step(self, action_dict={}, lastStep=False):
         ''''
         Perform a step in the environment based on the given action dictionary.
@@ -563,7 +549,7 @@ class parallel_env(ParallelEnv):
                 # Set agent velocity.
                 agent.velocity = action["movement"].astype(np.int32)
                 agent.velocity = np.clip(agent.velocity, -1.0, 1.0)
-                if isinstance(agent, Prospector):
+                if agent.capabilities[CAP.PROSPECT]:
                     relative_position=self.get_nearest_uncleaned(agent)
                     old_distance = np.linalg.norm(relative_position)
                     count=self.get_resources_discovered_count(agent)
@@ -581,7 +567,7 @@ class parallel_env(ParallelEnv):
                 else:
                     agent.position=new_position
 
-                if isinstance(agent, Prospector):
+                if agent.capabilities[CAP.PROSPECT]:
                     # relative_position=agent.position-self.nearest_tile
                     # new_distance=np.linalg.norm(relative_position)
                     count=self.get_resources_discovered_count(agent)
@@ -596,19 +582,13 @@ class parallel_env(ParallelEnv):
                     senders.add(agent)
 
                 # Corrected resource handling for Hauler agents
-                if isinstance(agent, Hauler):
+                if agent.capabilities[CAP.CARRY]:
                     action_vec = action["resources"]
                     px, py = agent.position.astype(np.int32)
 
-                    cap = (
-                        getattr(agent, "capabilities", {}).get("carry_capacity")
-                        if hasattr(agent, "capabilities") and isinstance(agent.capabilities, dict)
-                        else None
-                    )
-                    if cap is None:
-                        cap = getattr(agent, "carry_capacity", 0.0)
+                    capacity = agent.capabilities[CAP.CARRY_CAPACITY]
                     current_load = sum(agent.cargo.values())
-                    free = max(0.0, cap - current_load)
+                    free = max(0.0, capacity - current_load)
 
                     for idx, val in enumerate(action_vec):
                         if val > 0:
@@ -692,6 +672,7 @@ class parallel_env(ParallelEnv):
 
         return reward
 
+
     def get_nearest_uncleaned(self, agent):
         
         pos = agent.position
@@ -710,7 +691,8 @@ class parallel_env(ParallelEnv):
         
         # Return the relative difference as float32.
         return (self.nearest_tile - pos).astype(np.float32)
-    
+
+
     def get_resources_discovered_count(self, agent):
         ''' Returns the number of resource cells discovered within the agent's observation radius.
             
@@ -733,21 +715,21 @@ class parallel_env(ParallelEnv):
         
         # Return the total count of discovered resources within radius (regardless of type)
         return np.sum(discovered_in_radius)
-    
+
+
     def _nearest_extractor_distance(self, position):
         """Return the minimum Euclidean distance from the given position to any Extractor.
         If no Extractor exists, return np.inf.
         """
-        if not any(isinstance(a, Extractor) for a in self.agents):
-            return np.inf
         pos = np.asarray(position, dtype=np.float32)
         dmin = np.inf
         for a in self.agents:
-            if isinstance(a, Extractor):
+            if a.capabilities[CAP.EXTRACT]:
                 d = np.linalg.norm(pos - a.position)
                 if d < dmin:
                     dmin = d
         return dmin
+
 
     def _getAvailableActions(self, agent):
         ''' Returns the available actions for the given agent. '''
