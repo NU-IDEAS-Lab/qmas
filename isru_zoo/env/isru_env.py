@@ -289,7 +289,8 @@ class parallel_env(ParallelEnv):
         plt.figure(figsize=figsize)
 
         # Plot the map layers.
-        map_layers = state["map"]
+        # map_layers = state["map"]
+        map_layers = state
         num_layers = map_layers.shape[-1]
         for i in range(num_layers):
             plt.subplot(1, num_layers, i + 1)
@@ -324,15 +325,22 @@ class parallel_env(ParallelEnv):
         # Create the state space.
         # The state space is a complete observation of the environment.
         # This is not part of the standard PettingZoo API, but is useful for centralized training.
-        return spaces.Dict({
-            "id": spaces.Discrete(len(self.possible_agents)),
-            "map": spaces.Box(
-                low=-np.inf,
-                high=np.inf,
-                shape=self.map_shape,
-                dtype=np.float32
-            )
-        })
+        # return spaces.Dict({
+        #     "id": spaces.Discrete(len(self.possible_agents)),
+        #     "map": spaces.Box(
+        #         low=-np.inf,
+        #         high=np.inf,
+        #         shape=self.map_shape,
+        #         dtype=np.float32
+        #     )
+        # })
+
+        return spaces.Box(
+            low=-np.inf,
+            high=np.inf,
+            shape=self.map_shape,
+            dtype=np.float32
+        )
 
 
     @functools.cache
@@ -382,7 +390,9 @@ class parallel_env(ParallelEnv):
         ''' Returns the global state of the environment.
             This is useful for centralized training, decentralized execution. '''
         
-        return self._populateStateSpace(self.possible_agents[0], force_visible=True)[0]
+        state = self._populateStateSpace(self.possible_agents[0], force_visible=True)[0]
+
+        return state["map"]
 
 
     def observe(self, agent, senders=set()):
@@ -415,7 +425,8 @@ class parallel_env(ParallelEnv):
         # Debugging: highlight the visible area in the map.
         # obs["map"][obs_mask["map"], :] += 0.2
 
-        return combined_obs, combined_obs_mask
+        # return combined_obs, combined_obs_mask
+        return combined_obs["map"], combined_obs_mask["map"]
 
 
     def available_actions(self, agent):
@@ -438,7 +449,7 @@ class parallel_env(ParallelEnv):
 
         # Build the combined map.
         layers = [self.map_obstacles, map_agents, self.map_depots, *self.map_resources.values()]
-        map_combined = np.stack(layers, axis=-1)
+        map_combined = np.stack(layers, axis=-1).astype(np.float32)
 
         # Create the observation.
         obs = {
