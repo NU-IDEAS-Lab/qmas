@@ -171,18 +171,9 @@ class parallel_env(ParallelEnv):
 
         if seed != None:
             random.seed(seed)
-        
-        origin = np.array([0.0, 0.0], dtype=np.float32)
-        world_indices_x = np.arange(self.world_dims[0])
-        world_indices_y = np.arange(self.world_dims[1])
 
-        # Reset obstacles.
-        self.map_obstacles = np.zeros(self.world_dims, dtype=np.float32)
-        self.map_obstacles[
-            np.random.choice(world_indices_x, self.num_obstacles),
-            np.random.choice(world_indices_y, self.num_obstacles)
-        ] = 1.0
-        positions_available = np.argwhere(self.map_obstacles == 0)
+        # Generate new map (obstacles, resources, etc.) and get available positions.
+        positions_available = self.generate_map()        
 
         # Reset the agents.
         self.agents = copy(self.possible_agents)
@@ -193,37 +184,8 @@ class parallel_env(ParallelEnv):
                 reset_start_position=True,
                 position=start_position
             )
-            agent.reward = 0.0
-
-            # Haulers start empty: cargo per resource_id -> 0.0
             if agent.capabilities[CAP.CARRY]:
                 agent.cargo = {r.resource_id: 0.0 for r in self.possible_resources}
-
-        # Reset depots.
-        # Ensure they are placed in an available location.
-        self.map_depots = np.zeros(self.world_dims, dtype=np.float32)
-        for depot in self.possible_depots:
-            idx = np.random.randint(positions_available.shape[0])
-            depot.reset(
-                reset_start_position=True,
-                position=positions_available[idx]
-            )
-            self.map_depots[depot.position[0], depot.position[1]] = depot.resource_id
-        
-        # Build stable resource index mappings for action vector <-> resource objects
-        self.resource_list = list(self.possible_resources)
-        self.rid_to_idx = {r.resource_id: i for i, r in enumerate(self.resource_list)}
-        self.idx_to_res = {i: r for i, r in enumerate(self.resource_list)}
-
-        # Reset resources.
-        self.map_resources = {}
-        self.mask_map_resources_discovered = np.zeros(self.world_dims, dtype=bool)
-        for r in self.possible_resources:
-            self.map_resources[r] = np.zeros(self.world_dims, dtype=np.float32)
-            for _ in range(r.quantity):
-                idx = np.random.randint(positions_available.shape[0])
-                pos = positions_available[idx]
-                self.map_resources[r][pos[0], pos[1]] += 1.0
 
         # Reset other state.
         self.step_count = 0
@@ -242,6 +204,51 @@ class parallel_env(ParallelEnv):
             info[agent]["visibility_mask"] = obs_mask
 
         return observation, info
+
+
+    def generate_map(self):
+        ''' Generates a random map for the environment. '''
+
+        world_indices_x = np.arange(self.world_dims[0])
+        world_indices_y = np.arange(self.world_dims[1])
+
+        # Reset obstacles.
+        self.map_obstacles = np.zeros(self.world_dims, dtype=np.float32)
+        self.map_obstacles[
+            np.random.choice(world_indices_x, self.num_obstacles),
+            np.random.choice(world_indices_y, self.num_obstacles)
+        ] = 1.0
+        positions_available = np.argwhere(self.map_obstacles == 0)
+
+        # Reset depots.
+        # Ensure they are placed in an available location.
+        self.map_depots = np.zeros(self.world_dims, dtype=np.float32)
+        for depot in self.possible_depots:
+            idx = np.random.randint(positions_available.shape[0])
+            depot.position = positions_available[idx]
+            # reset per-episode depot accounting
+            if not hasattr(depot, "stock"):
+                depot.stock = 0.0
+            else:
+                depot.stock = 0.0
+            self.map_depots[depot.position[0], depot.position[1]] = depot.resource_id
+
+        # Build stable resource index mappings for action vector <-> resource objects
+        self.resource_list = list(self.possible_resources)
+        self.rid_to_idx = {r.resource_id: i for i, r in enumerate(self.resource_list)}
+        self.idx_to_res = {i: r for i, r in enumerate(self.resource_list)}
+
+        # Reset resources.
+        self.map_resources = {}
+        self.mask_map_resources_discovered = np.zeros(self.world_dims, dtype=bool)
+        for r in self.possible_resources:
+            self.map_resources[r] = np.zeros(self.world_dims, dtype=np.float32)
+            for _ in range(r.quantity):
+                idx = np.random.randint(positions_available.shape[0])
+                pos = positions_available[idx]
+                self.map_resources[r][pos[0], pos[1]] += 1.0
+
+        return positions_available
 
 
     def get_random_position(self):
