@@ -123,7 +123,7 @@ class parallel_env(ParallelEnv):
         ]
 
         # Record the map shape.
-        self.map_shape = (*self.world_dims, len(self.possible_resources) + 3)  # +3 for obstacles, agents, depots
+        self.map_shape = (*self.world_dims, 2 * len(self.possible_resources) + 3)  # +3 for obstacles, agents, depots
 
         # Set up spaces.
         self.observation_spaces = spaces.Dict({
@@ -448,9 +448,20 @@ class parallel_env(ParallelEnv):
             if a == agent and not force_visible:
                 # Distinguish the agent in the map.
                 map_agents[pos[0], pos[1]] += 255
+        
+        # Load agent cargo into the map.
+        map_cargo = []
+        for r in self.possible_resources:
+            m = np.zeros(self.world_dims, dtype=np.float32)
+            for a in self.agents:
+                if isinstance(a, Hauler):
+                    if r.resource_id in a.cargo:
+                        pos = a.position.astype(np.int32)
+                        m[pos[0], pos[1]] = a.cargo[r.resource_id]
+            map_cargo.append(m)
 
         # Build the combined map.
-        layers = [self.map_obstacles, map_agents, self.map_depots, *self.map_resources.values()]
+        layers = [self.map_obstacles, map_agents, self.map_depots, *self.map_resources.values(), *map_cargo]
         map_combined = np.stack(layers, axis=-1).astype(np.float32)
 
         # Create the observation.
