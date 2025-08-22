@@ -14,7 +14,7 @@ class Predictor(torch.nn.Module):
 
         transition_dim = obs_dim + action_dim
 
-        self.prediction_horizon = args.diffusion_horizon
+        self.prediction_horizon = args.prediction_history_window
 
         fix_mask = torch.zeros((self.prediction_horizon, transition_dim))
 
