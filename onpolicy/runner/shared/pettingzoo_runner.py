@@ -112,8 +112,6 @@ class PettingzooRunner(Runner):
         # Reset environment.
         obs, share_obs, available_actions = self.envs.reset()
 
-        
-
         # Get the shape of the action space.
         act_shape = get_shape_from_act_space(self.buffer.act_space)
         if isinstance(act_shape, Iterable):
@@ -123,7 +121,6 @@ class PettingzooRunner(Runner):
         
         # Get the shape of action log probabilities from the policy.
         action_log_prob_shape = (self.n_rollout_threads, self.num_agents, self.policy.actor.act.log_prob_dim)
-        
 
         # Initialize buffer.
         self.buffer.insert(
@@ -304,15 +301,15 @@ class PettingzooRunner(Runner):
                 if np.any(aa == None):
                     aa = None
                 
-                # Use the prediction from the diffuser if available.
-                use_prediction = hasattr(self.policy, "diffuser") and len(buffer[0]) == HISTORY_LENGTH and not self.all_args.diffusion_disable
+                # Use the prediction from the predictor if available.
+                use_prediction = hasattr(self.policy, "predictor") and len(buffer[0]) == HISTORY_LENGTH and not self.all_args.prediction_disable
                 if use_prediction:
                     for agentIdx in range(self.num_agents):
                         trajectory = torch.stack([t["transition"] for t in buffer[agentIdx]], dim=0)
                         visibility_mask = torch.stack([t["visibility_mask"] for t in buffer[agentIdx]], dim=0)
 
-                        # Get the prediction from the diffuser.
-                        pred = self.trainer.policy.get_prediction(
+                        # Get the prediction from the predictor.
+                        pred = self.trainer.policy.predictor.get_prediction(
                             trajectory=trajectory,
                             visibility_mask=visibility_mask,
                             prediction_prev=prediction_prev
@@ -426,15 +423,15 @@ class PettingzooRunner(Runner):
                 if np.any(aa == None):
                     aa = None
                 
-                # Use the prediction from the diffuser if available.
-                use_prediction = hasattr(self.policy, "diffuser") and len(buffer[0]) == HISTORY_LENGTH and not self.all_args.diffusion_disable
+                # Use the prediction from the predictor if available.
+                use_prediction = hasattr(self.policy, "predictor") and len(buffer[0]) == HISTORY_LENGTH and not self.all_args.prediction_disable
                 if use_prediction:
                     for agentIdx in range(self.num_agents):
                         trajectory = torch.stack([t["transition"] for t in buffer[agentIdx]], dim=0)
                         visibility_mask = torch.stack([t["visibility_mask"] for t in buffer[agentIdx]], dim=0)
 
-                        # Get the prediction from the diffuser.
-                        pred = self.trainer.policy.get_prediction(
+                        # Get the prediction from the predictor.
+                        pred = self.trainer.policy.predictor.get_prediction(
                             trajectory=trajectory,
                             visibility_mask=visibility_mask,
                             prediction_prev=prediction_prev

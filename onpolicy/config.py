@@ -339,7 +339,7 @@ def get_config():
     # diffuser parameters
     parser.add_argument("--diffusion_steps", type=int, default=20)
     parser.add_argument("--diffusion_horizon", type=int, default=8)
-    parser.add_argument("--diffusion_disable", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--prediction_disable", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--diffusion_autoregression_steps", type=int, default=0)
     parser.add_argument("--diffusion_model_type", type=str, default="dit1d",
                         choices=["jannerunet", "dit1d"],

@@ -17,7 +17,7 @@ class QmasAlgorithm(R_MAPPO):
 
         super().__init__(args, policy, env, device)
 
-        self.prediction_horizon = policy.prediction_horizon
+        self.prediction_horizon = policy.predictor.prediction_horizon
 
 
     def diffusion_update(self, diffusion_model, optimizer, loss_args, update_model):
@@ -83,7 +83,7 @@ class QmasAlgorithm(R_MAPPO):
                 data_generator = buffer.sample_trajectories(self.num_mini_batch, self.prediction_horizon)
                 
                 for sample in data_generator:
-                    self.train_sample_diffuser(sample.to(self.device), train_info)
+                    self.train_sample_diffuser(sample, train_info)
                     num_diffusion_updates += 1
 
             # Average the diffusion losses
@@ -141,8 +141,8 @@ class QmasAlgorithm(R_MAPPO):
             agent_rewards_batch = rewards_batch[:, :, i]
 
             # Calculate trajectory returns.
-            discounts = torch.ones((agent_rewards_batch.shape[0], agent_rewards_batch.shape[1]), dtype=torch.float32, device=self.device) * 0.997 # TODO: This constant is from Janner et al. (2022).
-            discounts = torch.pow(discounts, torch.arange(1, rewards_batch.shape[1] + 1, dtype=torch.float32, device=self.device))
+            discounts = torch.ones((agent_rewards_batch.shape[0], agent_rewards_batch.shape[1]), dtype=torch.float32) * 0.997 # TODO: This constant is from Janner et al. (2022).
+            discounts = torch.pow(discounts, torch.arange(1, rewards_batch.shape[1] + 1, dtype=torch.float32))
             agent_returns_batch = torch.sum(agent_rewards_batch * discounts, dim=1).reshape((-1, 1))
 
             # Build trajectories.
@@ -151,17 +151,22 @@ class QmasAlgorithm(R_MAPPO):
             # Get the visibility mask for the current agent.
             agent_fix_mask = fix_mask_batch[:, :, i, :]
 
+            # Transfer tensors to the device.
+            trajectories = trajectories.to(self.device)
+            agent_returns_batch = agent_returns_batch.to(self.device)
+            agent_fix_mask = agent_fix_mask.to(self.device)
+
             # Update the fix_mask. This determines which parts of the trajectory are fixed and which are predicted.
             # This applies to both update_diffusion and update_classifier.
-            self.policy.diffuser.fix_mask = torch.nn.Parameter(agent_fix_mask, requires_grad=False)
+            self.policy.predictor.diffuser.fix_mask = torch.nn.Parameter(agent_fix_mask, requires_grad=False)
 
             # Update diffuser model.
-            diffuser_loss = self.policy.diffuser.update_diffusion(
+            diffuser_loss = self.policy.predictor.diffuser.update_diffusion(
                 x0=trajectories,
             )['diffusion_loss']
 
             # Update guide model.
-            guide_loss = self.policy.diffuser.update_classifier(
+            guide_loss = self.policy.predictor.diffuser.update_classifier(
                 x0=trajectories,
                 condition_cg=agent_returns_batch
             )['classifier_loss']
@@ -172,11 +177,8 @@ class QmasAlgorithm(R_MAPPO):
 
     def prep_training(self):
         super().prep_training()
-        self.policy.diffuser.train()
-        self.policy.guide.train()
-    
+        self.policy.predictor.train()    
 
     def prep_rollout(self):
         super().prep_rollout()
-        self.policy.diffuser.eval()
-        self.policy.guide.eval()
+        self.policy.predictor.eval()

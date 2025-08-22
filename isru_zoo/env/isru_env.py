@@ -30,6 +30,8 @@ def add_args(parser):
                         help="The radius within which agents can observe each other and resources.")
     parser.add_argument("--hauler_capacity", type=float, default=10.0,
                         help="The maximum amount of resources a hauler can carry.")
+    parser.add_argument("--hauler_pickup_threshold", type=float, default=1.5,
+                        help="Max Euclidean distance (in grid units) a Hauler must be within of any Extractor to pick up resources.")
     parser.add_argument("--render_mode", type=str, default="human",
                         choices=parallel_env.metadata["render_modes"],
                         help="The rendering mode for the environment.")
@@ -74,6 +76,7 @@ class parallel_env(ParallelEnv):
             world_size: int = 50,
             observation_radius: int = 10,
             hauler_capacity: float = 10.0,
+            hauler_pickup_threshold: float = 1.5,
             render_mode: str = "human",
         ):
         """
@@ -88,6 +91,7 @@ class parallel_env(ParallelEnv):
         self.render_mode = render_mode
         self.default_observation_radius = observation_radius
         self.default_hauler_capacity = hauler_capacity
+        self.hauler_pickup_threshold = hauler_pickup_threshold
 
         # Set up entities.
         self.possible_agents = \
@@ -107,8 +111,7 @@ class parallel_env(ParallelEnv):
 
         # Set up the possible resources.
         self.possible_resources = [
-            TestResource1(10),
-            TestResource2(5)
+            TestResource1(10)
         ]
 
         # Set up depots.
@@ -129,9 +132,45 @@ class parallel_env(ParallelEnv):
         self.action_spaces = spaces.Dict({
             agent: self.action_space(agent) for agent in self.possible_agents
         })
+        self.nearest_tile=None
         
         # Reset the environment.
         self.reset()
+    def _nearest_extractor_distance(self, position):
+        """Return the minimum Euclidean distance from the given position to any Extractor.
+        If no Extractor exists, return np.inf.
+        """
+        if not any(isinstance(a, Extractor) for a in self.agents):
+            return np.inf
+        pos = np.asarray(position, dtype=np.float32)
+        dmin = np.inf
+        for a in self.agents:
+            if isinstance(a, Extractor):
+                d = np.linalg.norm(pos - a.position)
+                if d < dmin:
+                    dmin = d
+        return dmin
+
+    def _find_extractor_over_resource(self, hauler_pos, resource):
+        """Return (extractor, extractor_pos_int) if there exists an Extractor that is
+        standing on a cell containing the given resource and is within the
+        hauler_pickup_threshold of the given hauler position. Otherwise (None, None).
+        """
+        if not any(isinstance(a, Extractor) for a in self.agents):
+            return None, None
+        pos = np.asarray(hauler_pos, dtype=np.float32)
+        
+        for a in self.agents:
+            if isinstance(a, Extractor):
+                ex_pos_int = a.position.astype(np.int32)
+                # Extractor must be standing on a cell that actually has this resource
+                if self.map_resources[resource][ex_pos_int[0], ex_pos_int[1]] > 0:
+                    d = np.linalg.norm(pos - a.position)
+                    if d <= self.hauler_pickup_threshold:
+                        return a, ex_pos_int
+        return None, None
+
+        # Removed misplaced environment setup block from class scope.
 
 
     def reset(self, seed=None, options=None):
@@ -221,7 +260,7 @@ class parallel_env(ParallelEnv):
     def get_random_position(self):
         ''' Returns a random position in the world. '''
 
-        return np.random.uniform(-self.world_dims / 2, self.world_dims / 2).astype(np.float32)
+        return np.random.uniform(0, self.world_dims).astype(np.float32)
 
 
     def render(self, pred=None, figsize=(9, 6), history_length=2):
@@ -392,7 +431,10 @@ class parallel_env(ParallelEnv):
         map_agents = np.zeros(self.world_dims, dtype=np.int32)
         for i, a in enumerate(self.agents):
             pos = a.position.astype(np.int32)
-            map_agents[pos[0], pos[1]] = i + 1  # Start from 1 to avoid confusion with empty space.
+            map_agents[pos[0], pos[1]] = 1 + a.role.value
+            if a == agent and not force_visible:
+                # Distinguish the agent in the map.
+                map_agents[pos[0], pos[1]] += 255
 
         # Build the combined map.
         layers = [self.map_obstacles, map_agents, self.map_depots, *self.map_resources.values()]
@@ -480,7 +522,7 @@ class parallel_env(ParallelEnv):
             } for agent in self.possible_agents
         }
         senders = set()
-
+        
         # Perform agent actions.
         for agent in self.agents:
             if agent in action_dict:
@@ -493,10 +535,15 @@ class parallel_env(ParallelEnv):
 
                 # Record the action.
                 agent.last_action = action
-
+                self._populateStateSpace(agent)
                 # Set agent velocity.
                 agent.velocity = action["movement"].astype(np.int32)
                 agent.velocity = np.clip(agent.velocity, -1.0, 1.0)
+                if isinstance(agent, Prospector):
+                    relative_position=self.get_nearest_uncleaned(agent)
+                    old_distance = np.linalg.norm(relative_position)
+                    count=self.get_resources_discovered_count(agent)
+                    reward_dict[agent]+=0.2*count
 
                 # Move the agent.
                 raw_position=agent.position + agent.velocity
@@ -504,8 +551,21 @@ class parallel_env(ParallelEnv):
                 pos_max = self.world_dims.astype(np.float32) - 1.0
                 new_position = np.clip(raw_position, pos_min, pos_max)
                 new_position_int = new_position.astype(np.int32)
-                if self.map_obstacles[new_position_int[0], new_position_int[1]] == 0:
-                    agent.position = new_position
+
+                if self.map_obstacles[new_position_int[0], new_position_int[1]] == 1 or not np.array_equal(raw_position, new_position):
+                    reward_dict[agent] -= 2
+                else:
+                    agent.position=new_position
+
+                if isinstance(agent, Prospector):
+                    # relative_position=agent.position-self.nearest_tile
+                    # new_distance=np.linalg.norm(relative_position)
+                    count=self.get_resources_discovered_count(agent)
+                    reward_dict[agent]+=0.1*count
+                    # if new_distance < old_distance:
+                    #     reward_dict[agent] += 0.2
+                    # else:
+                    #     reward_dict[agent] -= 0.05
 
                 # Handle communication.
                 if action["communication"][0] >= 0.5:
@@ -516,18 +576,36 @@ class parallel_env(ParallelEnv):
                     action_vec = action["resources"]
                     px, py = agent.position.astype(np.int32)
 
-                    cap = agent.capabilities.get("carry_capacity", 0.0)
+                    cap = (
+                        getattr(agent, "capabilities", {}).get("carry_capacity")
+                        if hasattr(agent, "capabilities") and isinstance(agent.capabilities, dict)
+                        else None
+                    )
+                    if cap is None:
+                        cap = getattr(agent, "carry_capacity", 0.0)
                     current_load = sum(agent.cargo.values())
                     free = max(0.0, cap - current_load)
 
                     for idx, val in enumerate(action_vec):
                         if val > 0:
+                            # PICKUP: Require an Extractor to be standing on a tile that contains
+                            # this resource type, and the Hauler must be within pickup threshold
+                            # of that Extractor. 
                             r = self.idx_to_res[idx]
-                            available = self.map_resources[r][px, py]
+                            extractor, ex_pos_int = self._find_extractor_over_resource(agent.position, r)
+                            if extractor is None:
+                                # No eligible extractor-on-resource in range; cannot pick up
+                                reward_dict[agent] -= 0.001
+                                continue
+
+                            available = self.map_resources[r][ex_pos_int[0], ex_pos_int[1]]
                             want = float(val)
                             take = min(want, available, free)
                             if take > 0:
-                                self.map_resources[r][px, py] -= take
+                                # Remove from the resource map at the extractor's tile
+                                self.map_resources[r][ex_pos_int[0], ex_pos_int[1]] -= take
+                                # Add to the hauler's cargo
+                                reward_dict[agent]+= 0.2*take
                                 agent.cargo[r.resource_id] = agent.cargo.get(r.resource_id, 0.0) + take
                                 free -= take
                         elif val < 0:
@@ -580,18 +658,69 @@ class parallel_env(ParallelEnv):
         
         reward = 0.0
 
-        # TEST: Provide reward based on distance of agent to specific location.
-        target_position = np.array([2.0, 2.0], dtype=np.float32)
-        dist = np.linalg.norm(agent.position.astype(np.float32) - target_position)
-        reward = -dist
-
-        # # Reward for depositing resources.
-        # if "resources_deposited" is not None:
-        #     for r, amount in resources_deposited.items():
-        #         reward += r.reward_deposit * amount
+        # Reward for depositing resources.
+        if resources_deposited != None:
+            for r, amount in resources_deposited.items():
+                reward += r.reward_deposit * amount
 
         return reward
 
+    def get_nearest_uncleaned(self, agent):
+        
+        pos = agent.position
+        # Get all indices where there has resources.
+        indices = np.argwhere(self.map_resources == 1)
+        if indices.size == 0:
+            return np.array([0, 0], dtype=np.float32)
+        
+        # Compute differences from pos and squared distances (avoid sqrt for performance)
+        diffs = indices - pos  # shape: (num_uncleaned, 2)
+        squared_distances = np.sum(diffs**2, axis=1)
+        
+        # Find the index of the minimum squared distance
+        min_idx = np.argmin(squared_distances)
+        self.nearest_tile = indices[min_idx]
+        
+        # Return the relative difference as float32.
+        return (self.nearest_tile - pos).astype(np.float32)
+    
+    def get_resources_discovered_count(self, agent):
+        ''' Returns the number of resource cells discovered within the agent's observation radius.
+            
+            Args:
+                agent: The agent to calculate discoveries for
+                
+            Returns:
+                int: The number of discovered resource cells within observation radius
+        '''
+        # Calculate the visible area based on a circular observation radius
+        radius = agent.observation_radius
+        pos = agent.position.astype(np.int32)
+        
+        # Create a visibility mask for the current agent position
+        visible = (np.arange(self.world_dims[0])[:, None] - pos[0]) ** 2 + \
+                 (np.arange(self.world_dims[1])[None, :] - pos[1]) ** 2 <= radius ** 2
+                 
+        # Count how many discovered resource cells are within the agent's current visibility
+        discovered_in_radius = np.logical_and(self.mask_map_resources_discovered, visible)
+        
+        # Return the total count of discovered resources within radius (regardless of type)
+        return np.sum(discovered_in_radius)
+    
+    def _nearest_extractor_distance(self, position):
+        """Return the minimum Euclidean distance from the given position to any Extractor.
+        If no Extractor exists, return np.inf.
+        """
+        if not any(isinstance(a, Extractor) for a in self.agents):
+            return np.inf
+        pos = np.asarray(position, dtype=np.float32)
+        dmin = np.inf
+        for a in self.agents:
+            if isinstance(a, Extractor):
+                d = np.linalg.norm(pos - a.position)
+                if d < dmin:
+                    dmin = d
+        return dmin
 
     def _getAvailableActions(self, agent):
         ''' Returns the available actions for the given agent. '''
