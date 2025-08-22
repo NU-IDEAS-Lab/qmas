@@ -101,6 +101,7 @@ class Agent(Entity):
 
     def reset(self, *args, **kwargs):
         super().reset(*args, **kwargs)
+        self.cargo = {}
 
 
 # --- New agent Type subclasses ---
@@ -134,12 +135,9 @@ class Hauler(Agent):
     def __init__(self, *args, carry_capacity=1.0, **kwargs):
         super().__init__(*args, **kwargs)
         self.capabilities.update({"carry": True, "carry_capacity": carry_capacity})
-        self.cargo = {}
 
     def reset(self, *args, **kwargs):
         super().reset(*args, **kwargs)
-        # Clear inventory at episode start
-        self.cargo = {}
 
 
 class Depot(Entity):
