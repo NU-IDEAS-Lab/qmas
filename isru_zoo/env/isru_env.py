@@ -236,6 +236,7 @@ class parallel_env(ParallelEnv):
 
         # Reset other state.
         self.step_count = 0
+        self.last_rewards = {agent: 0.0 for agent in self.possible_agents}
         self.dones = dict.fromkeys(self.agents, False)
 
         # Set available actions.
@@ -299,7 +300,8 @@ class parallel_env(ParallelEnv):
             plt.axis("off")
         
         # Display the total reward for this step. Position this text below the subplots. Do not use suptitle.
-        plt.figtext(0.5, 0.01, f"Step: {self.step_count}, Total Reward: {sum([self.get_reward(agent, False, False) for agent in self.agents]):.2f}", ha="center", fontsize=8)
+        reward = sum(self.last_rewards.values())
+        plt.figtext(0.5, 0.01, f"Step: {self.step_count}, Combined Step Reward: {reward:.2f}", ha="center", fontsize=8)
 
         if self.render_mode == "human":
             # Show the plot.
@@ -660,6 +662,9 @@ class parallel_env(ParallelEnv):
         
         # Set available actions.
         self.available_actions_dict = {agent: self._getAvailableActions(agent) for agent in self.possible_agents}
+
+        # Record last rewards.
+        self.last_rewards = copy(reward_dict)
 
         return obs_dict, reward_dict, self.dones, truncated_dict, info_dict
 
