@@ -46,7 +46,7 @@ class R_Actor(nn.Module):
 
         obs_shape = get_shape_from_obs_space(obs_space)
         self._use_cnn = len(obs_shape) == 3
-        self._use_mlp = not self._use_cnn
+        self._use_mlp = True
         self._use_attention = False
 
         if self._use_gnn:
@@ -302,7 +302,7 @@ class R_Critic(nn.Module):
 
         obs_shape = get_shape_from_obs_space(cent_obs_space)
         self._use_cnn = len(obs_shape) == 3
-        self._use_mlp = not self._use_cnn
+        self._use_mlp = True
         self._use_attention = False
 
         if self._use_gnn:
