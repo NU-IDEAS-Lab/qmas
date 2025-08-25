@@ -628,7 +628,7 @@ class parallel_env(ParallelEnv):
                                 reward_dict[agent] += r.reward_extraction
 
         # Calculate the percentage of resources deposited.
-        total_resources = sum(r.resource_count for r in self.possible_resources)
+        total_resources = sum(r.quantity for r in self.possible_resources)
         deposited_resources = sum(depot.stock for depot in self.possible_depots)
         resource_deposit_percentage = deposited_resources / float(total_resources)
 
