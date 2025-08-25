@@ -414,8 +414,13 @@ class parallel_env(ParallelEnv):
             if agent in action_dict:
                 action = action_dict[agent]
 
+                # Set the agent velocity.
+                agent.velocity = np.array(action, dtype=np.float32)
+                if np.linalg.norm(agent.velocity) > 1.0:
+                    agent.velocity = agent.velocity / np.linalg.norm(agent.velocity)
+
                 # Increment the agent state.                
-                agent.position += action
+                agent.position += agent.velocity
 
                 self.state_history[agent].append(agent.position.copy())
 
