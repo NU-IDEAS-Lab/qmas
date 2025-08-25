@@ -8,7 +8,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from copy import copy
 
-from isru_zoo.env.entity import ENTITY_TYPE, CAP, Agent, Depot, Extractor, Hauler, Prospector
+from isru_zoo.env.entity import ENTITY_TYPE, AGENT_ROLE, CAP, Agent, Depot, Extractor, Hauler, Prospector
 from isru_zoo.env.resource import TestResource1, TestResource2
 
 
@@ -381,7 +381,7 @@ class parallel_env(ParallelEnv):
         
         state = self._populateStateSpace(self.possible_agents[0], force_visible=True)[0]
 
-        return state["map"]
+        return state
 
 
     def observe(self, agent, senders=set()):
@@ -389,6 +389,8 @@ class parallel_env(ParallelEnv):
 
         # Collect local data.
         local_obs, local_obs_mask = self._populateStateSpace(agent)
+
+        return local_obs, local_obs_mask
 
         # Set up the matrices.
         map = np.copy(local_obs["map"])
@@ -720,3 +722,127 @@ class parallel_env(ParallelEnv):
         ''' Returns the available actions for the given agent. '''
 
         return None
+
+class parallel_env_simple_obs(parallel_env):
+    ''' A simple observation version of the ISRU environment. '''
+
+    @property
+    @functools.cache
+    def state_space(self):
+        ''' Returns the state space of the environment. '''
+
+        return spaces.Dict({
+            "id": spaces.Box(
+                low=0,
+                high=len(self.possible_agents),
+                dtype=np.int32,
+            ),
+            "agents": spaces.Dict({
+                agent: spaces.Dict({
+                    "position": spaces.Box(
+                        low=0,
+                        high=np.max(self.world_dims),
+                        shape=(2,),
+                        dtype=np.float32
+                    ),
+                    "velocity": spaces.Box(
+                        low=-1,
+                        high=1,
+                        shape=(2,),
+                        dtype=np.float32
+                    ),
+                    "role": spaces.Box(
+                        low=0,
+                        high=len(AGENT_ROLE),
+                        shape=(1,),
+                        dtype=np.int32
+                    ),
+                    "cargo": spaces.Box(
+                        low=0,
+                        high=self.default_hauler_capacity,
+                        shape=(len(self.possible_resources),),
+                        dtype=np.float32
+                    ),
+                }) for agent in self.possible_agents
+            }),
+            "depots": spaces.Dict({
+                depot: spaces.Dict({
+                    "position": spaces.Box(
+                        low=0,
+                        high=np.max(self.world_dims),
+                        shape=(2,),
+                        dtype=np.float32
+                    ),
+                    "stock": spaces.Box(
+                        low=0,
+                        high=np.inf,
+                        shape=(1,),
+                        dtype=np.float32
+                    ),
+                }) for depot in self.possible_depots
+            }),
+            "resources": spaces.Dict({
+                r: spaces.Box(
+                    low=0,
+                    high=np.max(self.world_dims),
+                    shape=(r.quantity, len(self.world_dims)),
+                    dtype=np.float32
+                ) for r in self.possible_resources
+            }),
+        })
+
+
+    def _populateStateSpace(self, agent, force_visible=False):
+        ''' Fills in the state/observation space for the given agent. '''
+
+        # Create the observation.
+        obs = {
+            "id": self.possible_agents.index(agent),
+            "agents": {
+                a: {
+                    "position": a.position,
+                    "velocity": a.velocity,
+                    "role": np.array([a.role.value], dtype=np.int32),
+                    "cargo": np.array(
+                        [a.cargo.get(r.resource_id, 0.0) for r in self.possible_resources],
+                        dtype=np.float32
+                    )
+                } for a in self.possible_agents
+            },
+            "depots": {
+                d: {
+                    "position": d.position,
+                    "stock": np.array([d.stock], dtype=np.float32)
+                } for d in self.possible_depots
+            },
+            "resources": {}
+        }
+
+        # Add resource positions.
+        for r in self.possible_resources:
+            obs["resources"][r] = np.ones((r.quantity, len(self.world_dims)), dtype=np.float32) * -1.0
+            locations = np.argwhere(self.map_resources[r] > 0)
+            obs["resources"][r][:locations.shape[0], :] = locations.astype(np.float32)
+
+        obs_mask = {
+            "id": np.ones_like(obs["id"], dtype=bool),
+            "agents": {
+                a: {
+                    "position": np.ones_like(obs["agents"][a]["position"], dtype=bool),
+                    "velocity": np.ones_like(obs["agents"][a]["velocity"], dtype=bool),
+                    "role": np.ones_like(obs["agents"][a]["role"], dtype=bool),
+                    "cargo": np.ones_like(obs["agents"][a]["cargo"], dtype=bool)
+                } for a in self.possible_agents
+            },
+            "depots": {
+                d: {
+                    "position": np.ones_like(obs["depots"][d]["position"], dtype=bool),
+                    "stock": np.ones_like(obs["depots"][d]["stock"], dtype=bool)
+                } for d in self.possible_depots
+            },
+            "resources": {
+                r: np.ones_like(obs["resources"][r], dtype=bool) for r in self.possible_resources
+            }
+        }
+
+        return obs, obs_mask
