@@ -8,7 +8,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from copy import copy
 
-from isru_zoo.env.entity import ENTITY_TYPE, CAP, Agent, Depot, Extractor, Hauler, Prospector
+from isru_zoo.env.entity import ENTITY_TYPE, AGENT_ROLE, CAP, Agent, Depot, Extractor, Hauler, Prospector
 from isru_zoo.env.resource import TestResource1, TestResource2
 
 
@@ -381,7 +381,7 @@ class parallel_env(ParallelEnv):
         
         state = self._populateStateSpace(self.possible_agents[0], force_visible=True)[0]
 
-        return state["map"]
+        return state
 
 
     def observe(self, agent, senders=set()):
@@ -389,6 +389,8 @@ class parallel_env(ParallelEnv):
 
         # Collect local data.
         local_obs, local_obs_mask = self._populateStateSpace(agent)
+
+        return local_obs, local_obs_mask
 
         # Set up the matrices.
         map = np.copy(local_obs["map"])
@@ -628,7 +630,7 @@ class parallel_env(ParallelEnv):
                                 reward_dict[agent] += r.reward_extraction
 
         # Calculate the percentage of resources deposited.
-        total_resources = sum(r.resource_count for r in self.possible_resources)
+        total_resources = sum(r.quantity for r in self.possible_resources)
         deposited_resources = sum(depot.stock for depot in self.possible_depots)
         resource_deposit_percentage = deposited_resources / float(total_resources)
 
@@ -720,3 +722,194 @@ class parallel_env(ParallelEnv):
         ''' Returns the available actions for the given agent. '''
 
         return None
+
+class parallel_env_simple_obs(parallel_env):
+    ''' A simple observation version of the ISRU environment. '''
+
+    @property
+    @functools.cache
+    def state_space(self):
+        ''' Returns the state space of the environment. '''
+
+        return spaces.Dict({
+            "id": spaces.Box(
+                low=0,
+                high=len(self.possible_agents),
+                dtype=np.int32,
+            ),
+            "agents": spaces.Dict({
+                agent: spaces.Dict({
+                    "position": spaces.Box(
+                        low=0,
+                        high=np.max(self.world_dims),
+                        shape=(2,),
+                        dtype=np.float32
+                    ),
+                    "velocity": spaces.Box(
+                        low=-1,
+                        high=1,
+                        shape=(2,),
+                        dtype=np.float32
+                    ),
+                    "role": spaces.Box(
+                        low=0,
+                        high=len(AGENT_ROLE),
+                        shape=(1,),
+                        dtype=np.int32
+                    ),
+                    "cargo": spaces.Box(
+                        low=0,
+                        high=self.default_hauler_capacity,
+                        shape=(len(self.possible_resources),),
+                        dtype=np.float32
+                    ),
+                }) for agent in self.possible_agents
+            }),
+            "depots": spaces.Dict({
+                depot: spaces.Dict({
+                    "position": spaces.Box(
+                        low=0,
+                        high=np.max(self.world_dims),
+                        shape=(2,),
+                        dtype=np.float32
+                    ),
+                    "stock": spaces.Box(
+                        low=0,
+                        high=np.inf,
+                        shape=(1,),
+                        dtype=np.float32
+                    ),
+                }) for depot in self.possible_depots
+            }),
+            "resources": spaces.Dict({
+                r: spaces.Box(
+                    low=0,
+                    high=np.max(self.world_dims),
+                    shape=(r.quantity, len(self.world_dims)),
+                    dtype=np.float32
+                ) for r in self.possible_resources
+            }),
+        })
+
+
+    def _populateStateSpace(self, agent, force_visible=False):
+        ''' Fills in the state/observation space for the given agent. '''
+
+        # Create the observation.
+        obs = {
+            "id": self.possible_agents.index(agent),
+            "agents": {
+                a: {
+                    "position": a.position,
+                    "velocity": a.velocity,
+                    "role": np.array([a.role.value], dtype=np.int32),
+                    "cargo": np.array(
+                        [a.cargo.get(r.resource_id, 0.0) for r in self.possible_resources],
+                        dtype=np.float32
+                    )
+                } for a in self.possible_agents
+            },
+            "depots": {
+                d: {
+                    "position": d.position,
+                    "stock": np.array([d.stock], dtype=np.float32)
+                } for d in self.possible_depots
+            },
+            "resources": {}
+        }
+
+        # Add resource positions.
+        for r in self.possible_resources:
+            obs["resources"][r] = np.ones((r.quantity, len(self.world_dims)), dtype=np.float32) * -1.0
+            locations = np.argwhere(self.map_resources[r] > 0)
+            obs["resources"][r][:locations.shape[0], :] = locations.astype(np.float32)
+
+        obs_mask = {
+            "id": np.ones_like(obs["id"], dtype=bool),
+            "agents": {
+                a: {
+                    "position": np.ones_like(obs["agents"][a]["position"], dtype=bool),
+                    "velocity": np.ones_like(obs["agents"][a]["velocity"], dtype=bool),
+                    "role": np.ones_like(obs["agents"][a]["role"], dtype=bool),
+                    "cargo": np.ones_like(obs["agents"][a]["cargo"], dtype=bool)
+                } for a in self.possible_agents
+            },
+            "depots": {
+                d: {
+                    "position": np.ones_like(obs["depots"][d]["position"], dtype=bool),
+                    "stock": np.ones_like(obs["depots"][d]["stock"], dtype=bool)
+                } for d in self.possible_depots
+            },
+            "resources": {
+                r: np.ones_like(obs["resources"][r], dtype=bool) for r in self.possible_resources
+            }
+        }
+
+        return obs, obs_mask
+
+
+    def render(self, pred=None, figsize=(9, 6), history_length=2):
+        ''' Renders the environment.
+            
+            Args:
+                figsize (tuple, optional): The size of the figure in inches.
+                
+            Returns:
+                None
+        '''
+
+        # Convert the predicted state back into a dictionary (unflatten).
+        pred_unflattened = []
+        pred_steps = pred.shape[0] if pred is not None else 0
+        for i in range(pred_steps):
+            p = spaces.unflatten(self.observation_spaces, pred[i].flatten())
+            pred_unflattened.append(p)
+
+        # Get the true environment state.
+        state = self.state()
+
+        # Plot state as a grid using matplotlib.
+        plt.figure(figsize=figsize)
+
+        # Plot the depots.
+        plt.scatter(*np.argwhere(self.map_depots > 0).T, label="Depots", marker="s", color="black")
+        
+        # Plot the resources.
+        for i, r in enumerate(self.possible_resources):
+            plt.scatter(*np.argwhere(self.map_resources[r] > 0).T, label=f"Resource {r.resource_id}", alpha=0.5)
+        
+        # Plot the agents.
+        for agent in self.agents:
+            pos = agent.position.astype(np.int32)
+            if agent.capabilities[CAP.CARRY]:
+                plt.scatter(pos[1], pos[0], label=f"Hauler {self.possible_agents.index(agent)}", marker="^", s=100, edgecolor="black")
+            elif agent.capabilities[CAP.EXTRACT]:
+                plt.scatter(pos[1], pos[0], label=f"Extractor {self.possible_agents.index(agent)}", marker="o", s=100, edgecolor="black")
+            elif agent.capabilities[CAP.PROSPECT]:
+                plt.scatter(pos[1], pos[0], label=f"Prospector {self.possible_agents.index(agent)}", marker="*", s=100, edgecolor="black")
+        
+        # Display the total reward for this step. Position this text below the subplots. Do not use suptitle.
+        reward = sum(self.last_rewards.values())
+        resources_deposited = sum(depot.stock for depot in self.possible_depots)
+        plt.figtext(0.5, 0.01, f"Step: {self.step_count}, Combined Step Reward: {reward:.2f}, Resources Deposited: {resources_deposited}", ha="center", fontsize=8)
+
+        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.xlim(-1, self.world_dims[1])
+        plt.ylim(-1, self.world_dims[0])
+        plt.gca().set_aspect('equal', adjustable='box')
+
+        if self.render_mode == "human":
+            # Show the plot.
+            plt.show()
+            return None
+        elif self.render_mode == "rgb_array":
+            # Save the plot to a buffer and return it as an RGB array.
+            from io import BytesIO
+            io_buf = BytesIO()
+            plt.savefig(io_buf, format='raw')
+            io_buf.seek(0)
+            img_arr = np.reshape(np.frombuffer(io_buf.getvalue(), dtype=np.uint8),
+                                newshape=(int(plt.bbox.bounds[3]), int(plt.bbox.bounds[2]), -1))
+            io_buf.close()
+            plt.close()
+            return img_arr
