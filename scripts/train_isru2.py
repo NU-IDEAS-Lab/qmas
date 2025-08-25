@@ -4,24 +4,25 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-    "--experiment_name", "isru",
+    "--experiment_name", "isru-simple",
     "--project_name", "qmas",
-    "--env_class", "isru_zoo.isru_v0.parallel_env",
+    "--env_class", "isru_zoo.isru_v0.parallel_env_simple_obs",
     "--user_name", "ideas-mas",
 
 	"--num_extractors", "1",
     "--num_haulers", "1",
     "--num_prospectors", "1",
 
-    "--hauler_capacity", "3",
+    "--hauler_capacity", "1",
 
-    "--world_size", "10",
-    "--observation_radius", "4",
+    "--world_size", "5",
+    "--observation_radius", "5",
+    # "--observation_mask",
     "--num_obstacles", "0",
 
-    "--num_env_steps", "10000000",
-    "--episode_length", "200",
-    "--max_cycles", "200",
+    "--num_env_steps", "1000000",
+    "--episode_length", "50",
+    "--max_cycles", "50",
 
     # "--algorithm_class", "qmas.variant_two_modules.algorithm.QmasAlgorithm",
     # "--policy_class", "qmas.variant_two_modules.policy.QmasPolicy",
@@ -40,9 +41,9 @@ args = [
 
     "--seed", "0",
 
-    "--n_rollout_threads", "100",
+    "--n_rollout_threads", "300",
     "--cuda",
-    "--cuda_idx", "0",
+    "--cuda_idx", "2",
 
     "--save_interval", "1000",
     "--results_dir", "/data/group/mas/qmas/results",
