@@ -641,7 +641,7 @@ class parallel_env(ParallelEnv):
                         for r in self.possible_resources:
                             if self.map_resources[r][px, py] > 0:
                                 # Extractor is sitting on a resource tile.
-                                reward_dict[agent] += r.reward_extraction
+                                # reward_dict[agent] += r.reward_extraction
                                 info_dict["extractors/num_in_place"] += 1
 
         # Calculate the percentage of resources deposited.
@@ -667,12 +667,15 @@ class parallel_env(ParallelEnv):
             info_dict[agent]["visibility_mask"] = obs_mask
 
             # Reward prospectors for new resources discovered.
-            if agent.capabilities[CAP.PROSPECT]:
-                resources_discovered = self._get_num_resources_discovered()
-                reward_dict[agent] += 1.0 * (resources_discovered - resources_discovered_prev)
+            # if agent.capabilities[CAP.PROSPECT]:
+            #     resources_discovered = self._get_num_resources_discovered()
+            #     reward_dict[agent] += 1.0 * (resources_discovered - resources_discovered_prev)
 
             # Reward all agents for progress towards full resource deposit.
-            reward_dict[agent] += 5.0 * resource_deposit_percentage
+            # reward_dict[agent] += 5.0 * resource_deposit_percentage
+
+            # Provide reward.
+            reward_dict[agent] += self.reward(agent, end_truncate, end_done)
 
         # Handle end of episode.
         if end_truncate or end_done:
@@ -694,6 +697,44 @@ class parallel_env(ParallelEnv):
         self.last_rewards = copy(reward_dict)
 
         return obs_dict, reward_dict, self.dones, truncated_dict, info_dict
+
+
+    def reward(self, agent, end_truncate, end_done):
+        ''' Returns the reward for the given agent. '''
+
+        reward = 0.0
+
+        if agent.role == AGENT_ROLE.HAULER:
+            cargo_total = sum(agent.cargo.values())
+            if cargo_total > 0:
+                # Reward haulers for carrying resources.
+                reward += 0.05 * cargo_total
+                # Reward haulers for distance to the nearest depot.
+                nearest_depot_dist = np.min([np.linalg.norm(agent.position - depot.position) for depot in self.possible_depots])
+                reward += 10.0 * 1.0 / (1.0 + nearest_depot_dist)
+            else:
+                # Reward haulers for distance to the nearest extractor.
+                nearest_extractor_dist = self._nearest_extractor_distance(agent.position)
+                reward += 2.0 * 1.0 / (1.0 + nearest_extractor_dist)
+
+        elif agent.role == AGENT_ROLE.PROSPECTOR:
+            # Reward prospectors for the number of resources discovered.
+            num_discovered = self._get_num_resources_discovered()
+            reward += 0.1 * num_discovered
+        
+        elif agent.role == AGENT_ROLE.EXTRACTOR:
+            # Reward extractors for being on a resource tile.
+            px, py = agent.position.astype(np.int32)
+            if self.map_depots[px, py] == 0 :
+                for r in self.possible_resources:
+                    if self.map_resources[r][px, py] > 0:
+                        reward += r.reward_extraction
+                        break
+
+        else:
+            raise ValueError(f"Unknown agent role: {agent.role}")
+
+        return reward
 
 
     def get_nearest_uncleaned(self, agent):
