@@ -14,8 +14,9 @@ args = [
     "--state_per_agent",
     "--num_dimensions", "2",
     "--observation_probability", "0.5",
+    "--random_start_positions",
 
-    "--num_env_steps", "1000000",
+    "--num_env_steps", "5000000",
     "--episode_length", "50",
     "--max_cycles", "50",
 
@@ -36,9 +37,9 @@ args = [
 
     "--seed", "0",
 
-    "--n_rollout_threads", "100",
+    "--n_rollout_threads", "300",
     "--cuda",
-    "--cuda_idx", "7",
+    "--cuda_idx", "2",
 
     "--save_interval", "1000",
     "--results_dir", "/data/group/mas/qmas/results",

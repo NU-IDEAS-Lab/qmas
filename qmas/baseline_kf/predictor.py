@@ -18,19 +18,17 @@ class Predictor:
             raise ValueError("Prediction horizon must be 1 for the Kalman Filter predictor.")
 
         # Initialize the Kalman Filter parameters.
-        # TODO: Observation matrix H...
-        # TODO: Noise matrices should be set correctly.
         dt = 1.0
         self.F = torch.tensor(
             data=[
-                [1, 0, dt, 0, 0, 0, 0, 0, 0], #a0p0
-                [0, 1, 0, dt, 0, 0, 0, 0, 0], #a0p1
-                [0, 0, 1, 0, 0, 0, 0, 0, 0],  #a0v0
-                [0, 0, 0, 1, 0, 0, 0, 0, 0],  #a0v1
-                [0, 0, 0, 0, 1, 0, dt, 0, 0], #a1p0
-                [0, 0, 0, 0, 0, 1, 0, dt, 0], #a1p1
-                [0, 0, 0, 0, 0, 0, 1, 0, 0],  #a1v0
-                [0, 0, 0, 0, 0, 0, 0, 1, 0],  #a1v1
+                [1, 0, dt, 0, 0, 0, 0, 0, 0], #l0p0
+                [0, 1, 0, dt, 0, 0, 0, 0, 0], #l0p1
+                [0, 0, 1, 0, 0, 0, 0, 0, 0],  #l0v0
+                [0, 0, 0, 1, 0, 0, 0, 0, 0],  #l0v1
+                [0, 0, 0, 0, 1, 0, dt, 0, 0], #f1p0
+                [0, 0, 0, 0, 0, 1, 0, dt, 0], #f1p1
+                [0, 0, 0, 0, 0, 0, 1, 0, 0],  #f1v0
+                [0, 0, 0, 0, 0, 0, 0, 1, 0],  #f1v1
                 [0, 0, 0, 0, 0, 0, 0, 0, 1],  #id
             ],
             dtype=torch.float32,
@@ -38,14 +36,14 @@ class Predictor:
         )
         self.B = torch.tensor(
             data=[
-                [0, 0], #a0p0
-                [0, 0], #a0p1
-                [0, 0], #a0v0
-                [0, 0], #a0v1
-                [0, 0], #a1p0
-                [0, 0], #a1p1
-                [1, 0], #a1v0
-                [0, 1], #a1v1
+                [0, 0], #l0p0
+                [0, 0], #l0p1
+                [0, 0], #l0v0
+                [0, 0], #l0v1
+                [0, 0], #f0p0
+                [0, 0], #f0p1
+                [1.0, 0], #f0v0
+                [0, 1.0], #f0v1
                 [0, 0], #id
             ],
             dtype=torch.float32,
@@ -134,9 +132,6 @@ class KalmanFilterIntermittenObservations(KalmanFilter):
     ''' This class implements a Kalman Filter for trajectory prediction with intermittent observations.
         It inherits from the KalmanFilter class.
         It is based on work by Sinopoli et al. (2004) - https://doi.org/10.1109/TAC.2004.834121 '''
-
-    def predict(self, u):
-        return super().predict(u)
 
     def update(self, z, gamma=None):
         """

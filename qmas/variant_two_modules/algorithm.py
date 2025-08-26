@@ -72,12 +72,17 @@ class QmasAlgorithm(R_MAPPO):
         train_info = {}
         self.train_initialize_info(train_info)
 
+        # Determine what to update.
+        # update_actor = np.random.rand() < 0.5
+        # update_critic = True
+        update_predictor = True
+
         # Phase 1: Policy Training
         policy_info = super().train(buffer, update_actor, update_critic, last_step)
         train_info.update(policy_info)
 
-        # Phase 2: Diffusion Training
-        if update_actor or update_critic:  # Only train diffusion if we're updating either policy component
+        # Phase 2: Predictor Training
+        if update_predictor:
             num_diffusion_updates = 0
             for _ in range(self.ppo_epoch):
                 data_generator = buffer.sample_trajectories(self.num_mini_batch, self.prediction_horizon)
