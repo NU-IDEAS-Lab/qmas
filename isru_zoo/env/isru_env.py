@@ -271,6 +271,19 @@ class parallel_env(ParallelEnv):
         # Get the observation with respect to agent 0.
         # state = self.observe(self.agents[0], senders=set())[0]
 
+        return self.render_state(state, figsize=figsize)
+
+
+    def render_state(self, state, figsize=(9, 6)):
+        ''' Renders the given state.
+            
+            Args:
+                state (dict): The state to render.
+                
+            Returns:
+                None or np.ndarray: None if render_mode is "human", otherwise an RGB array.
+        '''
+
         # Plot state as a grid using matplotlib.
         plt.figure(figsize=figsize)
 
@@ -438,7 +451,7 @@ class parallel_env(ParallelEnv):
             map_agents[pos[0], pos[1]] = 1 + a.role.value
             if a == agent and not force_visible:
                 # Distinguish the agent in the map.
-                map_agents[pos[0], pos[1]] += 255
+                map_agents[pos[0], pos[1]] *= -1
         
         # Load agent cargo into the map.
         map_cargo = []
