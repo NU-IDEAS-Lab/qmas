@@ -487,7 +487,8 @@ class parallel_env(ParallelEnv):
             for i, r in enumerate(self.possible_resources):
                 self.mask_map_resources_discovered |= (self.map_resources[r] > 0) & obs_mask["map"][:, :, resource_layer + i]
         
-        return obs, obs_mask
+        return obs["map"], obs_mask["map"]
+        # return obs, obs_mask
 
 
     def _update_adversary_velocity(self, adversary):
