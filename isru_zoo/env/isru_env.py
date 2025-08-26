@@ -30,6 +30,8 @@ def add_args(parser):
                         help="The radius within which agents can observe each other and resources.")
     parser.add_argument("--observation_mask", action="store_true",
                         help="Whether to apply visibility mask to returned observations.")
+    parser.add_argument("--available_actions_mask", action="store_true",
+                        help="Whether to return an available actions mask for each agent.")
     parser.add_argument("--hauler_capacity", type=float, default=10.0,
                         help="The maximum amount of resources a hauler can carry.")
     parser.add_argument("--hauler_pickup_threshold", type=float, default=1.5,
@@ -78,6 +80,7 @@ class parallel_env(ParallelEnv):
             world_size: int = 50,
             observation_radius: int = 10,
             observation_mask: bool = False,
+            available_actions_mask: bool = False,
             hauler_capacity: float = 10.0,
             hauler_pickup_threshold: float = 1.5,
             render_mode: str = "human",
@@ -93,6 +96,7 @@ class parallel_env(ParallelEnv):
         self.num_obstacles = num_obstacles
         self.render_mode = render_mode
         self.mask_observations = observation_mask
+        self.mask_available_actions = available_actions_mask
         self.default_observation_radius = observation_radius
         self.default_hauler_capacity = hauler_capacity
         self.hauler_pickup_threshold = hauler_pickup_threshold
@@ -225,9 +229,6 @@ class parallel_env(ParallelEnv):
         self.step_count = 0
         self.last_rewards = {agent: 0.0 for agent in self.possible_agents}
         self.dones = dict.fromkeys(self.agents, False)
-
-        # Set available actions.
-        self.available_actions_dict = {agent: self._getAvailableActions(agent) for agent in self.agents}
 
         info = {
             agent: {} for agent in self.agents
@@ -380,7 +381,10 @@ class parallel_env(ParallelEnv):
             elif action_space.__class__.__name__ == "Discrete":
                 return spaces.MultiBinary(action_space.n)
             elif action_space.__class__.__name__ == "MultiDiscrete":
-                return spaces.MultiBinary(len(action_space.nvec), np.max(action_space.nvec))
+                return spaces.MultiBinary(action_space.nvec)
+            elif isinstance(action_space, spaces.Box) and np.issubdtype(action_space.dtype, np.integer):
+                diff = action_space.high - action_space.low + 1
+                return spaces.MultiBinary(diff)
             else:
                 raise NotImplementedError(f"Action space {action_space} not supported for action masking.")
         return get_available_action_space(action_space)
@@ -436,9 +440,39 @@ class parallel_env(ParallelEnv):
 
 
     def available_actions(self, agent):
-        ''' Returns the dictionary of available actions for all agents.
-            This is not standard in the Pettingzoo API but is useful. '''
-        return self.available_actions_dict[agent]
+        ''' Returns the available actions for this agent. '''
+
+        if not self.mask_available_actions:
+            return None
+
+        result = self.available_actions_space(agent).sample()
+        
+        # Prevent movement into obstacles or out of bounds.
+        for dx in range(-1, 2):
+            for dy in range(-1, 2):
+                vel = np.array([dx, dy], dtype=np.int32)
+                pos = (agent.position + vel).astype(np.int32)
+                idx = vel + 1  # Shift from [-1, 0, 1] to [0, 1, 2] for indexing
+                if pos[0] < 0 or pos[0] >= self.world_dims[0] or \
+                        pos[1] < 0 or pos[1] >= self.world_dims[1] or \
+                        self.map_obstacles[pos[0], pos[1]] == 1:
+                    # This movement would go out of bounds or into an obstacle; disable it.
+                    result["movement"][idx[0], idx[1]] = 0
+                else:
+                    result["movement"][idx[0], idx[1]] = 1
+
+        # Communication is always available.
+        result["communication"] = np.ones_like(result["communication"])
+
+        if agent.capabilities[CAP.CARRY]:
+            # Hauler agents can always pick up or drop off resources.
+            result["resources"] = np.ones_like(result["resources"])
+        else:
+            # Non-hauler agents cannot pick up or drop off resources.
+            result["resources"] = np.zeros_like(result["resources"])
+        
+        result_flattened = spaces.flatten(self.available_actions_space(agent), result)
+        return result_flattened
 
 
     def _populateStateSpace(self, agent, force_visible=False):
@@ -689,10 +723,6 @@ class parallel_env(ParallelEnv):
         info_dict["resources/extant"] = total_resources - deposited_resources
         info_dict["resources/total"] = total_resources
 
-
-        # Set available actions.
-        self.available_actions_dict = {agent: self._getAvailableActions(agent) for agent in self.possible_agents}
-
         # Record last rewards.
         self.last_rewards = copy(reward_dict)
 
@@ -779,11 +809,6 @@ class parallel_env(ParallelEnv):
                     dmin = d
         return dmin
 
-
-    def _getAvailableActions(self, agent):
-        ''' Returns the available actions for the given agent. '''
-
-        return None
 
 class parallel_env_simple_obs(parallel_env):
     ''' A simple observation version of the ISRU environment. '''
