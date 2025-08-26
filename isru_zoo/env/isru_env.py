@@ -605,16 +605,10 @@ class parallel_env(ParallelEnv):
                 agent.velocity = np.clip(agent.velocity, -1.0, 1.0)
 
                 # Move the agent.
-                raw_position=agent.position + agent.velocity
+                raw_position = agent.position + agent.velocity
                 pos_min = np.array([0.0, 0.0], dtype=np.float32)
                 pos_max = self.world_dims.astype(np.float32) - 1.0
-                new_position = np.clip(raw_position, pos_min, pos_max)
-                new_position_int = new_position.astype(np.int32)
-
-                if self.map_obstacles[new_position_int[0], new_position_int[1]] == 1 or not np.array_equal(raw_position, new_position):
-                    reward_dict[agent] -= 2.0
-                else:
-                    agent.position=new_position
+                agent.position = np.clip(raw_position, pos_min, pos_max)
 
                 # Handle communication.
                 if action["communication"][0] >= 0.5:
