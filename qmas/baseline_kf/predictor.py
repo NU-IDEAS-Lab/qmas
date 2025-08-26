@@ -18,8 +18,6 @@ class Predictor:
             raise ValueError("Prediction horizon must be 1 for the Kalman Filter predictor.")
 
         # Initialize the Kalman Filter parameters.
-        # TODO: Observation matrix H...
-        # TODO: Noise matrices should be set correctly.
         dt = 1.0
         self.F = torch.tensor(
             data=[
@@ -134,9 +132,6 @@ class KalmanFilterIntermittenObservations(KalmanFilter):
     ''' This class implements a Kalman Filter for trajectory prediction with intermittent observations.
         It inherits from the KalmanFilter class.
         It is based on work by Sinopoli et al. (2004) - https://doi.org/10.1109/TAC.2004.834121 '''
-
-    def predict(self, u):
-        return super().predict(u)
 
     def update(self, z, gamma=None):
         """
