@@ -150,7 +150,6 @@ class PettingzooEnv(object):
         rewards = [rewards[i] for i in range(self.num_agents)]
 
         info["deltaSteps"] = [[self.deltaSteps[a]] for a in self.env.possible_agents]
-        info["ready"] = [info[a]["ready"] for a in self.env.possible_agents]
 
         return ret_obs, ret_share_obs, rewards, done, info, ret_available_actions
 

@@ -229,7 +229,9 @@ class parallel_env(ParallelEnv):
         # Set available actions.
         self.available_actions_dict = {agent: self._getAvailableActions(agent) for agent in self.agents}
 
-        info = {}
+        info = {
+            agent: {} for agent in self.agents
+        }
 
         # Return the initial observation.
         observation = {}
@@ -525,12 +527,16 @@ class parallel_env(ParallelEnv):
         obs_dict = {}
         reward_dict = {agent: 0.0 for agent in self.possible_agents}
         truncated_dict = {agent: False for agent in self.possible_agents}
-        info_dict = {}
-        resources_deposited = {
-            agent: {
-                r: 0.0 for r in self.possible_resources
-            } for agent in self.possible_agents
+        info_dict = {
+            "resources/discovered": 0.0,
+            "resources/deposited": 0.0,
+            "resources/step_picked_up": 0.0,
+            "resources/step_dropped_off": 0.0,
+            "resources/extant": 0.0,
+            "resources/total": 0.0,
+            "extractors/num_in_place": 0,
         }
+        info_dict.update({agent: {} for agent in self.possible_agents})
         senders = set()
         
         # Perform agent actions.
@@ -597,6 +603,7 @@ class parallel_env(ParallelEnv):
                                 reward_dict[agent]+= 0.2*take
                                 agent.cargo[r.resource_id] = agent.cargo.get(r.resource_id, 0.0) + take
                                 free -= take
+                                info_dict["resources/step_picked_up"] += take
                         elif val < 0:
                             r = self.idx_to_res[idx]
                             want_drop = float(-val)
@@ -610,6 +617,7 @@ class parallel_env(ParallelEnv):
                                         break
                                 agent.cargo[r.resource_id] -= drop
                                 reward_dict[agent] += depot.resource.reward_deposit * drop
+                                info_dict["resources/step_dropped_off"] += drop
                 elif agent.capabilities[CAP.EXTRACT]:
                     # Provide reward for Extractors that are sitting on a resource tile.
                     px, py = agent.position.astype(np.int32)
@@ -620,6 +628,7 @@ class parallel_env(ParallelEnv):
                             if self.map_resources[r][px, py] > 0:
                                 # Extractor is sitting on a resource tile.
                                 reward_dict[agent] += r.reward_extraction
+                                info_dict["extractors/num_in_place"] += 1
 
         # Calculate the percentage of resources deposited.
         total_resources = sum(r.quantity for r in self.possible_resources)
@@ -656,7 +665,14 @@ class parallel_env(ParallelEnv):
             for agent in self.agents:
                 truncated_dict[agent] = True
             self.agents = []
-        
+
+        # Update information dictionary.
+        info_dict["resources/discovered"] = self._get_num_resources_discovered()
+        info_dict["resources/deposited"] = deposited_resources
+        info_dict["resources/extant"] = total_resources - deposited_resources
+        info_dict["resources/total"] = total_resources
+
+
         # Set available actions.
         self.available_actions_dict = {agent: self._getAvailableActions(agent) for agent in self.possible_agents}
 
