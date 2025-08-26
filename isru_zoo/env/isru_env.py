@@ -229,11 +229,7 @@ class parallel_env(ParallelEnv):
         # Set available actions.
         self.available_actions_dict = {agent: self._getAvailableActions(agent) for agent in self.agents}
 
-        info = {
-            agent: {
-                "ready": True
-            } for agent in self.agents
-        }
+        info = {}
 
         # Return the initial observation.
         observation = {}
@@ -529,11 +525,7 @@ class parallel_env(ParallelEnv):
         obs_dict = {}
         reward_dict = {agent: 0.0 for agent in self.possible_agents}
         truncated_dict = {agent: False for agent in self.possible_agents}
-        info_dict = {
-            agent: {
-                "ready": True,
-            } for agent in self.possible_agents
-        }
+        info_dict = {}
         resources_deposited = {
             agent: {
                 r: 0.0 for r in self.possible_resources
@@ -662,7 +654,6 @@ class parallel_env(ParallelEnv):
         # Handle end of episode.
         if end_truncate or end_done:
             for agent in self.agents:
-                info_dict[agent]["ready"] = True
                 truncated_dict[agent] = True
             self.agents = []
         
