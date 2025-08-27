@@ -12,6 +12,8 @@ class Resource:
         else:
             self.resource_id = resource_id
 
+    def __repr__(self):
+        return f"Resource(id={self.resource_id}, quantity={self.quantity})"
 
 class TestResource1(Resource):
     ''' We are using this as the test resource during development. '''
