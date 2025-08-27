@@ -182,7 +182,7 @@ class parallel_env(ParallelEnv):
         # Reset resources.
         for r in self.possible_resources:
             if self.randomize_num_resources:
-                r.reset(quantity=random.randint(1, r.quantity))
+                r.reset(quantity=random.randint(1, r.quantity_max))
             else:
                 r.reset()
 
