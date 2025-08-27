@@ -36,6 +36,8 @@ def add_args(parser):
                         help="Whether to return an available actions mask for each agent.")
     parser.add_argument("--hauler_capacity", type=float, default=10.0,
                         help="The maximum amount of resources a hauler can carry.")
+    parser.add_argument("--hauler_pickup_threshold", type=float, default=1.5,
+                        help="Max Euclidean distance (in grid units) a Hauler must be within of any Extractor to pick up resources.")
     parser.add_argument("--render_mode", type=str, default="human",
                         choices=parallel_env.metadata["render_modes"],
                         help="The rendering mode for the environment.")
@@ -83,6 +85,7 @@ class parallel_env(ParallelEnv):
             observation_mask: bool = False,
             available_actions_mask: bool = False,
             hauler_capacity: float = 10.0,
+            hauler_pickup_threshold: float = 1.5,
             render_mode: str = "human",
         ):
         """
@@ -99,22 +102,23 @@ class parallel_env(ParallelEnv):
         self.mask_available_actions = available_actions_mask
         self.default_observation_radius = observation_radius
         self.default_hauler_capacity = hauler_capacity
+        self.hauler_pickup_threshold = hauler_pickup_threshold
 
         # Set up entities.
-        self.extractors = [Extractor(
+        self.possible_agents = \
+            [Extractor(
                 position=self.get_random_position(),
                 observation_radius=self.default_observation_radius
-            ) for _ in range(num_extractors)]
-        self.haulers = [Hauler(
+            ) for _ in range(num_extractors)] + \
+            [Hauler(
                 position=self.get_random_position(),
                 carry_capacity=self.default_hauler_capacity,
                 observation_radius=self.default_observation_radius
-            ) for _ in range(num_haulers)]
-        self.prospectors = [Prospector(
+            ) for _ in range(num_haulers)] + \
+            [Prospector(
                 position=self.get_random_position(),
                 observation_radius=self.default_observation_radius
             ) for _ in range(num_prospectors)]
-        self.possible_agents = self.extractors + self.haulers + self.prospectors
 
         # Set up the possible resources.
         self.possible_resources = [
@@ -157,8 +161,8 @@ class parallel_env(ParallelEnv):
                 ex_pos_int = a.position.astype(np.int32)
                 # Extractor must be standing on a cell that actually has this resource
                 if self.map_resources[resource][ex_pos_int[0], ex_pos_int[1]] > 0:
-                    # Extractor must be in the 9-neighborhood of the Hauler
-                    if np.all(np.abs(ex_pos_int - pos) <= 1):
+                    d = np.linalg.norm(pos - a.position)
+                    if d <= self.hauler_pickup_threshold:
                         return a, ex_pos_int
         return None, None
 
@@ -625,18 +629,16 @@ class parallel_env(ParallelEnv):
                 # if action["communication"][0] >= 0.5:
                 #     senders.add(agent)
 
-                # Resource handling for Hauler agents
+                # Corrected resource handling for Hauler agents
                 if agent.capabilities[CAP.CARRY]:
-                    action_resources = action["resources"]
+                    action_vec = action["resources"]
                     px, py = agent.position.astype(np.int32)
 
-                    # Calculate current load and free capacity.
                     capacity = agent.capabilities[CAP.CARRY_CAPACITY]
                     current_load = sum(agent.cargo.values())
                     free = max(0.0, capacity - current_load)
 
-                    # Handle pickup and drop-off for each resource type.
-                    for idx, val in enumerate(action_resources):
+                    for idx, val in enumerate(action_vec):
                         if val > 0:
                             # PICKUP: Require an Extractor to be standing on a tile that contains
                             # this resource type, and the Hauler must be within pickup threshold
@@ -978,27 +980,22 @@ class parallel_env_simple_obs(parallel_env):
         # Plot state as a grid using matplotlib.
         plt.figure(figsize=figsize)
 
+        # Plot the depots.
+        plt.scatter(*np.argwhere(self.map_depots > 0).T, label="Depots", marker="s", color="black")
+        
         # Plot the resources.
         for i, r in enumerate(self.possible_resources):
-            color = plt.cm.get_cmap("tab10")(i)
-            positions = np.argwhere(self.map_resources[r] > 0)
-            if positions.size > 0:
-                plt.scatter(positions[:, 0], positions[:, 1], label=f"Resource {r.resource_id}", alpha=0.5)
-            
-            # Plot depot for this resource type.
-            depot_positions = np.argwhere(self.map_depots == r.resource_id)
-            if depot_positions.size > 0:
-                plt.scatter(depot_positions[:, 0], depot_positions[:, 1], label=f"Depot {r.resource_id}", marker="s", color=color, edgecolor="black", s=100)
+            plt.scatter(*np.argwhere(self.map_resources[r] > 0).T, label=f"Resource {r.resource_id}", alpha=0.5)
         
         # Plot the agents.
         for agent in self.agents:
             pos = agent.position.astype(np.int32)
             if agent.capabilities[CAP.CARRY]:
-                plt.scatter(pos[0], pos[1], label=f"Hauler {self.possible_agents.index(agent)}", marker="^", s=100, color="red", edgecolor="black")
+                plt.scatter(pos[1], pos[0], label=f"Hauler {self.possible_agents.index(agent)}", marker="^", s=100, edgecolor="black")
             elif agent.capabilities[CAP.EXTRACT]:
-                plt.scatter(pos[0], pos[1], label=f"Extractor {self.possible_agents.index(agent)}", marker="o", s=100, color="yellow", edgecolor="black")
+                plt.scatter(pos[1], pos[0], label=f"Extractor {self.possible_agents.index(agent)}", marker="o", s=100, edgecolor="black")
             elif agent.capabilities[CAP.PROSPECT]:
-                plt.scatter(pos[0], pos[1], label=f"Prospector {self.possible_agents.index(agent)}", marker="*", s=100, color="green", edgecolor="black")
+                plt.scatter(pos[1], pos[0], label=f"Prospector {self.possible_agents.index(agent)}", marker="*", s=100, edgecolor="black")
         
         # Display the total reward for this step. Position this text below the subplots. Do not use suptitle.
         reward = sum(self.last_rewards.values())
@@ -1007,8 +1004,8 @@ class parallel_env_simple_obs(parallel_env):
         plt.figtext(0.5, 0.01, f"Step: {self.step_count}, Combined Step Reward: {reward:.2f}, Resources Deposited: {resources_deposited}, Resources Held: {resources_held}", ha="center", fontsize=8)
 
         plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-        plt.xlim(-1, self.world_dims[0])
-        plt.ylim(-1, self.world_dims[1])
+        plt.xlim(-1, self.world_dims[1])
+        plt.ylim(-1, self.world_dims[0])
         plt.gca().set_aspect('equal', adjustable='box')
 
         if self.render_mode == "human":
