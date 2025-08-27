@@ -682,7 +682,7 @@ class parallel_env(ParallelEnv):
 
         # Check termination conditions.
         end_truncate = lastStep or (self.max_cycles >= 0 and self.step_count >= self.max_cycles)
-        end_done = False  # No done conditions for now.
+        end_done = deposited_resources >= total_resources
 
         # Perform post-step calculations.
         for agent in self.possible_agents:
