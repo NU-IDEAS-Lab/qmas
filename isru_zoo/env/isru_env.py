@@ -24,6 +24,8 @@ def add_args(parser):
                         help="The number of prospector vehicles to place in the world.")
     parser.add_argument("--num_obstacles", type=int, default=0,
                         help="The number of obstacles to place in the world.")
+    parser.add_argument("--num_resources", type=int, default=20,
+                        help="The number of resources to place in the world.")
     parser.add_argument("--world_size", type=int, default=50,
                         help="The size of the world. The world is a square with side length `world_size`.")
     parser.add_argument("--observation_radius", type=int, default=10,
@@ -77,6 +79,7 @@ class parallel_env(ParallelEnv):
             num_prospectors: int = 1,
             max_cycles: int = -1,
             num_obstacles: int = 10,
+            num_resources: int = 20,
             world_size: int = 50,
             observation_radius: int = 10,
             observation_mask: bool = False,
@@ -119,7 +122,7 @@ class parallel_env(ParallelEnv):
 
         # Set up the possible resources.
         self.possible_resources = [
-            TestResource1(10)
+            TestResource1(num_resources)
         ]
 
         # Set up depots.
@@ -639,7 +642,11 @@ class parallel_env(ParallelEnv):
                             extractor, ex_pos_int = self._find_extractor_over_resource(agent.position, r)
                             if extractor is None:
                                 # No eligible extractor-on-resource in range; cannot pick up
-                                reward_dict[agent] -= 0.001
+                                # reward_dict[agent] -= 0.001
+                                continue
+
+                            # Do not allow pickup from depots.
+                            if self.map_depots[ex_pos_int[0], ex_pos_int[1]] != 0:
                                 continue
 
                             available = self.map_resources[r][ex_pos_int[0], ex_pos_int[1]]
@@ -649,7 +656,8 @@ class parallel_env(ParallelEnv):
                                 # Remove from the resource map at the extractor's tile
                                 self.map_resources[r][ex_pos_int[0], ex_pos_int[1]] -= take
                                 # Add to the hauler's cargo
-                                reward_dict[agent]+= 0.2*take
+                                reward_dict[agent]+= 5.0 * take
+                                reward_dict[extractor] += 5.0 * take
                                 agent.cargo[r.resource_id] = agent.cargo.get(r.resource_id, 0.0) + take
                                 free -= take
                                 info_dict["resources/step_picked_up"] += take
@@ -665,7 +673,8 @@ class parallel_env(ParallelEnv):
                                         depot.stock += drop
                                         break
                                 agent.cargo[r.resource_id] -= drop
-                                reward_dict[agent] += depot.resource.reward_deposit * drop
+                                self.map_resources[r][px, py] += drop
+                                reward_dict[agent] += 10.0 * depot.resource.reward_deposit * drop
                                 info_dict["resources/step_dropped_off"] += drop
                 elif agent.capabilities[CAP.EXTRACT]:
                     # Provide reward for Extractors that are sitting on a resource tile.
@@ -686,7 +695,7 @@ class parallel_env(ParallelEnv):
 
         # Check termination conditions.
         end_truncate = lastStep or (self.max_cycles >= 0 and self.step_count >= self.max_cycles)
-        end_done = False  # No done conditions for now.
+        end_done = deposited_resources >= total_resources
 
         # Perform post-step calculations.
         for agent in self.possible_agents:
@@ -743,10 +752,10 @@ class parallel_env(ParallelEnv):
                 # Reward haulers for distance to the nearest depot.
                 nearest_depot_dist = np.min([np.linalg.norm(agent.position - depot.position) for depot in self.possible_depots])
                 reward += 10.0 * 1.0 / (1.0 + nearest_depot_dist)
-            else:
-                # Reward haulers for distance to the nearest extractor.
-                nearest_extractor_dist = self._nearest_extractor_distance(agent.position)
-                reward += 2.0 * 1.0 / (1.0 + nearest_extractor_dist)
+
+            # Reward haulers for distance to the nearest extractor.
+            nearest_extractor_dist = self._nearest_extractor_distance(agent.position)
+            reward += 2.0 * 1.0 / (1.0 + nearest_extractor_dist)
 
         elif agent.role == AGENT_ROLE.PROSPECTOR:
             # Reward prospectors for the number of resources discovered.
@@ -764,6 +773,13 @@ class parallel_env(ParallelEnv):
 
         else:
             raise ValueError(f"Unknown agent role: {agent.role}")
+
+        # Reward for global objective at the end of the episode.
+        if end_truncate or end_done:
+            total_resources = sum(r.quantity for r in self.possible_resources)
+            deposited_resources = sum(depot.stock for depot in self.possible_depots)
+            resource_deposit_percentage = deposited_resources / float(total_resources)
+            reward += 1000.0 * resource_deposit_percentage
 
         return reward
 
@@ -979,7 +995,8 @@ class parallel_env_simple_obs(parallel_env):
         # Display the total reward for this step. Position this text below the subplots. Do not use suptitle.
         reward = sum(self.last_rewards.values())
         resources_deposited = sum(depot.stock for depot in self.possible_depots)
-        plt.figtext(0.5, 0.01, f"Step: {self.step_count}, Combined Step Reward: {reward:.2f}, Resources Deposited: {resources_deposited}", ha="center", fontsize=8)
+        resources_held = sum(sum(agent.cargo.values()) for agent in self.agents if agent.capabilities[CAP.CARRY])
+        plt.figtext(0.5, 0.01, f"Step: {self.step_count}, Combined Step Reward: {reward:.2f}, Resources Deposited: {resources_deposited}, Resources Held: {resources_held}", ha="center", fontsize=8)
 
         plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
         plt.xlim(-1, self.world_dims[1])
