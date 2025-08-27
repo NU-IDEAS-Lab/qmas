@@ -24,7 +24,7 @@ args = [
     # "--observation_mask",
     "--available_actions_mask",
 
-    "--num_env_steps", "20000000",
+    "--num_env_steps", "5000000",
     "--episode_length", "200",
     "--max_cycles", "200",
 
