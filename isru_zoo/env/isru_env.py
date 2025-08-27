@@ -980,26 +980,27 @@ class parallel_env_simple_obs(parallel_env):
         # Plot state as a grid using matplotlib.
         plt.figure(figsize=figsize)
 
-        # Plot the depots.
-        positions = np.argwhere(self.map_depots > 0)
-        if positions.size > 0:
-            plt.scatter(positions[:, 0], positions[:, 1], label="Depots", marker="s", color="black")
-        
         # Plot the resources.
         for i, r in enumerate(self.possible_resources):
+            color = plt.cm.get_cmap("tab10")(i)
             positions = np.argwhere(self.map_resources[r] > 0)
             if positions.size > 0:
                 plt.scatter(positions[:, 0], positions[:, 1], label=f"Resource {r.resource_id}", alpha=0.5)
+            
+            # Plot depot for this resource type.
+            depot_positions = np.argwhere(self.map_depots == r.resource_id)
+            if depot_positions.size > 0:
+                plt.scatter(depot_positions[:, 0], depot_positions[:, 1], label=f"Depot {r.resource_id}", marker="s", color=color, edgecolor="black", s=100)
         
         # Plot the agents.
         for agent in self.agents:
             pos = agent.position.astype(np.int32)
             if agent.capabilities[CAP.CARRY]:
-                plt.scatter(pos[0], pos[1], label=f"Hauler {self.possible_agents.index(agent)}", marker="^", s=100, edgecolor="black")
+                plt.scatter(pos[0], pos[1], label=f"Hauler {self.possible_agents.index(agent)}", marker="^", s=100, color="red", edgecolor="black")
             elif agent.capabilities[CAP.EXTRACT]:
-                plt.scatter(pos[0], pos[1], label=f"Extractor {self.possible_agents.index(agent)}", marker="o", s=100, edgecolor="black")
+                plt.scatter(pos[0], pos[1], label=f"Extractor {self.possible_agents.index(agent)}", marker="o", s=100, color="yellow", edgecolor="black")
             elif agent.capabilities[CAP.PROSPECT]:
-                plt.scatter(pos[0], pos[1], label=f"Prospector {self.possible_agents.index(agent)}", marker="*", s=100, edgecolor="black")
+                plt.scatter(pos[0], pos[1], label=f"Prospector {self.possible_agents.index(agent)}", marker="*", s=100, color="green", edgecolor="black")
         
         # Display the total reward for this step. Position this text below the subplots. Do not use suptitle.
         reward = sum(self.last_rewards.values())
