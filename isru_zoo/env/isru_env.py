@@ -672,8 +672,8 @@ class parallel_env(ParallelEnv):
                                 # Remove from the resource map at the extractor's tile
                                 self.map_resources[r][ex_pos_int[0], ex_pos_int[1]] -= take
                                 # Add to the hauler's cargo
-                                reward_dict[agent]+= 5.0 * take
-                                reward_dict[extractor] += 5.0 * take
+                                reward_dict[agent]+= 100.0 * take
+                                reward_dict[extractor] += 100.0 * take
                                 agent.cargo[r.resource_id] = agent.cargo.get(r.resource_id, 0.0) + take
                                 free -= take
                                 info_dict["resources/step_picked_up"] += take
@@ -690,7 +690,7 @@ class parallel_env(ParallelEnv):
                                         break
                                 agent.cargo[r.resource_id] -= drop
                                 self.map_resources[r][px, py] += drop
-                                reward_dict[agent] += 10.0 * depot.resource.reward_deposit * drop
+                                reward_dict[agent] += 100.0 * depot.resource.reward_deposit * drop
                                 info_dict["resources/step_dropped_off"] += drop
                 elif agent.capabilities[CAP.EXTRACT]:
                     # Provide reward for Extractors that are sitting on a resource tile.
@@ -767,11 +767,11 @@ class parallel_env(ParallelEnv):
                 reward += 0.05 * cargo_total
                 # Reward haulers for distance to the nearest depot.
                 nearest_depot_dist = np.min([np.linalg.norm(agent.position - depot.position) for depot in self.possible_depots])
-                reward += 10.0 * 1.0 / (1.0 + nearest_depot_dist)
+                reward += 1.0 / (1.0 + nearest_depot_dist)
 
             # Reward haulers for distance to the nearest extractor.
             nearest_extractor_dist = self._nearest_extractor_distance(agent.position)
-            reward += 2.0 * 1.0 / (1.0 + nearest_extractor_dist)
+            reward += 1.0 / (1.0 + nearest_extractor_dist)
 
         elif agent.role == AGENT_ROLE.PROSPECTOR:
             # Reward prospectors for the number of resources discovered.
@@ -791,11 +791,11 @@ class parallel_env(ParallelEnv):
             raise ValueError(f"Unknown agent role: {agent.role}")
 
         # Reward for global objective at the end of the episode.
-        if end_truncate or end_done:
+        if True: #end_truncate or end_done:
             total_resources = sum(r.quantity for r in self.possible_resources)
             deposited_resources = sum(depot.stock for depot in self.possible_depots)
             resource_deposit_percentage = deposited_resources / float(total_resources)
-            reward += 1000.0 * resource_deposit_percentage
+            reward += 100.0 * resource_deposit_percentage
 
         return reward
 
@@ -991,6 +991,16 @@ class parallel_env_simple_obs(parallel_env):
         # Plot state as a grid using matplotlib.
         plt.figure(figsize=figsize)
 
+        # Plot the agents.
+        for agent in self.agents:
+            pos = agent.position.astype(np.int32)
+            if agent.capabilities[CAP.CARRY]:
+                plt.scatter(pos[0], pos[1], label=f"Hauler {self.possible_agents.index(agent)}", marker="^", s=100, alpha=0.5, color="red", edgecolor="black")
+            elif agent.capabilities[CAP.EXTRACT]:
+                plt.scatter(pos[0], pos[1], label=f"Extractor {self.possible_agents.index(agent)}", marker="o", s=100, alpha=0.5, color="yellow", edgecolor="black")
+            elif agent.capabilities[CAP.PROSPECT]:
+                plt.scatter(pos[0], pos[1], label=f"Prospector {self.possible_agents.index(agent)}", marker="*", s=100, alpha=0.5, color="green", edgecolor="black")
+
         # Plot the resources.
         for i, r in enumerate(self.possible_resources):
             color = plt.cm.get_cmap("tab10")(i)
@@ -1002,17 +1012,7 @@ class parallel_env_simple_obs(parallel_env):
             depot_positions = np.argwhere(self.map_depots == r.resource_id)
             if depot_positions.size > 0:
                 plt.scatter(depot_positions[:, 0], depot_positions[:, 1], label=f"Depot {r.resource_id}", marker="s", color=color, edgecolor="black", s=100)
-        
-        # Plot the agents.
-        for agent in self.agents:
-            pos = agent.position.astype(np.int32)
-            if agent.capabilities[CAP.CARRY]:
-                plt.scatter(pos[0], pos[1], label=f"Hauler {self.possible_agents.index(agent)}", marker="^", s=100, color="red", edgecolor="black")
-            elif agent.capabilities[CAP.EXTRACT]:
-                plt.scatter(pos[0], pos[1], label=f"Extractor {self.possible_agents.index(agent)}", marker="o", s=100, color="yellow", edgecolor="black")
-            elif agent.capabilities[CAP.PROSPECT]:
-                plt.scatter(pos[0], pos[1], label=f"Prospector {self.possible_agents.index(agent)}", marker="*", s=100, color="green", edgecolor="black")
-        
+                
         # Display the total reward for this step. Position this text below the subplots. Do not use suptitle.
         reward = sum(self.last_rewards.values())
         resources_deposited = sum(depot.stock for depot in self.possible_depots)
