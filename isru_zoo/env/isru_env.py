@@ -228,12 +228,10 @@ class parallel_env(ParallelEnv):
         self.map_depots = np.zeros(self.world_dims, dtype=np.float32)
         for depot in self.possible_depots:
             idx = np.random.randint(positions_available.shape[0])
-            depot.position = positions_available[idx]
-            # reset per-episode depot accounting
-            if not hasattr(depot, "stock"):
-                depot.stock = 0.0
-            else:
-                depot.stock = 0.0
+            depot.reset(
+                reset_start_position=True,
+                position=positions_available[idx]
+            )
             self.map_depots[depot.position[0], depot.position[1]] = depot.resource_id
 
         # Build stable resource index mappings for action vector <-> resource objects
