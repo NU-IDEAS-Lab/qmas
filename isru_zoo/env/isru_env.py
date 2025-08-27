@@ -610,16 +610,20 @@ class parallel_env(ParallelEnv):
 
                 # Record the action.
                 agent.last_action = action
-                self._populateStateSpace(agent)
+                
                 # Set agent velocity.
                 agent.velocity = action["movement"].astype(np.int32)
                 agent.velocity = np.clip(agent.velocity, -1.0, 1.0)
 
                 # Move the agent.
-                raw_position = agent.position + agent.velocity
+                position_prev = np.copy(agent.position)
+                agent.position = agent.position + agent.velocity
                 pos_min = np.array([0.0, 0.0], dtype=np.float32)
                 pos_max = self.world_dims.astype(np.float32) - 1.0
-                agent.position = np.clip(raw_position, pos_min, pos_max)
+                agent.position = np.clip(agent.position, pos_min, pos_max)
+
+                # Correct agent velocity to reflect actual movement (in case of collisions).
+                agent.velocity = agent.position - position_prev
 
                 # Handle communication.
                 if action["communication"][0] >= 0.5:
