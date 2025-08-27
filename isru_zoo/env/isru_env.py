@@ -24,6 +24,8 @@ def add_args(parser):
                         help="The number of prospector vehicles to place in the world.")
     parser.add_argument("--num_obstacles", type=int, default=0,
                         help="The number of obstacles to place in the world.")
+    parser.add_argument("--num_resources", type=int, default=20,
+                        help="The number of resources to place in the world.")
     parser.add_argument("--world_size", type=int, default=50,
                         help="The size of the world. The world is a square with side length `world_size`.")
     parser.add_argument("--observation_radius", type=int, default=10,
@@ -77,6 +79,7 @@ class parallel_env(ParallelEnv):
             num_prospectors: int = 1,
             max_cycles: int = -1,
             num_obstacles: int = 10,
+            num_resources: int = 20,
             world_size: int = 50,
             observation_radius: int = 10,
             observation_mask: bool = False,
@@ -119,7 +122,7 @@ class parallel_env(ParallelEnv):
 
         # Set up the possible resources.
         self.possible_resources = [
-            TestResource1(10)
+            TestResource1(num_resources)
         ]
 
         # Set up depots.
