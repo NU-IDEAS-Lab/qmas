@@ -527,22 +527,22 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
         sample = self[step]
         
         if self.share_obs_object:
-            sample_share_obs = np.array(sample["share_obs"])
+            sample_share_obs = sample["share_obs"]
             share_obs = sample_share_obs.reshape(-1, *sample_share_obs.shape[4:])
         else:
-            share_obs = sample["share_obs"].numpy()
+            share_obs = sample["share_obs"]
         if self.obs_object:
-            sample_obs = np.array(sample["obs"])
+            sample_obs = sample["obs"]
             obs = sample_obs.reshape(-1, *sample_obs.shape[4:], 1)
         else:
-            obs = np.concatenate(sample["obs"].numpy())
-        rnn_states_actor = np.concatenate(sample["rnn_states_actor"].numpy())
-        rnn_states_critic = np.concatenate(sample["rnn_states_critic"].numpy())
-        masks = np.concatenate(sample["masks"].numpy())
+            obs = sample["obs"].flatten(0, 1)
+        rnn_states_actor = sample["rnn_states_actor"].flatten(0, 1)
+        rnn_states_critic = sample["rnn_states_critic"].flatten(0, 1)
+        masks = sample["masks"].flatten(0, 1)
         if np.any(sample["available_actions"] == None):
             available_actions = None
         else:
-            available_actions = np.concatenate(sample["available_actions"].numpy())
+            available_actions = sample["available_actions"].flatten(0, 1)
 
         return share_obs, obs, rnn_states_actor, rnn_states_critic, masks, available_actions
 
