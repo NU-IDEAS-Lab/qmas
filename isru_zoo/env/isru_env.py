@@ -26,6 +26,8 @@ def add_args(parser):
                         help="The number of obstacles to place in the world.")
     parser.add_argument("--num_resources", type=int, default=20,
                         help="The number of resources to place in the world.")
+    parser.add_argument("--randomize_num_resources", action="store_true",
+                        help="Whether to randomize the number of resources at each reset up to `num_resources`.")
     parser.add_argument("--world_size", type=int, default=50,
                         help="The size of the world. The world is a square with side length `world_size`.")
     parser.add_argument("--observation_radius", type=int, default=10,
@@ -80,6 +82,7 @@ class parallel_env(ParallelEnv):
             max_cycles: int = -1,
             num_obstacles: int = 10,
             num_resources: int = 20,
+            randomize_num_resources: bool = False,
             world_size: int = 50,
             observation_radius: int = 10,
             observation_mask: bool = False,
@@ -97,6 +100,7 @@ class parallel_env(ParallelEnv):
         self.max_cycles = max_cycles
         self.world_dims = np.array([world_size, world_size], dtype=np.int32)
         self.num_obstacles = num_obstacles
+        self.randomize_num_resources = randomize_num_resources
         self.render_mode = render_mode
         self.mask_observations = observation_mask
         self.mask_available_actions = available_actions_mask
@@ -174,6 +178,13 @@ class parallel_env(ParallelEnv):
 
         if seed != None:
             random.seed(seed)
+
+        # Reset resources.
+        for r in self.possible_resources:
+            if self.randomize_num_resources:
+                r.reset(quantity=random.randint(1, r.quantity))
+            else:
+                r.reset()
 
         # Generate new map (obstacles, resources, etc.) and get available positions.
         positions_available = self.generate_map()        
@@ -894,7 +905,7 @@ class parallel_env_simple_obs(parallel_env):
                 r: spaces.Box(
                     low=0,
                     high=np.max(self.world_dims),
-                    shape=(r.quantity, len(self.world_dims)),
+                    shape=(r.quantity_max, len(self.world_dims)),
                     dtype=np.float32
                 ) for r in self.possible_resources
             }),
@@ -929,7 +940,7 @@ class parallel_env_simple_obs(parallel_env):
 
         # Add resource positions.
         for r in self.possible_resources:
-            obs["resources"][r] = np.ones((r.quantity, len(self.world_dims)), dtype=np.float32) * -1.0
+            obs["resources"][r] = np.ones((r.quantity_max, len(self.world_dims)), dtype=np.float32) * -1.0
             locations = np.argwhere(self.map_resources[r] > 0)
             obs["resources"][r][:locations.shape[0], :] = locations.astype(np.float32)
 

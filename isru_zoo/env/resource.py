@@ -3,14 +3,20 @@ class Resource:
 
     resource_count = 0
 
-    def __init__(self, quantity, resource_id=None):
-        self.quantity = quantity
+    def __init__(self, quantity_max, resource_id=None):
+        self.quantity_max = quantity_max
+        self.quantity = quantity_max
         
         if resource_id == None:
             self.resource_id = Resource.resource_count
             Resource.resource_count += 1
         else:
             self.resource_id = resource_id
+    
+    def reset(self, quantity=None):
+        ''' Resets the resource to its initial state. '''
+        if quantity is not None:
+            self.quantity = quantity
 
     def __repr__(self):
         return f"Resource(id={self.resource_id}, quantity={self.quantity})"
