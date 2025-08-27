@@ -981,21 +981,25 @@ class parallel_env_simple_obs(parallel_env):
         plt.figure(figsize=figsize)
 
         # Plot the depots.
-        plt.scatter(*np.argwhere(self.map_depots > 0).T, label="Depots", marker="s", color="black")
+        positions = np.argwhere(self.map_depots > 0)
+        if positions.size > 0:
+            plt.scatter(positions[:, 0], positions[:, 1], label="Depots", marker="s", color="black")
         
         # Plot the resources.
         for i, r in enumerate(self.possible_resources):
-            plt.scatter(*np.argwhere(self.map_resources[r] > 0).T, label=f"Resource {r.resource_id}", alpha=0.5)
+            positions = np.argwhere(self.map_resources[r] > 0)
+            if positions.size > 0:
+                plt.scatter(positions[:, 0], positions[:, 1], label=f"Resource {r.resource_id}", alpha=0.5)
         
         # Plot the agents.
         for agent in self.agents:
             pos = agent.position.astype(np.int32)
             if agent.capabilities[CAP.CARRY]:
-                plt.scatter(pos[1], pos[0], label=f"Hauler {self.possible_agents.index(agent)}", marker="^", s=100, edgecolor="black")
+                plt.scatter(pos[0], pos[1], label=f"Hauler {self.possible_agents.index(agent)}", marker="^", s=100, edgecolor="black")
             elif agent.capabilities[CAP.EXTRACT]:
-                plt.scatter(pos[1], pos[0], label=f"Extractor {self.possible_agents.index(agent)}", marker="o", s=100, edgecolor="black")
+                plt.scatter(pos[0], pos[1], label=f"Extractor {self.possible_agents.index(agent)}", marker="o", s=100, edgecolor="black")
             elif agent.capabilities[CAP.PROSPECT]:
-                plt.scatter(pos[1], pos[0], label=f"Prospector {self.possible_agents.index(agent)}", marker="*", s=100, edgecolor="black")
+                plt.scatter(pos[0], pos[1], label=f"Prospector {self.possible_agents.index(agent)}", marker="*", s=100, edgecolor="black")
         
         # Display the total reward for this step. Position this text below the subplots. Do not use suptitle.
         reward = sum(self.last_rewards.values())
@@ -1004,8 +1008,8 @@ class parallel_env_simple_obs(parallel_env):
         plt.figtext(0.5, 0.01, f"Step: {self.step_count}, Combined Step Reward: {reward:.2f}, Resources Deposited: {resources_deposited}, Resources Held: {resources_held}", ha="center", fontsize=8)
 
         plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-        plt.xlim(-1, self.world_dims[1])
-        plt.ylim(-1, self.world_dims[0])
+        plt.xlim(-1, self.world_dims[0])
+        plt.ylim(-1, self.world_dims[1])
         plt.gca().set_aspect('equal', adjustable='box')
 
         if self.render_mode == "human":
