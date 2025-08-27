@@ -221,7 +221,8 @@ class parallel_env(ParallelEnv):
             np.random.choice(world_indices_x, self.num_obstacles),
             np.random.choice(world_indices_y, self.num_obstacles)
         ] = 1.0
-        positions_available = np.argwhere(self.map_obstacles == 0)
+        positions_available_mask = self.map_obstacles == 0
+        positions_available = np.argwhere(positions_available_mask)
 
         # Reset depots.
         # Ensure they are placed in an available location.
@@ -233,6 +234,8 @@ class parallel_env(ParallelEnv):
                 position=positions_available[idx]
             )
             self.map_depots[depot.position[0], depot.position[1]] = depot.resource_id
+            positions_available_mask[depot.position[0], depot.position[1]] = False
+        positions_available = np.argwhere(positions_available_mask)
 
         # Build stable resource index mappings for action vector <-> resource objects
         self.resource_list = list(self.possible_resources)
