@@ -282,6 +282,76 @@ class parallel_env(ParallelEnv):
                 None
         '''
 
+        # # Convert the predicted state back into a dictionary (unflatten).
+        # pred_unflattened = []
+        # pred_steps = pred.shape[0] if pred is not None else 0
+        # for i in range(pred_steps):
+        #     p = spaces.unflatten(self.observation_spaces, pred[i].flatten())
+        #     pred_unflattened.append(p)
+
+        # Plot state as a grid using matplotlib.
+        plt.figure(figsize=figsize)
+
+        # Plot the agents.
+        for agent in self.agents:
+            pos = agent.position.astype(np.int32)
+            if agent.capabilities[CAP.CARRY]:
+                plt.scatter(pos[0], pos[1], label=f"Hauler {self.possible_agents.index(agent)}", marker="^", s=100, alpha=0.5, color="red", edgecolor="black")
+            elif agent.capabilities[CAP.EXTRACT]:
+                plt.scatter(pos[0], pos[1], label=f"Extractor {self.possible_agents.index(agent)}", marker="o", s=100, alpha=0.5, color="yellow", edgecolor="black")
+            elif agent.capabilities[CAP.PROSPECT]:
+                plt.scatter(pos[0], pos[1], label=f"Prospector {self.possible_agents.index(agent)}", marker="*", s=100, alpha=0.5, color="green", edgecolor="black")
+
+        # Plot the resources.
+        for i, r in enumerate(self.possible_resources):
+            color = plt.cm.get_cmap("tab10")(i)
+            positions = np.argwhere(self.map_resources[r] > 0)
+            if positions.size > 0:
+                plt.scatter(positions[:, 0], positions[:, 1], label=f"Resource {r.resource_id}", alpha=0.5)
+            
+            # Plot depot for this resource type.
+            depot_positions = np.argwhere(self.map_depots == r.resource_id)
+            if depot_positions.size > 0:
+                plt.scatter(depot_positions[:, 0], depot_positions[:, 1], label=f"Depot {r.resource_id}", marker="s", color=color, edgecolor="black", s=100)
+                
+        # Display the total reward for this step. Position this text below the subplots. Do not use suptitle.
+        reward = sum(self.last_rewards.values())
+        resources_deposited = sum(depot.stock for depot in self.possible_depots)
+        resources_held = sum(sum(agent.cargo.values()) for agent in self.agents if agent.capabilities[CAP.CARRY])
+        plt.figtext(0.5, 0.01, f"Step: {self.step_count}, Combined Step Reward: {reward:.2f}, Resources Deposited: {resources_deposited}, Resources Held: {resources_held}", ha="center", fontsize=8)
+
+        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.xlim(-1, self.world_dims[0])
+        plt.ylim(-1, self.world_dims[1])
+        plt.gca().set_aspect('equal', adjustable='box')
+
+        if self.render_mode == "human":
+            # Show the plot.
+            plt.show()
+            return None
+        elif self.render_mode == "rgb_array":
+            # Save the plot to a buffer and return it as an RGB array.
+            from io import BytesIO
+            io_buf = BytesIO()
+            plt.savefig(io_buf, format='raw')
+            io_buf.seek(0)
+            img_arr = np.reshape(np.frombuffer(io_buf.getvalue(), dtype=np.uint8),
+                                newshape=(int(plt.bbox.bounds[3]), int(plt.bbox.bounds[2]), -1))
+            io_buf.close()
+            plt.close()
+            return img_arr
+
+
+    def render_OLD(self, pred=None, figsize=(9, 6), history_length=2):
+        ''' Renders the environment.
+            
+            Args:
+                figsize (tuple, optional): The size of the figure in inches.
+                
+            Returns:
+                None
+        '''
+
         # Convert the predicted state back into a dictionary (unflatten).
         pred_unflattened = []
         pred_steps = pred.shape[0] if pred is not None else 0
@@ -966,76 +1036,3 @@ class parallel_env_simple_obs(parallel_env):
         }
 
         return obs, obs_mask
-
-
-    def render(self, pred=None, figsize=(9, 6), history_length=2):
-        ''' Renders the environment.
-            
-            Args:
-                figsize (tuple, optional): The size of the figure in inches.
-                
-            Returns:
-                None
-        '''
-
-        # Convert the predicted state back into a dictionary (unflatten).
-        pred_unflattened = []
-        pred_steps = pred.shape[0] if pred is not None else 0
-        for i in range(pred_steps):
-            p = spaces.unflatten(self.observation_spaces, pred[i].flatten())
-            pred_unflattened.append(p)
-
-        # Get the true environment state.
-        state = self.state()
-
-        # Plot state as a grid using matplotlib.
-        plt.figure(figsize=figsize)
-
-        # Plot the agents.
-        for agent in self.agents:
-            pos = agent.position.astype(np.int32)
-            if agent.capabilities[CAP.CARRY]:
-                plt.scatter(pos[0], pos[1], label=f"Hauler {self.possible_agents.index(agent)}", marker="^", s=100, alpha=0.5, color="red", edgecolor="black")
-            elif agent.capabilities[CAP.EXTRACT]:
-                plt.scatter(pos[0], pos[1], label=f"Extractor {self.possible_agents.index(agent)}", marker="o", s=100, alpha=0.5, color="yellow", edgecolor="black")
-            elif agent.capabilities[CAP.PROSPECT]:
-                plt.scatter(pos[0], pos[1], label=f"Prospector {self.possible_agents.index(agent)}", marker="*", s=100, alpha=0.5, color="green", edgecolor="black")
-
-        # Plot the resources.
-        for i, r in enumerate(self.possible_resources):
-            color = plt.cm.get_cmap("tab10")(i)
-            positions = np.argwhere(self.map_resources[r] > 0)
-            if positions.size > 0:
-                plt.scatter(positions[:, 0], positions[:, 1], label=f"Resource {r.resource_id}", alpha=0.5)
-            
-            # Plot depot for this resource type.
-            depot_positions = np.argwhere(self.map_depots == r.resource_id)
-            if depot_positions.size > 0:
-                plt.scatter(depot_positions[:, 0], depot_positions[:, 1], label=f"Depot {r.resource_id}", marker="s", color=color, edgecolor="black", s=100)
-                
-        # Display the total reward for this step. Position this text below the subplots. Do not use suptitle.
-        reward = sum(self.last_rewards.values())
-        resources_deposited = sum(depot.stock for depot in self.possible_depots)
-        resources_held = sum(sum(agent.cargo.values()) for agent in self.agents if agent.capabilities[CAP.CARRY])
-        plt.figtext(0.5, 0.01, f"Step: {self.step_count}, Combined Step Reward: {reward:.2f}, Resources Deposited: {resources_deposited}, Resources Held: {resources_held}", ha="center", fontsize=8)
-
-        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-        plt.xlim(-1, self.world_dims[0])
-        plt.ylim(-1, self.world_dims[1])
-        plt.gca().set_aspect('equal', adjustable='box')
-
-        if self.render_mode == "human":
-            # Show the plot.
-            plt.show()
-            return None
-        elif self.render_mode == "rgb_array":
-            # Save the plot to a buffer and return it as an RGB array.
-            from io import BytesIO
-            io_buf = BytesIO()
-            plt.savefig(io_buf, format='raw')
-            io_buf.seek(0)
-            img_arr = np.reshape(np.frombuffer(io_buf.getvalue(), dtype=np.uint8),
-                                newshape=(int(plt.bbox.bounds[3]), int(plt.bbox.bounds[2]), -1))
-            io_buf.close()
-            plt.close()
-            return img_arr
