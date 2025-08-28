@@ -420,7 +420,12 @@ class parallel_env(ParallelEnv):
         # The state space is a complete observation of the environment.
         # This is not part of the standard PettingZoo API, but is useful for centralized training.
         return spaces.Dict({
-            "role": spaces.Discrete(len(self.possible_agents)),
+            "role": spaces.Box(
+                low=0,
+                high=len(AGENT_ROLE),
+                shape=(1,),
+                dtype=np.int32
+            ),
             "agents": spaces.Dict({
                 agent: spaces.Dict({
                     "position": spaces.Box(
