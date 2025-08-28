@@ -38,12 +38,14 @@ class QmasPolicy(R_MAPPOPolicy):
         # Create the predictor / diffusion model.
         obs_dim = np.prod(get_shape_from_obs_space(self.obs_space, flatten_dicts=False)) # observation space for one agent
         action_dim = np.prod(get_shape_from_act_space(act_space)) # action space for one agent
-        self.predictor = Predictor(
-            obs_dim,
-            action_dim,
-            args,
-            device=self.device
-        )
+        self.predictors = [
+            Predictor(
+                obs_dim,
+                action_dim,
+                args,
+                device=self.device
+            ) for _ in range(args.prediction_ensemble_size)
+        ]
 
 
     def save(self, directory, episode):
