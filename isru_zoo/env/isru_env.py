@@ -699,25 +699,6 @@ class parallel_env(ParallelEnv):
         return obs, obs_mask
 
 
-    def _update_adversary_velocity(self, adversary):
-        """
-        Update velocity based on the step count to create a more complex pattern.
-        This function creates a time-varying velocity that follows different patterns.
-        """
-        if random.random() < 0.3:
-            # Randomly change velocity to create a new pattern
-            adversary.velocity += np.random.normal(0, 0.3, size=self.num_dimensions)
-                
-        # # Add some random noise to make the trajectory more natural
-        noise_magnitude = 0.05 * min(1.0, self.step_count / 50.0)  # Gradually increase noise
-        adversary.velocity += np.random.normal(0, noise_magnitude, size=self.num_dimensions)
-
-        # Normalize velocity to keep it within a reasonable range.
-        norm = np.linalg.norm(adversary.velocity)
-        if norm > 1.0:
-            adversary.velocity = adversary.velocity / norm
-
-
     def step(self, action_dict={}, lastStep=False):
         ''''
         Perform a step in the environment based on the given action dictionary.
