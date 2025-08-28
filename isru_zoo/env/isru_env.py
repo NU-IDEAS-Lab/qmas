@@ -881,17 +881,18 @@ class parallel_env(ParallelEnv):
         reward = 0.0
 
         if agent.role == AGENT_ROLE.HAULER:
-            cargo_total = sum(agent.cargo.values())
-            if cargo_total > 0:
-                # Reward haulers for carrying resources.
-                reward += 0.05 * cargo_total
-                # Reward haulers for distance to the nearest depot.
-                nearest_depot_dist = np.min([np.linalg.norm(agent.position - depot.position) for depot in self.possible_depots])
-                reward += 1.0 / (1.0 + nearest_depot_dist)
+            pass
+            # cargo_total = sum(agent.cargo.values())
+            # if cargo_total > 0:
+            #     # Reward haulers for carrying resources.
+            #     reward += 0.05 * cargo_total
+            #     # Reward haulers for distance to the nearest depot.
+            #     nearest_depot_dist = np.min([np.linalg.norm(agent.position - depot.position) for depot in self.possible_depots])
+            #     reward += 1.0 / (1.0 + nearest_depot_dist)
 
-            # Reward haulers for distance to the nearest extractor.
-            nearest_extractor_dist = self._nearest_extractor_distance(agent.position)
-            reward += 1.0 / (1.0 + nearest_extractor_dist)
+            # # Reward haulers for distance to the nearest extractor.
+            # nearest_extractor_dist = self._nearest_extractor_distance(agent.position)
+            # reward += 1.0 / (1.0 + nearest_extractor_dist)
 
         elif agent.role == AGENT_ROLE.PROSPECTOR:
             # Reward prospectors for the number of resources discovered.
@@ -911,12 +912,12 @@ class parallel_env(ParallelEnv):
             raise ValueError(f"Unknown agent role: {agent.role}")
 
         # Reward for global objective at the end of the episode.
-        if True: #end_truncate or end_done:
+        if end_truncate or end_done:
             # total_resources = sum(r.quantity for r in self.possible_resources)
             deposited_resources = sum(depot.stock for depot in self.possible_depots)
             # resource_deposit_percentage = deposited_resources / float(total_resources)
             # reward += 100.0 * resource_deposit_percentage
-            reward += 100.0 * deposited_resources
+            reward += 1000.0 * deposited_resources
 
         return reward
 
