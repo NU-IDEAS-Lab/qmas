@@ -87,20 +87,19 @@ class QmasAlgorithm(R_MAPPO):
         # Phase 2: Predictor Training (ensemble)
         if update_predictor:
             num_diffusion_updates = [0 for _ in range(self.num_predictors)]
+            assert self.args.n_rollout_threads % self.args.prediction_ensemble_size == 0, "n_rollout_threads must be divisible by prediction_ensemble_size."
+            split_size = self.args.n_rollout_threads // self.args.prediction_ensemble_size
+            thread_indices = torch.arange(self.args.n_rollout_threads)
+            thread_splits = torch.split(thread_indices, split_size)
             for _ in range(self.ppo_epoch):
                 # Split threads among predictors
-                thread_indices = buffer.get_thread_indices()  # Assume this returns a list of thread indices
-                thread_splits = np.array_split(thread_indices, self.num_predictors)
                 data_generator = buffer.sample_trajectories(self.num_mini_batch, self.prediction_horizon)
 
                 for sample in data_generator:
                     for i, predictor in enumerate(self.predictors):
                         if len(thread_splits[i]) == 0:
-                            continue
-                        # Filter sample to only include threads for this predictor
-                        sample_i = None
-                        raise NotImplementedError("still need to pull correct threads from sample for each predictor")
-                        self.train_sample_diffuser(sample_i, train_info, predictor)
+                            raise ValueError("Thread split is empty. Check prediction_ensemble_size and n_rollout_threads.")
+                        self.train_sample_diffuser(sample, train_info, predictor, thread_indices=thread_splits[i])
                         num_diffusion_updates[i] += 1
 
             # Average the diffusion losses for each predictor
@@ -116,34 +115,46 @@ class QmasAlgorithm(R_MAPPO):
         train_info['diffuser_loss'] = 0
         train_info['guide_loss'] = 0
 
-    def train_sample_diffuser(self, sample, train_info, predictor):
+    def train_sample_diffuser(self, sample, train_info, predictor, thread_indices=None):
         ''' Performs update for a single sample for a given predictor. '''
         
         # Permute, flatten, and then permute back to get rid of the thread dimension.
 
         # Process observations.
-        obs_batch = sample["obs"]
+        if thread_indices is None:
+            obs_batch = sample["obs"]
+        else:
+            obs_batch = sample["obs"][:, :, thread_indices]
         obs_batch = obs_batch.permute(1, 0, *range(2, obs_batch.ndim))
         obs_batch = obs_batch.flatten(start_dim=1, end_dim=2)
         obs_batch = obs_batch.permute(1, 0, *range(2, obs_batch.ndim))
         obs_batch = obs_batch.reshape(*obs_batch.shape[:3], -1)
 
         # Process actions.
-        actions_batch = sample["actions"]
+        if thread_indices is None:
+            actions_batch = sample["actions"]
+        else:
+            actions_batch = sample["actions"][:, :, thread_indices]
         actions_batch = actions_batch.permute(1, 0, *range(2, actions_batch.ndim))
         actions_batch = actions_batch.flatten(start_dim=1, end_dim=2)
         actions_batch = actions_batch.permute(1, 0, *range(2, actions_batch.ndim))
         actions_batch = actions_batch.reshape(*actions_batch.shape[:3], -1)
 
         # Process rewards.
-        rewards_batch = sample["rewards"]
+        if thread_indices is None:
+            rewards_batch = sample["rewards"]
+        else:
+            rewards_batch = sample["rewards"][:, :, thread_indices]
         rewards_batch = rewards_batch.permute(1, 0, *range(2, rewards_batch.ndim))
         rewards_batch = rewards_batch.flatten(start_dim=1, end_dim=2)
         rewards_batch = rewards_batch.permute(1, 0, *range(2, rewards_batch.ndim))
         rewards_batch = rewards_batch.reshape(*rewards_batch.shape[:2], -1)
 
         # Condition using visibility mask.
-        visibility_mask_batch = sample["visibility_mask"]
+        if thread_indices is None:
+            visibility_mask_batch = sample["visibility_mask"]
+        else:
+            visibility_mask_batch = sample["visibility_mask"][:, :, thread_indices]
         visibility_mask_batch = visibility_mask_batch.permute(1, 0, *range(2, visibility_mask_batch.ndim))
         visibility_mask_batch = visibility_mask_batch.flatten(start_dim=1, end_dim=2)
         visibility_mask_batch = visibility_mask_batch.permute(1, 0, *range(2, visibility_mask_batch.ndim))

@@ -20,6 +20,7 @@ class R_MAPPO():
                  env,
                  device=torch.device("cpu")):
 
+        self.args = args
         self.device = device
         self.tpdv = dict(dtype=torch.float32, device=device)
         self.policy = policy
