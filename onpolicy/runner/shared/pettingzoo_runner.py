@@ -251,7 +251,7 @@ class PettingzooRunner(Runner):
                         continue
 
                 if self.use_wandb:
-                    wandb.log({k: np.mean(v, axis=0)}, step=total_num_steps)
+                    wandb.log({k: np.mean(v)}, step=total_num_steps)
                 else:
                     self.writter.add_scalars(k, {k: np.mean(v)}, total_num_steps)    
 
