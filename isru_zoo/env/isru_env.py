@@ -416,6 +416,51 @@ class parallel_env(ParallelEnv):
     def state_space(self):
         ''' Returns the state space of the environment. '''
 
+        return self.observation_space(self.possible_agents[0])
+
+
+    @functools.cache
+    def observation_space(self, agent):
+        ''' Returns the observation space for the given agent. '''
+
+        def agent_obs_space(agent):
+            ''' Returns the observation space for a single agent. '''
+
+            return spaces.Dict({
+                "position": spaces.Box(
+                    low=0,
+                    high=np.max(self.world_dims),
+                    shape=(2,),
+                    dtype=np.float32
+                ),
+                "velocity": spaces.Box(
+                    low=-1,
+                    high=1,
+                    shape=(2,),
+                    dtype=np.float32
+                ),
+                "role": spaces.Box(
+                    low=0,
+                    high=len(AGENT_ROLE),
+                    shape=(1,),
+                    dtype=np.int32
+                ),
+                "cargo": spaces.Box(
+                    low=0,
+                    high=self.default_hauler_capacity,
+                    shape=(len(self.possible_resources),),
+                    dtype=np.float32
+                ),
+            })
+
+        # Set up agent state spaces. Ensure that each agent's data is first for its own observation.
+        # Python dictionaries maintain insertion order as of Python 3.7.
+        agent_spaces = {}
+        agent_spaces[agent] = agent_obs_space(agent)
+        for other_agent in self.possible_agents:
+            if other_agent != agent:
+                agent_spaces[other_agent] = agent_obs_space(other_agent)
+
         # Create the state space.
         # The state space is a complete observation of the environment.
         # This is not part of the standard PettingZoo API, but is useful for centralized training.
@@ -426,34 +471,7 @@ class parallel_env(ParallelEnv):
                 shape=(1,),
                 dtype=np.int32
             ),
-            "agents": spaces.Dict({
-                agent: spaces.Dict({
-                    "position": spaces.Box(
-                        low=0,
-                        high=np.max(self.world_dims),
-                        shape=(2,),
-                        dtype=np.float32
-                    ),
-                    "velocity": spaces.Box(
-                        low=-1,
-                        high=1,
-                        shape=(2,),
-                        dtype=np.float32
-                    ),
-                    "role": spaces.Box(
-                        low=0,
-                        high=len(AGENT_ROLE),
-                        shape=(1,),
-                        dtype=np.int32
-                    ),
-                    "cargo": spaces.Box(
-                        low=0,
-                        high=self.default_hauler_capacity,
-                        shape=(len(self.possible_resources),),
-                        dtype=np.float32
-                    ),
-                }) for agent in self.possible_agents
-            }),
+            "agents": spaces.Dict(agent_spaces),
             "depots": spaces.Dict({
                 depot: spaces.Dict({
                     "position": spaces.Box(
@@ -484,13 +502,6 @@ class parallel_env(ParallelEnv):
         #     shape=self.map_shape,
         #     dtype=np.float32
         # )
-
-
-    @functools.cache
-    def observation_space(self, agent):
-        ''' Returns the observation space for the given agent. '''
-
-        return self.state_space
 
 
     @functools.cache
@@ -647,17 +658,7 @@ class parallel_env(ParallelEnv):
         # Create the observation.
         obs = {
             "role": np.array([agent.role.value], dtype=np.int32),
-            "agents": {
-                a: {
-                    "position": a.position.astype(np.float32),
-                    "velocity": a.velocity.astype(np.float32),
-                    "role": np.array([a.role.value], dtype=np.int32),
-                    "cargo": np.array(
-                        [a.cargo.get(r.resource_id, 0.0) for r in self.possible_resources],
-                        dtype=np.float32
-                    ),
-                } for a in self.possible_agents
-            },
+            "agents": {},
             "depots": {
                 d: {
                     "position": d.position.astype(np.float32),
@@ -666,6 +667,26 @@ class parallel_env(ParallelEnv):
             },
             "map": map_combined
         }
+
+        def get_agent_state(a):
+            return {
+                "position": a.position.astype(np.float32),
+                "velocity": a.velocity.astype(np.float32),
+                "role": np.array([a.role.value], dtype=np.int32),
+                "cargo": np.array(
+                    [a.cargo.get(r.resource_id, 0.0) for r in self.possible_resources],
+                    dtype=np.float32
+                )
+            }
+
+        # Insert the ego agent first. Python dictionaries preserve insertion order.
+        obs["agents"][agent] = get_agent_state(agent)
+
+        # Add the rest of the agents.
+        for a in self.possible_agents:
+            if a != agent:
+                obs["agents"][a] = get_agent_state(a)
+
         obs_mask = {
             "role": np.ones_like(obs["role"], dtype=bool),
             "agents": {a: {k: np.ones_like(v, dtype=bool) for k, v in adict.items()} for a, adict in obs["agents"].items()},
@@ -968,10 +989,9 @@ class parallel_env(ParallelEnv):
 class parallel_env_simple_obs(parallel_env):
     ''' A simple observation version of the ISRU environment. '''
 
-    @property
     @functools.cache
-    def state_space(self):
-        ''' Returns the state space of the environment. '''
+    def observation_space(self, agent):
+        ''' Returns the observation space for the given agent. '''
 
         return spaces.Dict({
             "id": spaces.Box(
