@@ -759,7 +759,7 @@ class parallel_env(ParallelEnv):
                                         depot.stock += drop
                                         break
                                 agent.cargo[r.resource_id] -= drop
-                                self.map_resources[r][px, py] += drop
+                                # self.map_resources[r][px, py] += drop
                                 reward_dict[agent] += 100.0 * depot.resource.reward_deposit * drop
                                 info_dict["resources/step_dropped_off"] += drop
                 elif agent.capabilities[CAP.EXTRACT]:
