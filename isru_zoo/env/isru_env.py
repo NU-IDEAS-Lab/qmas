@@ -8,7 +8,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from copy import copy
 
-from isru_zoo.env.entity import ENTITY_TYPE, AGENT_ROLE, CAP, Agent, Depot, Extractor, Hauler, Prospector
+from isru_zoo.env.entity import ENTITY_TYPE, AGENT_ROLE, CAP, Agent, Depot, Extractor, Hauler, Prospector, ProspectorExtractor
 from isru_zoo.env.resource import TestResource1, TestResource2
 
 
@@ -110,7 +110,7 @@ class parallel_env(ParallelEnv):
 
         # Set up entities.
         self.possible_agents = \
-            [Extractor(
+            [ProspectorExtractor(
                 position=self.get_random_position(),
                 observation_radius=self.default_observation_radius
             ) for _ in range(num_extractors)] + \
@@ -118,11 +118,11 @@ class parallel_env(ParallelEnv):
                 position=self.get_random_position(),
                 carry_capacity=self.default_hauler_capacity,
                 observation_radius=self.default_observation_radius
-            ) for _ in range(num_haulers)] + \
-            [Prospector(
-                position=self.get_random_position(),
-                observation_radius=self.default_observation_radius
-            ) for _ in range(num_prospectors)]
+            ) for _ in range(num_haulers)] #+ \
+            # [Prospector(
+            #     position=self.get_random_position(),
+            #     observation_radius=self.default_observation_radius
+            # ) for _ in range(num_prospectors)]
 
         # Set up the possible resources.
         self.possible_resources = [
@@ -138,7 +138,8 @@ class parallel_env(ParallelEnv):
         ]
 
         # Record the map shape.
-        self.map_shape = (*self.world_dims, 2 * len(self.possible_resources) + 3)  # +3 for obstacles, agents, depots
+        # self.map_shape = (*self.world_dims, 2 * len(self.possible_resources) + 3)  # +3 for obstacles, agents, depots
+        self.map_shape = (*self.world_dims, len(self.possible_resources))
 
         # Set up spaces.
         self.observation_spaces = spaces.Dict({
@@ -415,32 +416,92 @@ class parallel_env(ParallelEnv):
     def state_space(self):
         ''' Returns the state space of the environment. '''
 
-        # Create the state space.
-        # The state space is a complete observation of the environment.
-        # This is not part of the standard PettingZoo API, but is useful for centralized training.
-        # return spaces.Dict({
-        #     "id": spaces.Discrete(len(self.possible_agents)),
-        #     "map": spaces.Box(
-        #         low=-np.inf,
-        #         high=np.inf,
-        #         shape=self.map_shape,
-        #         dtype=np.float32
-        #     )
-        # })
-
-        return spaces.Box(
-            low=-np.inf,
-            high=np.inf,
-            shape=self.map_shape,
-            dtype=np.float32
-        )
+        return self.observation_space(self.possible_agents[0])
 
 
     @functools.cache
     def observation_space(self, agent):
         ''' Returns the observation space for the given agent. '''
 
-        return self.state_space
+        def agent_obs_space(agent):
+            ''' Returns the observation space for a single agent. '''
+
+            return spaces.Dict({
+                "position": spaces.Box(
+                    low=0,
+                    high=np.max(self.world_dims),
+                    shape=(2,),
+                    dtype=np.float32
+                ),
+                "velocity": spaces.Box(
+                    low=-1,
+                    high=1,
+                    shape=(2,),
+                    dtype=np.float32
+                ),
+                "role": spaces.Box(
+                    low=0,
+                    high=len(AGENT_ROLE),
+                    shape=(1,),
+                    dtype=np.int32
+                ),
+                "cargo": spaces.Box(
+                    low=0,
+                    high=self.default_hauler_capacity,
+                    shape=(len(self.possible_resources),),
+                    dtype=np.float32
+                ),
+            })
+
+        # Set up agent state spaces. Ensure that each agent's data is first for its own observation.
+        # Python dictionaries maintain insertion order as of Python 3.7.
+        agent_spaces = {}
+        agent_spaces[agent] = agent_obs_space(agent)
+        for other_agent in self.possible_agents:
+            if other_agent != agent:
+                agent_spaces[other_agent] = agent_obs_space(other_agent)
+
+        # Create the state space.
+        # The state space is a complete observation of the environment.
+        # This is not part of the standard PettingZoo API, but is useful for centralized training.
+        return spaces.Dict({
+            "role": spaces.Box(
+                low=0,
+                high=len(AGENT_ROLE),
+                shape=(1,),
+                dtype=np.int32
+            ),
+            "agents": spaces.Dict(agent_spaces),
+            "depots": spaces.Dict({
+                depot: spaces.Dict({
+                    "position": spaces.Box(
+                        low=0,
+                        high=np.max(self.world_dims),
+                        shape=(2,),
+                        dtype=np.float32
+                    ),
+                    "stock": spaces.Box(
+                        low=0,
+                        high=np.inf,
+                        shape=(1,),
+                        dtype=np.float32
+                    ),
+                }) for depot in self.possible_depots
+            }),
+            "map": spaces.Box(
+                low=-np.inf,
+                high=np.inf,
+                shape=self.map_shape,
+                dtype=np.float32
+            )
+        })
+
+        # return spaces.Box(
+        #     low=-np.inf,
+        #     high=np.inf,
+        #     shape=self.map_shape,
+        #     dtype=np.float32
+        # )
 
 
     @functools.cache
@@ -571,82 +632,92 @@ class parallel_env(ParallelEnv):
         ''' Returns a populated state/observation space.'''
 
         # Load agent data into a map.
-        map_agents = np.zeros(self.world_dims, dtype=np.int32)
-        for i, a in enumerate(self.agents):
-            pos = a.position.astype(np.int32)
-            map_agents[pos[0], pos[1]] = 1 + a.role.value
-            if a == agent and not force_visible:
-                # Distinguish the agent in the map.
-                map_agents[pos[0], pos[1]] *= -1
+        # map_agents = np.zeros(self.world_dims, dtype=np.int32)
+        # for i, a in enumerate(self.agents):
+        #     pos = a.position.astype(np.int32)
+        #     map_agents[pos[0], pos[1]] = 1 + a.role.value
+        #     if a == agent and not force_visible:
+        #         # Distinguish the agent in the map.
+        #         map_agents[pos[0], pos[1]] *= -1
         
         # Load agent cargo into the map.
-        map_cargo = []
-        for r in self.possible_resources:
-            m = np.zeros(self.world_dims, dtype=np.float32)
-            for a in self.agents:
-                if a.capabilities[CAP.CARRY] and r.resource_id in a.cargo:
-                    pos = a.position.astype(np.int32)
-                    m[pos[0], pos[1]] = a.cargo[r.resource_id]
-            map_cargo.append(m)
+        # map_cargo = []
+        # for r in self.possible_resources:
+        #     m = np.zeros(self.world_dims, dtype=np.float32)
+        #     for a in self.agents:
+        #         if a.capabilities[CAP.CARRY] and r.resource_id in a.cargo:
+        #             pos = a.position.astype(np.int32)
+        #             m[pos[0], pos[1]] = a.cargo[r.resource_id]
+        #     map_cargo.append(m)
 
         # Build the combined map.
-        layers = [self.map_obstacles, map_agents, self.map_depots, *self.map_resources.values(), *map_cargo]
+        # layers = [self.map_obstacles, map_agents, self.map_depots, *self.map_resources.values(), *map_cargo]
+        layers = [*self.map_resources.values()]
         map_combined = np.stack(layers, axis=-1).astype(np.float32)
 
         # Create the observation.
         obs = {
-            "id": self.possible_agents.index(agent),
+            "role": np.array([agent.role.value], dtype=np.int32),
+            "agents": {},
+            "depots": {
+                d: {
+                    "position": d.position.astype(np.float32),
+                    "stock": np.array([d.stock], dtype=np.float32),
+                } for d in self.possible_depots
+            },
             "map": map_combined
         }
+
+        def get_agent_state(a):
+            return {
+                "position": a.position.astype(np.float32),
+                "velocity": a.velocity.astype(np.float32),
+                "role": np.array([a.role.value], dtype=np.int32),
+                "cargo": np.array(
+                    [a.cargo.get(r.resource_id, 0.0) for r in self.possible_resources],
+                    dtype=np.float32
+                )
+            }
+
+        # Insert the ego agent first. Python dictionaries preserve insertion order.
+        obs["agents"][agent] = get_agent_state(agent)
+
+        # Add the rest of the agents.
+        for a in self.possible_agents:
+            if a != agent:
+                obs["agents"][a] = get_agent_state(a)
+
         obs_mask = {
-            "id": True,
-            "map": np.ones_like(map_combined, dtype=bool)
+            "role": np.ones_like(obs["role"], dtype=bool),
+            "agents": {a: {k: np.ones_like(v, dtype=bool) for k, v in adict.items()} for a, adict in obs["agents"].items()},
+            "depots": {d: {k: np.ones_like(v, dtype=bool) for k, v in ddict.items()} for d, ddict in obs["depots"].items()},
+            "map": np.ones_like(obs["map"], dtype=bool),
         }
 
         # Calculate the visible area based on a circular observation radius.
-        if not force_visible or True:
-            radius = agent.observation_radius
-            pos = agent.position.astype(np.int32)
-            visible = (np.arange(self.world_dims[0])[:, None] - pos[0]) ** 2 + \
-                (np.arange(self.world_dims[1])[None, :] - pos[1]) ** 2 <= radius ** 2
-            # obs["map"][visible, 0] += 0.2 # testing - show the visible area in the obstacle layer
-            obs_mask["map"][~visible, :] = False
+        # if not force_visible or True:
+        #     radius = agent.observation_radius
+        #     pos = agent.position.astype(np.int32)
+        #     visible = (np.arange(self.world_dims[0])[:, None] - pos[0]) ** 2 + \
+        #         (np.arange(self.world_dims[1])[None, :] - pos[1]) ** 2 <= radius ** 2
+        #     # obs["map"][visible, 0] += 0.2 # testing - show the visible area in the obstacle layer
+        #     obs_mask["map"][~visible, :] = False
 
-        # Vehicle-class visibility: only Prospectors can directly observe resources.
-        # Layers are ordered as: 0=obstacles, 1=agents, 2=depots, 3+=resources
-        resource_layer = 3
-        if not force_visible:
-            if not agent.capabilities[CAP.PROSPECT]:
-                # Mask out all resource layers for non-prospector local observations.
-                # (Communicated observations will still be merged in `observe()`)
-                obs_mask["map"][:, :, resource_layer:] = False
+        # # Vehicle-class visibility: only Prospectors can directly observe resources.
+        # # Layers are ordered as: 0=obstacles, 1=agents, 2=depots, 3+=resources
+        # resource_layer = 3
+        # if not force_visible:
+        #     if not agent.capabilities[CAP.PROSPECT]:
+        #         # Mask out all resource layers for non-prospector local observations.
+        #         # (Communicated observations will still be merged in `observe()`)
+        #         obs_mask["map"][:, :, resource_layer:] = False
 
-        # Update the discovered resources mask.
-        if agent.capabilities[CAP.PROSPECT] and not force_visible:
-            for i, r in enumerate(self.possible_resources):
-                self.mask_map_resources_discovered |= (self.map_resources[r] > 0) & obs_mask["map"][:, :, resource_layer + i]
+        # # Update the discovered resources mask.
+        # if agent.capabilities[CAP.PROSPECT] and not force_visible:
+        #     for i, r in enumerate(self.possible_resources):
+        #         self.mask_map_resources_discovered |= (self.map_resources[r] > 0) & obs_mask["map"][:, :, resource_layer + i]
         
-        return obs["map"], obs_mask["map"]
-        # return obs, obs_mask
-
-
-    def _update_adversary_velocity(self, adversary):
-        """
-        Update velocity based on the step count to create a more complex pattern.
-        This function creates a time-varying velocity that follows different patterns.
-        """
-        if random.random() < 0.3:
-            # Randomly change velocity to create a new pattern
-            adversary.velocity += np.random.normal(0, 0.3, size=self.num_dimensions)
-                
-        # # Add some random noise to make the trajectory more natural
-        noise_magnitude = 0.05 * min(1.0, self.step_count / 50.0)  # Gradually increase noise
-        adversary.velocity += np.random.normal(0, noise_magnitude, size=self.num_dimensions)
-
-        # Normalize velocity to keep it within a reasonable range.
-        norm = np.linalg.norm(adversary.velocity)
-        if norm > 1.0:
-            adversary.velocity = adversary.velocity / norm
+        return obs, obs_mask
 
 
     def step(self, action_dict={}, lastStep=False):
@@ -759,7 +830,7 @@ class parallel_env(ParallelEnv):
                                         depot.stock += drop
                                         break
                                 agent.cargo[r.resource_id] -= drop
-                                self.map_resources[r][px, py] += drop
+                                # self.map_resources[r][px, py] += drop
                                 reward_dict[agent] += 100.0 * depot.resource.reward_deposit * drop
                                 info_dict["resources/step_dropped_off"] += drop
                 elif agent.capabilities[CAP.EXTRACT]:
@@ -830,25 +901,26 @@ class parallel_env(ParallelEnv):
 
         reward = 0.0
 
-        if agent.role == AGENT_ROLE.HAULER:
-            cargo_total = sum(agent.cargo.values())
-            if cargo_total > 0:
-                # Reward haulers for carrying resources.
-                reward += 0.05 * cargo_total
-                # Reward haulers for distance to the nearest depot.
-                nearest_depot_dist = np.min([np.linalg.norm(agent.position - depot.position) for depot in self.possible_depots])
-                reward += 1.0 / (1.0 + nearest_depot_dist)
+        if agent.capabilities[CAP.CARRY]:
+            pass
+            # cargo_total = sum(agent.cargo.values())
+            # if cargo_total > 0:
+            #     # Reward haulers for carrying resources.
+            #     reward += 0.05 * cargo_total
+            #     # Reward haulers for distance to the nearest depot.
+            #     nearest_depot_dist = np.min([np.linalg.norm(agent.position - depot.position) for depot in self.possible_depots])
+            #     reward += 1.0 / (1.0 + nearest_depot_dist)
 
-            # Reward haulers for distance to the nearest extractor.
-            nearest_extractor_dist = self._nearest_extractor_distance(agent.position)
-            reward += 1.0 / (1.0 + nearest_extractor_dist)
+            # # Reward haulers for distance to the nearest extractor.
+            # nearest_extractor_dist = self._nearest_extractor_distance(agent.position)
+            # reward += 1.0 / (1.0 + nearest_extractor_dist)
 
-        elif agent.role == AGENT_ROLE.PROSPECTOR:
+        if agent.capabilities[CAP.PROSPECT]:
             # Reward prospectors for the number of resources discovered.
             num_discovered = self._get_num_resources_discovered()
             reward += 0.1 * num_discovered
         
-        elif agent.role == AGENT_ROLE.EXTRACTOR:
+        if agent.capabilities[CAP.EXTRACT]:
             # Reward extractors for being on a resource tile.
             px, py = agent.position.astype(np.int32)
             if self.map_depots[px, py] == 0 :
@@ -857,15 +929,13 @@ class parallel_env(ParallelEnv):
                         reward += r.reward_extraction
                         break
 
-        else:
-            raise ValueError(f"Unknown agent role: {agent.role}")
-
         # Reward for global objective at the end of the episode.
-        if True: #end_truncate or end_done:
-            total_resources = sum(r.quantity for r in self.possible_resources)
+        if end_truncate or end_done:
+            # total_resources = sum(r.quantity for r in self.possible_resources)
             deposited_resources = sum(depot.stock for depot in self.possible_depots)
-            resource_deposit_percentage = deposited_resources / float(total_resources)
-            reward += 100.0 * resource_deposit_percentage
+            # resource_deposit_percentage = deposited_resources / float(total_resources)
+            # reward += 100.0 * resource_deposit_percentage
+            reward += 1000.0 * deposited_resources
 
         return reward
 
@@ -916,10 +986,9 @@ class parallel_env(ParallelEnv):
 class parallel_env_simple_obs(parallel_env):
     ''' A simple observation version of the ISRU environment. '''
 
-    @property
     @functools.cache
-    def state_space(self):
-        ''' Returns the state space of the environment. '''
+    def observation_space(self, agent):
+        ''' Returns the observation space for the given agent. '''
 
         return spaces.Dict({
             "id": spaces.Box(
