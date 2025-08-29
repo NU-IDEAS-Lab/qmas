@@ -191,7 +191,7 @@ class parallel_env(ParallelEnv):
         return np.random.uniform(-self.world_dims / 2, self.world_dims / 2).astype(np.float32)
 
 
-    def render(self, pred=None, figsize=(9, 6), history_length=2, uncertainty=None):
+    def render(self, pred=None, figsize=(9, 6), history_length=2, uncertainty=None, **kwargs):
         ''' Renders the environment.
             
             Args:
