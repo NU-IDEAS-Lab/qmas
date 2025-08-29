@@ -138,8 +138,7 @@ class parallel_env(ParallelEnv):
         ]
 
         # Record the map shape.
-        # self.map_shape = (*self.world_dims, 2 * len(self.possible_resources) + 3)  # +3 for obstacles, agents, depots
-        self.map_shape = (*self.world_dims, len(self.possible_resources))
+        self.map_shape = (2 * len(self.possible_resources) + 3, *self.world_dims)  # +3 for obstacles, agents, depots
 
         # Set up spaces.
         self.observation_spaces = spaces.Dict({
@@ -491,7 +490,7 @@ class parallel_env(ParallelEnv):
             "map": spaces.Box(
                 low=-np.inf,
                 high=np.inf,
-                shape=self.map_shape,
+                shape=(*self.world_dims, len(self.possible_resources)),
                 dtype=np.float32
             )
         })
@@ -1105,3 +1104,81 @@ class parallel_env_simple_obs(parallel_env):
         }
 
         return obs, obs_mask
+
+
+class parallel_env_map_obs(parallel_env):
+    ''' A map-based observation version of the ISRU environment. Intended for use with CNNs. '''
+
+    @functools.cache
+    def observation_space(self, agent):
+        ''' Returns the observation space for the given agent. '''
+
+        return spaces.Box(
+            low=-np.inf,
+            high=np.inf,
+            shape=self.map_shape,
+            dtype=np.float32
+        )
+
+
+    def _populateStateSpace(self, agent, force_visible=False):
+        ''' Fills in the state/observation space for the given agent. '''
+
+        # Load agent data into a map.
+        map_agents = np.zeros(self.world_dims, dtype=np.int32)
+        for i, a in enumerate(self.agents):
+            pos = a.position.astype(np.int32)
+            map_agents[pos[0], pos[1]] = 1 + a.role.value
+            if a == agent and not force_visible:
+                # Distinguish the agent in the map.
+                map_agents[pos[0], pos[1]] *= -1
+        
+        # Load agent cargo into the map.
+        map_cargo = []
+        for r in self.possible_resources:
+            m = np.zeros(self.world_dims, dtype=np.float32)
+            for a in self.agents:
+                if a.capabilities[CAP.CARRY] and r.resource_id in a.cargo:
+                    pos = a.position.astype(np.int32)
+                    m[pos[0], pos[1]] = a.cargo[r.resource_id]
+            map_cargo.append(m)
+
+        # Build the combined map.
+        layers = [self.map_obstacles, map_agents, self.map_depots, *self.map_resources.values(), *map_cargo]
+        map_combined = np.stack(layers, axis=0).astype(np.float32)
+
+        # Create the observation.
+        obs = {
+            "id": self.possible_agents.index(agent),
+            "map": map_combined
+        }
+        obs_mask = {
+            "id": True,
+            "map": np.ones_like(map_combined, dtype=bool)
+        }
+
+        # # Calculate the visible area based on a circular observation radius.
+        # if not force_visible or True:
+        #     radius = agent.observation_radius
+        #     pos = agent.position.astype(np.int32)
+        #     visible = (np.arange(self.world_dims[0])[:, None] - pos[0]) ** 2 + \
+        #         (np.arange(self.world_dims[1])[None, :] - pos[1]) ** 2 <= radius ** 2
+        #     # obs["map"][visible, 0] += 0.2 # testing - show the visible area in the obstacle layer
+        #     obs_mask["map"][~visible, :] = False
+
+        # # Vehicle-class visibility: only Prospectors can directly observe resources.
+        # # Layers are ordered as: 0=obstacles, 1=agents, 2=depots, 3+=resources
+        # resource_layer = 3
+        # if not force_visible:
+        #     if not agent.capabilities[CAP.PROSPECT]:
+        #         # Mask out all resource layers for non-prospector local observations.
+        #         # (Communicated observations will still be merged in `observe()`)
+        #         obs_mask["map"][:, :, resource_layer:] = False
+
+        # # Update the discovered resources mask.
+        # if agent.capabilities[CAP.PROSPECT] and not force_visible:
+        #     for i, r in enumerate(self.possible_resources):
+        #         self.mask_map_resources_discovered |= (self.map_resources[r] > 0) & obs_mask["map"][:, :, resource_layer + i]
+        
+        return obs["map"], obs_mask["map"]
+        # return obs, obs_mask
