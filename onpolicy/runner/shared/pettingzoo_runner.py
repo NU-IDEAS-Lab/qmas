@@ -390,6 +390,7 @@ class PettingzooRunner(Runner):
         HISTORY_LENGTH = self.all_args.prediction_history_window
         buffer = [deque(maxlen=HISTORY_LENGTH) for _ in range(self.num_agents)]
         prediction = torch.zeros((HISTORY_LENGTH, self.num_agents, *obs_shape), dtype=torch.float32)
+        uncertainty = torch.zeros_like(prediction)
         
         prediction_prev = None  # For autoregression
         for i_episode in range(self.all_args.render_episodes):
@@ -424,14 +425,14 @@ class PettingzooRunner(Runner):
                     aa = None
                 
                 # Use the prediction from the predictor if available.
-                use_prediction = hasattr(self.policy, "predictor") and len(buffer[0]) == HISTORY_LENGTH and not self.all_args.prediction_disable
+                use_prediction = hasattr(self.policy, "predictors") and len(buffer[0]) == HISTORY_LENGTH and not self.all_args.prediction_disable
                 if use_prediction:
                     for agentIdx in range(self.num_agents):
                         trajectory = torch.stack([t["transition"] for t in buffer[agentIdx]], dim=0)
                         visibility_mask = torch.stack([t["visibility_mask"] for t in buffer[agentIdx]], dim=0)
 
                         # Get the prediction from the predictor.
-                        pred = self.trainer.policy.predictor.get_prediction(
+                        pred, variance = self.trainer.policy.get_prediction(
                             trajectory=trajectory,
                             visibility_mask=visibility_mask,
                             prediction_prev=prediction_prev
@@ -443,9 +444,11 @@ class PettingzooRunner(Runner):
                         # Only take the first sample (n_samples is 1 anyway).
                         # Strip the action part of the prediction.
                         prediction[:, agentIdx, :] = pred[0, :, act_size:]
+                        uncertainty[:, agentIdx, :] = variance[0, :, act_size:]
                 else:
                     prediction.zero_()
                     prediction[-1] = torch.from_numpy(obs[0])
+                    uncertainty.zero_()
                 
                 actions, rnn_states = self.trainer.policy.act(
                     prediction[-1], # Use the final timestep of the prediction.
@@ -459,7 +462,7 @@ class PettingzooRunner(Runner):
                 if ipython_clear_output:
                     clear_output(wait = True)
                 spf = prediction if use_prediction else None
-                render_env.envs[0].env.render(spf, history_length=HISTORY_LENGTH)
+                render_env.envs[0].env.render(spf, history_length=HISTORY_LENGTH, uncertainty=uncertainty)
 
                 # Prepare the actions for the environment.
                 # [n_envs*n_agents, ...] -> [n_envs, n_agents, ...]
