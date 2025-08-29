@@ -329,7 +329,7 @@ class PettingzooRunner(Runner):
                     prediction[-1], # Use the final timestep of the prediction.
                     np.concatenate(rnn_states if isinstance(rnn_states, (list, tuple)) else [rnn_states]),
                     np.concatenate(masks),
-                    deterministic=True,
+                    deterministic=False,
                     available_actions=aa
                 )
 
@@ -414,6 +414,7 @@ class PettingzooRunner(Runner):
                 frames.append(image)
 
             dones = False
+            reward_total = 0.0
             while not np.all(dones):
                 time_start = time.time()
 
@@ -451,7 +452,7 @@ class PettingzooRunner(Runner):
                     prediction[-1], # Use the final timestep of the prediction.
                     np.concatenate(rnn_states if isinstance(rnn_states, (list, tuple)) else [rnn_states]),
                     np.concatenate(masks),
-                    deterministic=True,
+                    deterministic=False,
                     available_actions=aa
                 )
 
@@ -480,6 +481,8 @@ class PettingzooRunner(Runner):
                         "visibility_mask": torch.from_numpy(agent_viz_mask).to(self.device)
                     })
 
+                reward_total += render_rewards[0].sum()
+
                 time_stop = time.time()
 
                 # append frame
@@ -488,7 +491,7 @@ class PettingzooRunner(Runner):
                     frames.append(image)
                 
                 # Print the FPS information.
-                print(f"Step {render_env.envs[0].env.step_count} - FPS: {1 / (time_stop - time_start):.2f}, Time per step: {time_stop - time_start:.4f}s (excluding render)")
+                print(f"Step {render_env.envs[0].env.step_count} - FPS: {1 / (time_stop - time_start):.2f} (excluding render) - Reward Total: {reward_total:.2f}")
 
             # save gif
             if self.all_args.save_gifs:

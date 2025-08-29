@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-    "--experiment_name", "isru-aa-e200-r20rand-512x4",
+    "--experiment_name", "isru-hybridObs-e200-r20rand-h5-512x4",
     "--project_name", "qmas",
     "--env_class", "isru_zoo.isru_v0.parallel_env",
     "--user_name", "ideas-mas",
@@ -13,7 +13,7 @@ args = [
     "--num_haulers", "1",
     "--num_prospectors", "0",
 
-    "--hauler_capacity", "1",
+    "--hauler_capacity", "5",
 
     "--world_size", "5",
     "--num_obstacles", "0",
