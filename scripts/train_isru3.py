@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-    "--experiment_name", "isru-e1h1p0-e200-r20rand-h5-512x4",
+    "--experiment_name", "isru-e1h1p0-e200-r20rand-h5-512x4-ensemble3",
     "--project_name", "qmas",
     "--env_class", "isru_zoo.isru_v0.parallel_env",
     "--user_name", "ideas-mas",
@@ -43,10 +43,11 @@ args = [
 
     "--diffusion_model_type", "dit1d",
     "--diffusion_steps", "5",
+    "--prediction_ensemble_size", "3",
 
     "--seed", "0",
 
-    "--n_rollout_threads", "100",
+    "--n_rollout_threads", "120",
     "--cuda",
     "--cuda_idx", "3",
 
