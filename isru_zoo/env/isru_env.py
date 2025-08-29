@@ -8,7 +8,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from copy import copy
 
-from isru_zoo.env.entity import ENTITY_TYPE, AGENT_ROLE, CAP, Agent, Depot, Extractor, Hauler, Prospector
+from isru_zoo.env.entity import ENTITY_TYPE, AGENT_ROLE, CAP, Agent, Depot, Extractor, Hauler, Prospector, ProspectorExtractor
 from isru_zoo.env.resource import TestResource1, TestResource2
 
 
@@ -110,7 +110,7 @@ class parallel_env(ParallelEnv):
 
         # Set up entities.
         self.possible_agents = \
-            [Extractor(
+            [ProspectorExtractor(
                 position=self.get_random_position(),
                 observation_radius=self.default_observation_radius
             ) for _ in range(num_extractors)] + \
@@ -118,11 +118,11 @@ class parallel_env(ParallelEnv):
                 position=self.get_random_position(),
                 carry_capacity=self.default_hauler_capacity,
                 observation_radius=self.default_observation_radius
-            ) for _ in range(num_haulers)] + \
-            [Prospector(
-                position=self.get_random_position(),
-                observation_radius=self.default_observation_radius
-            ) for _ in range(num_prospectors)]
+            ) for _ in range(num_haulers)] #+ \
+            # [Prospector(
+            #     position=self.get_random_position(),
+            #     observation_radius=self.default_observation_radius
+            # ) for _ in range(num_prospectors)]
 
         # Set up the possible resources.
         self.possible_resources = [
@@ -901,7 +901,7 @@ class parallel_env(ParallelEnv):
 
         reward = 0.0
 
-        if agent.role == AGENT_ROLE.HAULER:
+        if agent.capabilities[CAP.CARRY]:
             pass
             # cargo_total = sum(agent.cargo.values())
             # if cargo_total > 0:
@@ -915,12 +915,12 @@ class parallel_env(ParallelEnv):
             # nearest_extractor_dist = self._nearest_extractor_distance(agent.position)
             # reward += 1.0 / (1.0 + nearest_extractor_dist)
 
-        elif agent.role == AGENT_ROLE.PROSPECTOR:
+        if agent.capabilities[CAP.PROSPECT]:
             # Reward prospectors for the number of resources discovered.
             num_discovered = self._get_num_resources_discovered()
             reward += 0.1 * num_discovered
         
-        elif agent.role == AGENT_ROLE.EXTRACTOR:
+        if agent.capabilities[CAP.EXTRACT]:
             # Reward extractors for being on a resource tile.
             px, py = agent.position.astype(np.int32)
             if self.map_depots[px, py] == 0 :
@@ -928,9 +928,6 @@ class parallel_env(ParallelEnv):
                     if self.map_resources[r][px, py] > 0:
                         reward += r.reward_extraction
                         break
-
-        else:
-            raise ValueError(f"Unknown agent role: {agent.role}")
 
         # Reward for global objective at the end of the episode.
         if end_truncate or end_done:
