@@ -337,6 +337,7 @@ def get_config():
     parser.add_argument("--eval_maps", type=str, nargs='+', default=None)
 
     # diffuser parameters
+    parser.add_argument("--prediction_ensemble_size", type=int, default=1)
     parser.add_argument("--prediction_history_window", type=int, default=8)
     parser.add_argument("--prediction_disable", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--diffusion_steps", type=int, default=20)

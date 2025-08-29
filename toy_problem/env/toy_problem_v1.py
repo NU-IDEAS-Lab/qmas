@@ -8,6 +8,7 @@ import numpy as np
 import math
 from copy import deepcopy
 from matplotlib import pyplot as plt
+import matplotlib
 import networkx as nx
 from copy import copy
 from enum import IntEnum
@@ -190,7 +191,7 @@ class parallel_env(ParallelEnv):
         return np.random.uniform(-self.world_dims / 2, self.world_dims / 2).astype(np.float32)
 
 
-    def render(self, pred=None, figsize=(9, 6), history_length=2):
+    def render(self, pred=None, figsize=(9, 6), history_length=2, uncertainty=None, **kwargs):
         ''' Renders the environment.
             
             Args:
@@ -206,8 +207,11 @@ class parallel_env(ParallelEnv):
         for i in range(pred_steps):
             p = spaces.unflatten(self.observation_spaces, pred[i].flatten())
             pred_unflattened.append(p)
-
-        # print(f"Prediction: {pred}")
+        
+        # Convert the uncertainty to a dictionary (unflatten).
+        uncertainty_unflattened = None
+        if uncertainty is not None:
+            uncertainty_unflattened = spaces.unflatten(self.observation_spaces, uncertainty[-1].flatten())
 
         # Plot as a line graph using matplotlib.
         plt.figure(figsize=figsize)
@@ -218,45 +222,84 @@ class parallel_env(ParallelEnv):
         plt.gca().set_aspect('equal', adjustable='box')
         plt.axhline(0, color='black', lw=0.5)
         plt.axvline(0, color='black', lw=0.5)
-        plt.title("2D Leader-Follower Environment")
+        obs_percentage = int(self.observation_probability * 100)
+        plt.title(f"Leader-Follower: {obs_percentage}% Observations")
         plt.grid()
         
         # Plot the agent positions.
         positions = [a.position for a in self.possible_agents]
         plt.plot([p[0] for p in positions], [p[1] for p in positions], 'bo', label='Followers')
         for i, agent in enumerate(self.agents):
-            plt.annotate(f"{agent}", (positions[i][0] + 1, positions[i][1]), fontsize=8, color='blue')
+            # plt.annotate(f"{agent}", (positions[i][0] + 1, positions[i][1]), fontsize=8, color='blue')
 
             # Plot actual history for the agent.
             history = self.state_history[agent]
-            plt.plot([h[0] for h in history], [h[1] for h in history], 'b', alpha=0.5, linewidth=0.5, label=f"{agent} actual")            
+            plt.plot([h[0] for h in history], [h[1] for h in history], 'b', alpha=0.5, linewidth=0.5, label="Actual Follower Position")            
         
         # Plot the adversary positions.
         positions = [a.position for a in self.possible_adversaries]
         plt.plot([p[0] for p in positions], [p[1] for p in positions], 'ro', label='Leaders')
         for i, adversary in enumerate(self.adversaries):
-            plt.annotate(f"{adversary}", (positions[i][0] + 1, positions[i][1]), fontsize=8, color='red')        
+            # plt.annotate(f"{adversary}", (positions[i][0] + 1, positions[i][1]), fontsize=8, color='red')        
 
             # Plot actual history for the adversary.
             history = self.state_history[adversary]
-            plt.plot([h[0] for h in history], [h[1] for h in history], 'r', alpha=0.5, linewidth=0.5, label=f"{adversary} actual")
+            plt.plot([h[0] for h in history], [h[1] for h in history], 'r', alpha=0.5, linewidth=0.5, label="Actual Leader Position")
 
 
         # Plot history of predictions from the perspective of agent 0.
         if len(pred_unflattened) > 0:
+            uncertainty_ellipses = []
+
             agent_preds = [pred_unflattened[i][self.possible_agents[0]]["agents"] for i in range(len(pred_unflattened))]
+            agent_pred_pos = agent_preds[-1][self.possible_agents[0]]["position"]
+            plt.scatter([agent_pred_pos[0]], [agent_pred_pos[1]], s=80, facecolors='none', edgecolors='b', label='Predicted Follower Position')
             for i, agent in enumerate(self.possible_agents):
                 # Get the history of predictions for this agent.
-                history = [p[agent]["position"] for p in agent_preds]
-                plt.plot([h[0] for h in history], [h[1] for h in history], 'b--', alpha=0.5, linewidth=1.5)            
-                plt.annotate(f"Pred {agent}", (history[-1][0] + 1, history[-1][1]), fontsize=8, color='blue')
+                pred_pos = [p[agent]["position"] for p in agent_preds]
+                plt.plot([p[0] for p in pred_pos], [p[1] for p in pred_pos], 'b--', alpha=0.5, linewidth=1.5)            
+                # plt.annotate(f"Pred {agent}", (history[-1][0] + 1, history[-1][1]), fontsize=8, color='blue')
+
+                # Plot prediction uncertainty if available.
+                if uncertainty_unflattened is not None:
+                    u = uncertainty_unflattened[self.possible_agents[0]]["agents"][agent]["position"]
+                    ellipse = matplotlib.patches.Ellipse(
+                        (pred_pos[-1][0], pred_pos[-1][1]),
+                        width=u[0] * 2,
+                        height=u[1] * 2,
+                        angle=0
+                    )
+                    uncertainty_ellipses.append(ellipse)
             
+            if len(uncertainty_ellipses) > 0:
+                patch_collection = matplotlib.collections.PatchCollection(uncertainty_ellipses, edgecolor='none', facecolor='blue', alpha=0.3)
+                plt.gca().add_collection(patch_collection)
+
+            uncertainty_ellipses = []
+
             adversary_preds = [pred_unflattened[i][self.possible_agents[0]]["adversaries"] for i in range(len(pred_unflattened))]
+            adversary_pred_pos = adversary_preds[-1][self.possible_adversaries[0]]["position"]
+            plt.scatter([adversary_pred_pos[0]], [adversary_pred_pos[1]], s=80, facecolors='none', edgecolors='r', label='Predicted Leader Position')
             for i, adversary in enumerate(self.possible_adversaries):
                 # Get the history of predictions for this adversary.
-                history = [p[adversary]["position"] for p in adversary_preds]
-                plt.plot([h[0] for h in history], [h[1] for h in history], 'r--', alpha=0.5, linewidth=1.5)            
-                plt.annotate(f"Pred {adversary}", (history[-1][0] + 1, history[-1][1]), fontsize=8, color='red')
+                pred_pos = [p[adversary]["position"] for p in adversary_preds]
+                plt.plot([p[0] for p in pred_pos], [p[1] for p in pred_pos], 'r--', alpha=0.5, linewidth=1.5)            
+
+                # Plot prediction uncertainty if available.
+                if uncertainty_unflattened is not None:
+                    u = uncertainty_unflattened[self.possible_agents[0]]["adversaries"][adversary]["position"]
+                    ellipse = matplotlib.patches.Ellipse(
+                        (pred_pos[-1][0], pred_pos[-1][1]),
+                        width=u[0] * 2,
+                        height=u[1] * 2,
+                        angle=0
+                    )
+                    uncertainty_ellipses.append(ellipse)
+            
+            if len(uncertainty_ellipses) > 0:
+                patch_collection = matplotlib.collections.PatchCollection(uncertainty_ellipses, edgecolor='none', facecolor='red', alpha=0.3)
+                plt.gca().add_collection(patch_collection)
+                
 
         # Add legend outside the plot.
         plt.legend(loc='upper left', bbox_to_anchor=(1, 1), fontsize=8)
