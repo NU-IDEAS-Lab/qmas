@@ -153,7 +153,7 @@ class CoordConv(nn.Module):
             init_(nn.Linear(hidden_size, hidden_size)), active_func)
 
     def forward(self, x):
-        x /= 255.0
+        # x /= 255.0
         ret = self.addcoords(x)
         ret = self.cnn(ret)
         return ret
