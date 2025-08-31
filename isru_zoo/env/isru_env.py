@@ -137,9 +137,6 @@ class parallel_env(ParallelEnv):
             ) for r in self.possible_resources
         ]
 
-        # Record the map shape.
-        self.map_shape = (2 * len(self.possible_resources) + 3, *self.world_dims)  # +3 for obstacles, agents, depots
-
         # Set up spaces.
         self.observation_spaces = spaces.Dict({
             agent: self.observation_space(agent) for agent in self.possible_agents
@@ -264,6 +261,12 @@ class parallel_env(ParallelEnv):
                 self.map_resources[r][pos[0], pos[1]] += 1.0
 
         return positions_available
+
+
+    @property
+    def map_shape(self):
+        ''' Returns the map shape. '''
+        return (2 * len(self.possible_resources) + 3, *self.world_dims)  # +3 for obstacles, agents, depots
 
 
     def get_random_position(self):
@@ -546,16 +549,22 @@ class parallel_env(ParallelEnv):
         ''' Returns the global state of the environment.
             This is useful for centralized training, decentralized execution. '''
         
-        state = self._populateStateSpace(self.possible_agents[0], force_visible=True)[0]
+        state = self._state()
 
         return state
+
+
+    def _state(self):
+        ''' Returns the global state and mask of the environment.'''
+
+        return self._observe(self.possible_agents[0], force_visible=True)[0]
 
 
     def observe(self, agent, senders=set()):
         ''' Returns the observation for the given agent.'''
 
         # Collect local data.
-        local_obs, local_obs_mask = self._populateStateSpace(agent)
+        local_obs, local_obs_mask = self._observe(agent)
 
         return local_obs, local_obs_mask
 
@@ -565,7 +574,7 @@ class parallel_env(ParallelEnv):
 
         # Handle communicated data.
         for sender in senders:
-            sender_obs, sender_obs_mask = self._populateStateSpace(sender)
+            sender_obs, sender_obs_mask = self._observe(sender)
             sender_visible = sender_obs_mask["map"] == True
             map[sender_visible] = sender_obs["map"][sender_visible]
             map_mask[sender_visible] = True
@@ -598,8 +607,10 @@ class parallel_env(ParallelEnv):
             return None
 
         result = self.available_actions_space(agent).sample()
+
+        other_agent_pos = [a.position for a in self.agents if a != agent]
         
-        # Prevent movement into obstacles or out of bounds.
+        # Prevent movement into obstacles or out of bounds or into another agent.
         for dx in range(-1, 2):
             for dy in range(-1, 2):
                 vel = np.array([dx, dy], dtype=np.int32)
@@ -607,7 +618,8 @@ class parallel_env(ParallelEnv):
                 idx = vel + 1  # Shift from [-1, 0, 1] to [0, 1, 2] for indexing
                 if pos[0] < 0 or pos[0] >= self.world_dims[0] or \
                         pos[1] < 0 or pos[1] >= self.world_dims[1] or \
-                        self.map_obstacles[pos[0], pos[1]] == 1:
+                        self.map_obstacles[pos[0], pos[1]] == 1 or \
+                        any(np.array_equal(pos, oap.astype(np.int32)) for oap in other_agent_pos):
                     # This movement would go out of bounds or into an obstacle; disable it.
                     result["movement"][idx[0], idx[1]] = 0
                 else:
@@ -627,7 +639,7 @@ class parallel_env(ParallelEnv):
         return result_flattened
 
 
-    def _populateStateSpace(self, agent, force_visible=False):
+    def _observe(self, agent, force_visible=False):
         ''' Returns a populated state/observation space.'''
 
         # Load agent data into a map.
@@ -812,8 +824,8 @@ class parallel_env(ParallelEnv):
                                 # Remove from the resource map at the extractor's tile
                                 self.map_resources[r][ex_pos_int[0], ex_pos_int[1]] -= take
                                 # Add to the hauler's cargo
-                                reward_dict[agent]+= 100.0 * take
-                                reward_dict[extractor] += 100.0 * take
+                                # reward_dict[agent]+= 100.0 * take
+                                # reward_dict[extractor] += 100.0 * take
                                 agent.cargo[r.resource_id] = agent.cargo.get(r.resource_id, 0.0) + take
                                 free -= take
                                 info_dict["resources/step_picked_up"] += take
@@ -829,8 +841,8 @@ class parallel_env(ParallelEnv):
                                         depot.stock += drop
                                         break
                                 agent.cargo[r.resource_id] -= drop
-                                # self.map_resources[r][px, py] += drop
-                                reward_dict[agent] += 100.0 * depot.resource.reward_deposit * drop
+                                self.map_resources[r][px, py] += drop
+                                # reward_dict[agent] += 100.0 * depot.resource.reward_deposit * drop
                                 info_dict["resources/step_dropped_off"] += drop
                 elif agent.capabilities[CAP.EXTRACT]:
                     # Provide reward for Extractors that are sitting on a resource tile.
@@ -1050,7 +1062,7 @@ class parallel_env_simple_obs(parallel_env):
         })
 
 
-    def _populateStateSpace(self, agent, force_visible=False):
+    def _observe(self, agent, force_visible=False):
         ''' Fills in the state/observation space for the given agent. '''
 
         # Create the observation.
@@ -1109,6 +1121,61 @@ class parallel_env_simple_obs(parallel_env):
 class parallel_env_map_obs(parallel_env):
     ''' A map-based observation version of the ISRU environment. Intended for use with CNNs. '''
 
+    @property
+    def map_shape(self):
+        ''' Returns the map shape. '''
+        return (2 * len(self.possible_resources) + 5, *self.world_dims)  # +5 for obstacles, agents, agent_velocities x and y, depots
+
+
+    @property
+    @functools.cache
+    def state_space(self):
+        ''' Returns the state space of the environment. '''
+
+        return super(parallel_env_map_obs, self).observation_space(self.possible_agents[0])
+        # return spaces.Dict({
+        #     "resources_deposited": spaces.Box(
+        #         low=0,
+        #         high=np.inf,
+        #         shape=(1,),
+        #         dtype=np.float32
+        #     ),
+        #     "extractors_in_place": spaces.Box(
+        #         low=0,
+        #         high=len([a for a in self.possible_agents if a.capabilities[CAP.EXTRACT]]),
+        #         shape=(1,),
+        #         dtype=np.int32
+        #     ),
+        # })
+    
+
+    def _state(self):
+        ''' Returns the global state and mask of the environment.'''
+
+
+        return super(parallel_env_map_obs, self)._observe(self.possible_agents[0], force_visible=True)[0]
+
+        # def extractors_in_place():
+        #     count = 0
+        #     for a in self.agents:
+        #         if a.capabilities[CAP.EXTRACT]:
+        #             px, py = a.position.astype(np.int32)
+        #             if self.map_depots[px, py] == 0 :
+        #                 for r in self.possible_resources:
+        #                     if self.map_resources[r][px, py] > 0:
+        #                         count += 1
+        #                         break
+        #     return count
+
+
+        # state = {
+        #     "resources_deposited": np.array([sum(depot.stock for depot in self.possible_depots)], dtype=np.float32),
+        #     "extractors_in_place": np.array([extractors_in_place()], dtype=np.int32),
+        # }
+
+        # return state
+
+
     @functools.cache
     def observation_space(self, agent):
         ''' Returns the observation space for the given agent. '''
@@ -1121,17 +1188,19 @@ class parallel_env_map_obs(parallel_env):
         )
 
 
-    def _populateStateSpace(self, agent, force_visible=False):
+    def _observe(self, agent, force_visible=False):
         ''' Fills in the state/observation space for the given agent. '''
 
         # Load agent data into a map.
         map_agents = np.zeros(self.world_dims, dtype=np.int32)
+        map_velocities = np.zeros((*self.world_dims, 2), dtype=np.float32)
         for i, a in enumerate(self.agents):
             pos = a.position.astype(np.int32)
-            map_agents[pos[0], pos[1]] = 1 + a.role.value
+            map_agents[pos[0], pos[1]] = 1 + 10.0 * a.role.value
             if a == agent and not force_visible:
                 # Distinguish the agent in the map.
                 map_agents[pos[0], pos[1]] *= -1
+            map_velocities[pos[0], pos[1], :] = a.velocity.astype(np.float32)
         
         # Load agent cargo into the map.
         map_cargo = []
@@ -1144,7 +1213,7 @@ class parallel_env_map_obs(parallel_env):
             map_cargo.append(m)
 
         # Build the combined map.
-        layers = [self.map_obstacles, map_agents, self.map_depots, *self.map_resources.values(), *map_cargo]
+        layers = [self.map_obstacles, map_agents, map_velocities[:, :, 0], map_velocities[:, :, 1], self.map_depots, *self.map_resources.values(), *map_cargo]
         map_combined = np.stack(layers, axis=0).astype(np.float32)
 
         # Create the observation.
