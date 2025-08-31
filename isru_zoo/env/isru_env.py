@@ -125,9 +125,8 @@ class parallel_env(ParallelEnv):
             # ) for _ in range(num_prospectors)]
 
         # Set up the possible resources.
-        self.possible_resources = [
-            TestResource1(num_resources)
-        ]
+        self.possible_resources = []
+        self.possible_resources.append(TestResource1(num_resources, resource_id=1))
 
         # Set up depots.
         self.possible_depots = [
@@ -295,6 +294,14 @@ class parallel_env(ParallelEnv):
         # Plot state as a grid using matplotlib.
         plt.figure(figsize=figsize)
 
+        # Plot the depots.
+        for i, r in enumerate(self.possible_resources):
+            color = plt.cm.get_cmap("tab10")(i)
+            # Plot depot for this resource type.
+            depot_positions = np.argwhere(self.map_depots == r.resource_id)
+            if depot_positions.size > 0:
+                plt.scatter(depot_positions[:, 0], depot_positions[:, 1], label=f"Depot {r.resource_id}", marker="s", color=color, edgecolor="black", s=100)
+
         # Plot the agents.
         for agent in self.agents:
             pos = agent.position.astype(np.int32)
@@ -311,12 +318,7 @@ class parallel_env(ParallelEnv):
             positions = np.argwhere(self.map_resources[r] > 0)
             if positions.size > 0:
                 plt.scatter(positions[:, 0], positions[:, 1], label=f"Resource {r.resource_id}", alpha=0.5)
-            
-            # Plot depot for this resource type.
-            depot_positions = np.argwhere(self.map_depots == r.resource_id)
-            if depot_positions.size > 0:
-                plt.scatter(depot_positions[:, 0], depot_positions[:, 1], label=f"Depot {r.resource_id}", marker="s", color=color, edgecolor="black", s=100)
-                
+                            
         # Display the total reward for this step. Position this text below the subplots. Do not use suptitle.
         reward = sum(self.last_rewards.values())
         resources_deposited = sum(depot.stock for depot in self.possible_depots)
@@ -827,7 +829,6 @@ class parallel_env(ParallelEnv):
                                 # reward_dict[agent]+= 100.0 * take
                                 # reward_dict[extractor] += 100.0 * take
                                 agent.cargo[r.resource_id] = agent.cargo.get(r.resource_id, 0.0) + take
-                                free -= take
                                 info_dict["resources/step_picked_up"] += take
                         elif val < 0:
                             r = self.idx_to_res[idx]
@@ -836,10 +837,8 @@ class parallel_env(ParallelEnv):
                             drop = min(want_drop, have)
 
                             if drop > 0 and self.map_depots[px, py] == r.resource_id:
-                                for depot in self.possible_depots:
-                                    if depot.resource_id == r.resource_id and np.all(depot.position == [px, py]):
-                                        depot.stock += drop
-                                        break
+                                depot = self.possible_depots[idx]
+                                depot.stock += drop
                                 agent.cargo[r.resource_id] -= drop
                                 self.map_resources[r][px, py] += drop
                                 # reward_dict[agent] += 100.0 * depot.resource.reward_deposit * drop
