@@ -185,7 +185,7 @@ class parallel_env(ParallelEnv):
         # Reset resources.
         for r in self.possible_resources:
             if self.randomize_num_resources:
-                r.reset(quantity=random.randint(1, r.quantity_max))
+                r.reset(quantity=np.random.randint(1, r.quantity_max))
             elif self.curriculum_num_resources:
                 # Scale the number of resources linearly with episode number.
                 episode = self.reset_count / 2.0
