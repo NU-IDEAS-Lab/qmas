@@ -65,7 +65,7 @@ class parallel_env(ParallelEnv):
                  num_adversaries: int = 1,
                  num_dimensions: int = 2,
                  max_cycles: int = -1,
-                 world_size: float = 50.0,
+                 world_size: float = 60.0,
                  random_start_positions: bool = False,
                  state_per_agent: bool = False,
                  observation_probability: float = 1.0,
