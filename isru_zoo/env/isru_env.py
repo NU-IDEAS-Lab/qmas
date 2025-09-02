@@ -1348,7 +1348,7 @@ class parallel_env_map_obs(parallel_env):
             for a in self.agents:
                 if a.capabilities[CAP.CARRY] and r.resource_id in a.cargo:
                     pos = a.position.astype(np.int32)
-                    m[pos[0], pos[1]] = a.cargo[r.resource_id] / a.capabilities[CAP.CARRY_CAPACITY]  # Normalize cargo by capacity
+                    m[pos[0], pos[1]] = a.cargo[r.resource_id] / a.capabilities.get(CAP.CARRY_CAPACITY, 1.0)  # Normalize cargo by capacity
             map_cargo.append(m)
 
         # Build the combined map.

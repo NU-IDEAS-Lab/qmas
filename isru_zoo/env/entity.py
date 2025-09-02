@@ -108,7 +108,6 @@ class Agent(Entity):
             CAP.PROSPECT: False,
             CAP.EXTRACT: False,
             CAP.CARRY: False,
-            CAP.CARRY_CAPACITY: 0.0,
         }
 
 
@@ -130,7 +129,6 @@ class Prospector(Agent):
             CAP.PROSPECT: True,
             CAP.EXTRACT: False,
             CAP.CARRY: False,
-            CAP.CARRY_CAPACITY: 0.0
         })
 
 
@@ -145,7 +143,6 @@ class Extractor(Agent):
             CAP.PROSPECT: False,
             CAP.EXTRACT: True,
             CAP.CARRY: False,
-            CAP.CARRY_CAPACITY: 0.0
         })
 
 
@@ -161,7 +158,6 @@ class ProspectorExtractor(Agent):
             CAP.PROSPECT: True,
             CAP.EXTRACT: True,
             CAP.CARRY: False,
-            CAP.CARRY_CAPACITY: 0.0
         })
 
 
