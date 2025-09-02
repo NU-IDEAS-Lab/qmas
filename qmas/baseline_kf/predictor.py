@@ -54,6 +54,7 @@ class Predictor:
         self.R = torch.eye(obs_dim, device=device) * 0.0 #args.kf_measurement_noise
 
         print(f"Lambda critical lower bound: {self.get_lower_bound_lambda_critical()}")
+        print(f"Lambda critical upper bound: {self.get_upper_bound_lambda_critical()}")
 
         self.kf = None
 
@@ -71,6 +72,39 @@ class Predictor:
         eigvals = torch.linalg.eigvals(self.A)
         lambda_critical = 1.0 - 1.0 / torch.max(torch.abs(eigvals)) ** 2
         return lambda_critical.item()
+
+
+    def get_upper_bound_lambda_critical(self):
+        ''' Get the upper bound on the critical observation probability for stability.
+            Based on Sinopoli et al. (2004) - https://doi.org/10.1109/TAC.2004.834121
+        '''
+
+        special_case = False
+        try:
+            C_inv = torch.linalg.inv(self.C)
+            special_case = True
+        except RuntimeError:
+            pass
+
+        # This is the special case where C is invertible.
+        # Detailed in Section IV of Sinopoli et al. (2004).
+        if special_case:
+            return self.get_lower_bound_lambda_critical()
+        
+        # General case - not implemented.
+        else:
+            def psi(Y, Z, lam):
+                zeros = torch.zeros_like(Y)
+                sqrt_lam = torch.sqrt(lam)
+                sqrt_one_minus_lam = torch.sqrt(1.0 - lam)
+
+                return torch.tensor([
+                    [Y,                                             sqrt_lam * (Y @ self.A + Z @ self.C),   sqrt_one_minus_lam * (Y @ self.A)],
+                    [sqrt_lam * (self.A.T @ Y + self.C.T @ Z.T),    Y,                                      zeros],
+                    [sqrt_one_minus_lam * (self.A.T @ Y),            zeros,                                 Y]
+                ], dtype=torch.float32, device=self.device)
+            
+            raise NotImplementedError("Upper bound calculation for the general case is not implemented.")
 
 
     def get_prediction(self, trajectory, visibility_mask, prediction_prev=None):
