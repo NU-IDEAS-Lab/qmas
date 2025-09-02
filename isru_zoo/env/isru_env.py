@@ -28,6 +28,8 @@ def add_args(parser):
                         help="The number of resources to place in the world.")
     parser.add_argument("--randomize_num_resources", action="store_true",
                         help="Whether to randomize the number of resources at each reset up to `num_resources`.")
+    parser.add_argument("--curriculum_num_resources", action="store_true",
+                        help="Whether to increase the number of resources over time up to `num_resources`.")
     parser.add_argument("--world_size", type=int, default=50,
                         help="The size of the world. The world is a square with side length `world_size`.")
     parser.add_argument("--observation_radius", type=int, default=10,
@@ -80,9 +82,11 @@ class parallel_env(ParallelEnv):
             num_haulers: int = 2,
             num_prospectors: int = 1,
             max_cycles: int = -1,
+            episode_max: int = 1000,
             num_obstacles: int = 10,
             num_resources: int = 20,
             randomize_num_resources: bool = False,
+            curriculum_num_resources: bool = False,
             world_size: int = 50,
             observation_radius: int = 10,
             observation_mask: bool = False,
@@ -98,9 +102,11 @@ class parallel_env(ParallelEnv):
 
         # Configuration.
         self.max_cycles = max_cycles
+        self.episode_max = episode_max
         self.world_dims = np.array([world_size, world_size], dtype=np.int32)
         self.num_obstacles = num_obstacles
         self.randomize_num_resources = randomize_num_resources
+        self.curriculum_num_resources = curriculum_num_resources
         self.render_mode = render_mode
         self.mask_observations = observation_mask
         self.mask_available_actions = available_actions_mask
@@ -146,6 +152,7 @@ class parallel_env(ParallelEnv):
         self.nearest_tile=None
         
         # Reset the environment.
+        self.reset_count = 0
         self.reset()
 
 
@@ -178,7 +185,12 @@ class parallel_env(ParallelEnv):
         # Reset resources.
         for r in self.possible_resources:
             if self.randomize_num_resources:
-                r.reset(quantity=np.random.randint(1, r.quantity_max))
+                r.reset(quantity=random.randint(1, r.quantity_max))
+            elif self.curriculum_num_resources:
+                # Scale the number of resources linearly with episode number.
+                episode = self.reset_count / 2.0
+                quantity = int(np.ceil((episode / self.episode_max) * r.quantity_max))
+                r.reset(quantity=quantity)
             else:
                 r.reset()
 
@@ -212,6 +224,8 @@ class parallel_env(ParallelEnv):
             obs, obs_mask = self.observe(agent)
             observation[agent] = obs
             info[agent]["visibility_mask"] = obs_mask
+        
+        self.reset_count += 1
 
         return observation, info
 
@@ -866,9 +880,6 @@ class parallel_env(ParallelEnv):
 
         # Perform post-step calculations.
         for agent in self.possible_agents:
-            # Calculate the previous number of resources discovered.
-            resources_discovered_prev = self._get_num_resources_discovered()
-
             # Perform observation.
             agent_observation, obs_mask = self.observe(
                 agent,
@@ -876,14 +887,6 @@ class parallel_env(ParallelEnv):
             )
             obs_dict[agent] = agent_observation
             info_dict[agent]["visibility_mask"] = obs_mask
-
-            # Reward prospectors for new resources discovered.
-            # if agent.capabilities[CAP.PROSPECT]:
-            #     resources_discovered = self._get_num_resources_discovered()
-            #     reward_dict[agent] += 1.0 * (resources_discovered - resources_discovered_prev)
-
-            # Reward all agents for progress towards full resource deposit.
-            # reward_dict[agent] += 5.0 * resource_deposit_percentage
 
             # Provide reward.
             reward_dict[agent] += self.reward(agent, end_truncate, end_done)
@@ -941,10 +944,10 @@ class parallel_env(ParallelEnv):
 
         # Reward for global objective at the end of the episode.
         if end_truncate or end_done:
-            # total_resources = sum(r.quantity for r in self.possible_resources)
+            total_resources = sum(r.quantity for r in self.possible_resources)
             deposited_resources = sum(depot.stock for depot in self.possible_depots)
-            # resource_deposit_percentage = deposited_resources / float(total_resources)
-            # reward += 100.0 * resource_deposit_percentage
+            resource_deposit_percentage = deposited_resources / float(total_resources)
+            # reward += 1000.0 * resource_deposit_percentage
             reward += 1000.0 * deposited_resources
 
         return reward
