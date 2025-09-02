@@ -891,17 +891,25 @@ class parallel_env(ParallelEnv):
             # Provide reward.
             reward_dict[agent] += self.reward(agent, end_truncate, end_done)
 
-        # Handle end of episode.
-        if end_truncate or end_done:
-            for agent in self.agents:
-                truncated_dict[agent] = True
-            self.agents = []
-
         # Update information dictionary.
         info_dict["resources/discovered"] = self._get_num_resources_discovered()
         info_dict["resources/deposited"] = deposited_resources
         info_dict["resources/extant"] = total_resources - deposited_resources
         info_dict["resources/total"] = total_resources
+
+        # Handle end of episode.
+        if end_truncate or end_done:
+            resources_held = sum(sum(agent.cargo.values()) for agent in self.agents)
+            resources_map = sum(self.map_resources[r].sum() for r in self.possible_resources)
+
+            # Check that everything looks good at the end of the episode.
+            assert self._get_num_resources_discovered() <= total_resources, "More resources discovered than available!"
+            assert deposited_resources <= total_resources, "More resources deposited than available!"
+            assert total_resources == deposited_resources + resources_held + resources_map, "Resource accounting error!"
+
+            for agent in self.agents:
+                truncated_dict[agent] = True
+            self.agents = []
 
         # Record last rewards.
         self.last_rewards = copy(reward_dict)
