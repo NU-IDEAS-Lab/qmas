@@ -258,7 +258,10 @@ class PettingzooRunner(Runner):
     # @torch.no_grad()
     def eval(self):
         log_root = zarr.open_group(self.all_args.eval_output_file, mode="a")
-        log_exp = log_root.require_group(self.experiment_name)
+        if self.all_args.eval_series == "":
+            log_exp = log_root.require_group(self.experiment_name)
+        else:
+            log_exp = log_root.require_group(self.all_args.eval_series).require_group(self.experiment_name)
 
         eval_env = self.envs
 
