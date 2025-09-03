@@ -331,6 +331,9 @@ class PettingzooRunner(Runner):
                     prediction[-1] = torch.from_numpy(obs[0])
                     uncertainty.zero_()
                 
+                # Calculate prediction error.
+                prediction_error = torch.abs(prediction[-1] - torch.from_numpy(obs[0]))
+
                 actions, rnn_states = self.trainer.policy.act(
                     prediction[-1], # Use the final timestep of the prediction.
                     np.concatenate(rnn_states if isinstance(rnn_states, (list, tuple)) else [rnn_states]),
@@ -356,6 +359,9 @@ class PettingzooRunner(Runner):
                         "transition": torch.from_numpy(transition).to(self.device),
                         "visibility_mask": torch.from_numpy(agent_viz_mask).to(self.device)
                     })
+                
+                # Add prediction error to infos for logging.
+                infos[0]["prediction_error_mean"] = prediction_error.mean().item()
 
                 # Log information.
                 keys = infos[0].keys()
@@ -469,6 +475,10 @@ class PettingzooRunner(Runner):
                     clear_output(wait = True)
                 spf = prediction if use_prediction else None
                 render_env.envs[0].env.render(spf, history_length=HISTORY_LENGTH, uncertainty=uncertainty)
+
+                # Calculate prediction error.
+                prediction_error = torch.abs(prediction[-1] - torch.from_numpy(obs[0]))
+                print(f"Mean Prediction Error: {prediction_error.mean():.2f}")
 
                 # Prepare the actions for the environment.
                 # [n_envs*n_agents, ...] -> [n_envs, n_agents, ...]
