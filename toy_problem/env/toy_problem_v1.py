@@ -474,15 +474,15 @@ class parallel_env(ParallelEnv):
             self.state_history[adversary].append(adversary.position.copy())
 
         # Assign per-agent reward based on distance to assigned adversary (by index).
-        error_sum = 0.0
+        tracking_error_sum = 0.0
         for i, agent in enumerate(self.agents):
             if i < len(self.adversaries):
                 assigned_adv = self.adversaries[i]
                 distance = np.linalg.norm(agent.position - assigned_adv.position)
-                error_sum += distance
+                tracking_error_sum += distance
                 reward_dict[agent] = -distance
             else:
-                reward_dict[agent] = 0.0  # No assigned adversary
+                reward_dict[agent] = 0.0  # No assigned adversary        
 
         # Perform observations.
         for agent in self.possible_agents:
@@ -491,7 +491,7 @@ class parallel_env(ParallelEnv):
             info_dict[agent]["visibility_mask"] = obs_mask
 
         # Record information.
-        info_dict["tracking_error_mean"] = error_sum / len(self.agents) if len(self.agents) > 0 else 0.0
+        info_dict["tracking_error_mean"] = tracking_error_sum / len(self.agents) if len(self.agents) > 0 else 0.0
 
         # Check truncation conditions.
         if lastStep or (self.max_cycles >= 0 and self.step_count >= self.max_cycles):
