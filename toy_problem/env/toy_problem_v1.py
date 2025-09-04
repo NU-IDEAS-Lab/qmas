@@ -34,6 +34,8 @@ def add_args(parser):
                              "If false, the state function will return a single copy of the state that is shared among all agents.")
     parser.add_argument("--observation_probability", type=float, default=1.0,
                         help="The probability that an agent will observe another entity.")
+    parser.add_argument("--disturbance_drift_magnitude", type=float, default=0.0,
+                        help="The magnitude of the random disturbance drift applied to adversaries.")
 
 
 def validate_args(parsed_args):
@@ -69,6 +71,7 @@ class parallel_env(ParallelEnv):
                  random_start_positions: bool = False,
                  state_per_agent: bool = False,
                  observation_probability: float = 1.0,
+                 disturbance_drift_magnitude: float = 0.0,
                 ):
         """
         Initialize the environment.
@@ -82,6 +85,7 @@ class parallel_env(ParallelEnv):
         self.random_start_positions = random_start_positions
         self.state_per_agent = state_per_agent
         self.observation_probability = observation_probability
+        self.disturbance_drift_magnitude = disturbance_drift_magnitude
 
         # Set up entities.
         self.possible_agents = [
@@ -464,6 +468,9 @@ class parallel_env(ParallelEnv):
 
                 # Increment the agent state.                
                 agent.position += agent.velocity
+
+                # Apply drift disturbance.
+                agent.position += np.array([self.disturbance_drift_magnitude, 0.0])  # Drift in x-direction
 
                 self.state_history[agent].append(agent.position.copy())
 
