@@ -469,15 +469,16 @@ class parallel_env(ParallelEnv):
                 # Increment the agent state.                
                 agent.position += agent.velocity
 
-                # Apply drift disturbance.
-                agent.position += np.array([self.disturbance_drift_magnitude, 0.0])  # Drift in x-direction
-
                 self.state_history[agent].append(agent.position.copy())
 
         # Perform adversary actions.
         for adversary in self.adversaries:
             adversary.velocity = self._get_adversary_control(adversary)
             adversary.position += adversary.velocity
+
+            # Apply drift disturbance.
+            adversary.position += np.array([self.disturbance_drift_magnitude, 0.0])  # Drift in x-direction
+
             self.state_history[adversary].append(adversary.position.copy())
 
         # Assign per-agent reward based on distance to assigned adversary (by index).
