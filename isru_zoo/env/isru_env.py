@@ -896,6 +896,8 @@ class parallel_env(ParallelEnv):
         info_dict["resources/deposited"] = deposited_resources
         info_dict["resources/extant"] = total_resources - deposited_resources
         info_dict["resources/total"] = total_resources
+        for agent in self.possible_agents:
+            info_dict[f"rewards/{agent}"] = reward_dict[agent]
 
         # Handle end of episode.
         if end_truncate or end_done:
