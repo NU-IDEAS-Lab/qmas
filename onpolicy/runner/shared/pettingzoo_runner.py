@@ -451,7 +451,7 @@ class PettingzooRunner(Runner):
                         )
 
                         # Store as the previous prediction.
-                        prediction_prev = pred.detach()
+                        prediction_prev = pred.detach().clone()
 
                         # Only take the first sample (n_samples is 1 anyway).
                         # Strip the action part of the prediction.
@@ -485,6 +485,9 @@ class PettingzooRunner(Runner):
                 actions = actions.detach().cpu().reshape((self.n_render_rollout_threads, self.num_agents, *actions.shape[1:]))
                 rnn_states = rnn_states.detach().cpu().reshape((self.n_render_rollout_threads, *rnn_states.shape[1:]))
                 actions_env = [actions[idx, :, :].numpy() for idx in range(self.n_render_rollout_threads)]
+
+                if render_env.envs[0].env.step_count == 24:
+                    print(f"ready")
 
                 # Take a step in the environment and get the results.
                 obs, share_obs, render_rewards, dones, infos, available_actions = render_env.step(actions_env)
