@@ -50,8 +50,8 @@ class Predictor:
             device=device
         )
         self.C = torch.eye(obs_dim, device=device)
-        self.Q = torch.eye(obs_dim, device=device) * 0.1 #args.kf_process_noise
-        self.R = torch.eye(obs_dim, device=device) * 0.0 #args.kf_measurement_noise
+        self.Q = torch.eye(obs_dim, device=device) * 1.0 #args.kf_process_noise
+        self.R = torch.eye(obs_dim, device=device) * 1.0 #args.kf_measurement_noise
 
         print(f"Lambda critical lower bound: {self.get_lower_bound_lambda_critical()}")
         print(f"Lambda critical upper bound: {self.get_upper_bound_lambda_critical()}")
@@ -138,7 +138,7 @@ class Predictor:
         visibility_mask_diag = torch.diag(visibility_mask[-1, self.action_dim:])
 
         # Update the Kalman Filter with the observation.
-        self.kf.update(trajectory[-1, self.action_dim:], visibility_mask_diag)
+        self.kf.update(trajectory[-1, self.action_dim:], gamma=visibility_mask_diag)
 
         return prediction
 
@@ -164,7 +164,7 @@ class KalmanFilter:
         return self.x
 
 
-    def update(self, z):
+    def update(self, z, **kwargs):
         S = self.C @ self.P @ self.C.T + self.R
         K = self.P @ self.C.T @ torch.linalg.inv(S)
         y = z - self.C @ self.x
