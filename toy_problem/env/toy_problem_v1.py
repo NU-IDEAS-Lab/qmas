@@ -413,11 +413,11 @@ class parallel_env(ParallelEnv):
         """
         velocity = adversary.velocity.copy()
 
-        if random.random() < 0.3:
+        if np.random.random() < 0.6:
             # Randomly change velocity to create a new pattern
-            velocity += np.random.normal(0, 0.3, size=self.num_dimensions)
+            velocity += np.random.normal(0, 0.4, size=self.num_dimensions)
                 
-        # # Add some random noise to make the trajectory more natural
+        # Add some random noise to make the trajectory more natural
         noise_magnitude = 0.05 * min(1.0, self.step_count / 50.0)  # Gradually increase noise
         velocity += np.random.normal(0.0, noise_magnitude, size=self.num_dimensions)
 
@@ -471,6 +471,12 @@ class parallel_env(ParallelEnv):
         for adversary in self.adversaries:
             adversary.velocity = self._get_adversary_control(adversary)
             adversary.position += adversary.velocity
+
+            # Add a nonlinear disturbance to the adversary position.
+            # if np.random.rand() < 0.1:
+            #     disturbance = np.random.uniform(0, 1.0, size=self.num_dimensions)
+            #     adversary.position += disturbance
+
             self.state_history[adversary].append(adversary.position.copy())
 
         # Assign per-agent reward based on distance to assigned adversary (by index).
