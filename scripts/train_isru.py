@@ -42,7 +42,7 @@ args = [
     "--no-use_ReLU",
     "--no-use_feature_normalization",
     # "--no-use_valuenorm",
-    "--hidden_size", "512",
+    "--hidden_size", "128",
     "--layer_N", "2",
 
     "--diffusion_model_type", "dit1d",

@@ -40,7 +40,7 @@ args = [
     "--share_policy",
     "--no-share_reward",
     "--use_ReLU",
-    "--hidden_size", "512",
+    "--hidden_size", "128",
     "--layer_N", "2",
 
     "--diffusion_model_type", "dit1d",
