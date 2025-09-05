@@ -41,7 +41,7 @@ args = [
     "--no-share_reward",
     "--use_ReLU",
     "--hidden_size", "512",
-    "--layer_N", "4",
+    "--layer_N", "2",
 
     "--diffusion_model_type", "dit1d",
 

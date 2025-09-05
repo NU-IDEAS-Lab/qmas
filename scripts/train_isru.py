@@ -43,7 +43,7 @@ args = [
     "--no-use_feature_normalization",
     # "--no-use_valuenorm",
     "--hidden_size", "512",
-    "--layer_N", "4",
+    "--layer_N", "2",
 
     "--diffusion_model_type", "dit1d",
 
