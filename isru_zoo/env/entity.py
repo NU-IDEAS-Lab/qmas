@@ -114,6 +114,7 @@ class Agent(Entity):
     def reset(self, *args, **kwargs):
         super().reset(*args, **kwargs)
         self.cargo = {}
+        self.steps_stationary = 0
 
 
 # --- New agent Type subclasses ---

@@ -804,6 +804,12 @@ class parallel_env(ParallelEnv):
                 # Correct agent velocity to reflect actual movement (in case of collisions).
                 agent.velocity = agent.position - position_prev
 
+                # Check for how long the agent has been stationary.
+                if np.linalg.norm(agent.velocity) < 1e-5:
+                    agent.steps_stationary += 1
+                else:
+                    agent.steps_stationary = 1
+
                 # Handle communication.
                 # if action["communication"][0] >= 0.5:
                 #     senders.add(agent)
@@ -949,7 +955,7 @@ class parallel_env(ParallelEnv):
             if self.map_depots[px, py] == 0 :
                 for r in self.possible_resources:
                     if self.map_resources[r][px, py] > 0:
-                        reward += r.reward_extraction
+                        reward += r.reward_extraction * agent.steps_stationary
                         break
 
         # Reward for global objective at the end of the episode.
