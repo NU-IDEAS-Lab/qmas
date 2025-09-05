@@ -4,28 +4,23 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-    "--experiment_name", "isru-simple-aa-e200-r20rand-512x4",
+    "--experiment_name", "isru-UN-e1h1p0-e200-r20-h5-5x5-512x4",
     "--project_name", "qmas",
-    "--env_class", "isru_zoo.isru_v0.parallel_env_simple_obs",
+    # "--env_class", "isru_zoo.isru_v0.parallel_env",
+    "--env_class", "isru_zoo.isru_v0.parallel_env_map_obs",
     "--user_name", "ideas-mas",
 
 	"--num_extractors", "1",
     "--num_haulers", "1",
     "--num_prospectors", "0",
 
-    "--hauler_capacity", "1",
-
-    # "--lr", "3e-4",
-    # "--critic_lr", "3e-4",
-    # "--gae_lambda", "1.0",
-    # "--gamma", "0.999",
-    # "--entropy_coef", "0.05",
-    # "--value_loss_coef", "0.5",
+    "--hauler_capacity", "5",
 
     "--world_size", "5",
     "--num_obstacles", "0",
     "--num_resources", "20",
-    "--randomize_num_resources",
+    # "--randomize_num_resources",
+    # "--curriculum_num_resources",
 
     "--observation_radius", "999999",
     # "--observation_mask",
@@ -44,7 +39,9 @@ args = [
     "--skip_steps",
     "--share_policy",
     "--no-share_reward",
-    "--use_ReLU",
+    "--no-use_ReLU",
+    "--no-use_feature_normalization",
+    # "--no-use_valuenorm",
     "--hidden_size", "512",
     "--layer_N", "4",
 
@@ -52,9 +49,9 @@ args = [
 
     "--seed", "0",
 
-    "--n_rollout_threads", "300",
+    "--n_rollout_threads", "50",
     "--cuda",
-    "--cuda_idx", "3",
+    "--cuda_idx", "4",
 
     "--save_interval", "1000",
     "--results_dir", "/data/group/mas/qmas/results",
