@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-    "--experiment_name", "isru-UN-e1h1p0-e200-r20curr-h5-5x5-512x4",
+    "--experiment_name", "isru-UN-stateHybrid-e1h1p0-e200-r20curr-h5-5x5-512x4",
     "--project_name", "qmas",
     # "--env_class", "isru_zoo.isru_v0.parallel_env",
     "--env_class", "isru_zoo.isru_v0.parallel_env_map_obs",
@@ -39,9 +39,7 @@ args = [
     "--skip_steps",
     "--share_policy",
     "--no-share_reward",
-    "--no-use_ReLU",
-    "--no-use_feature_normalization",
-    # "--no-use_valuenorm",
+    "--use_ReLU",
     "--hidden_size", "128",
     "--layer_N", "2",
 
