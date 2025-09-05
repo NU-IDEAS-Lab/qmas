@@ -584,37 +584,6 @@ class parallel_env(ParallelEnv):
 
         return local_obs, local_obs_mask
 
-        # Set up the matrices.
-        map = np.copy(local_obs["map"])
-        map_mask = np.zeros_like(local_obs_mask["map"], dtype=bool)
-
-        # Handle communicated data.
-        for sender in senders:
-            sender_obs, sender_obs_mask = self._observe(sender)
-            sender_visible = sender_obs_mask["map"] == True
-            map[sender_visible] = sender_obs["map"][sender_visible]
-            map_mask[sender_visible] = True
-        
-        # Apply local observations (overwrite any communicated data).
-        map[local_obs_mask["map"] == True] = local_obs["map"][local_obs_mask["map"] == True]
-        map_mask |= local_obs_mask["map"]
-
-        # Update the local observation.
-        combined_obs = local_obs
-        combined_obs["map"] = map
-        combined_obs_mask = local_obs_mask
-        combined_obs_mask["map"] = map_mask
-
-        # Debugging: highlight the visible area in the map.
-        # obs["map"][obs_mask["map"], :] += 0.2
-
-        if self.mask_observations:
-            result = combined_obs["map"] * combined_obs_mask["map"]
-            return result, combined_obs_mask["map"]
-        else:
-            # return combined_obs, combined_obs_mask
-            return combined_obs["map"], combined_obs_mask["map"]
-
 
     def available_actions(self, agent):
         ''' Returns the available actions for this agent. '''
@@ -1390,37 +1359,69 @@ class parallel_env_map_obs(parallel_env):
         map_combined = np.stack(layers, axis=0).astype(np.float32)
 
         # Create the observation.
-        obs = {
-            "id": self.possible_agents.index(agent),
-            "map": map_combined
-        }
-        obs_mask = {
-            "id": True,
-            "map": np.ones_like(map_combined, dtype=bool)
-        }
+        obs = map_combined
+        obs_mask = np.ones_like(map_combined, dtype=bool)
 
-        # # Calculate the visible area based on a circular observation radius.
-        # if not force_visible or True:
-        #     radius = agent.observation_radius
-        #     pos = agent.position.astype(np.int32)
-        #     visible = (np.arange(self.world_dims[0])[:, None] - pos[0]) ** 2 + \
-        #         (np.arange(self.world_dims[1])[None, :] - pos[1]) ** 2 <= radius ** 2
-        #     # obs["map"][visible, 0] += 0.2 # testing - show the visible area in the obstacle layer
-        #     obs_mask["map"][~visible, :] = False
+        # Calculate the visible area based on a circular observation radius.
+        if not force_visible or True:
+            radius = agent.observation_radius
+            pos = agent.position.astype(np.int32)
+            visible = (np.arange(self.world_dims[0])[:, None] - pos[0]) ** 2 + \
+                (np.arange(self.world_dims[1])[None, :] - pos[1]) ** 2 <= radius ** 2
+            # obs[visible, 0] += 0.2 # testing - show the visible area in the obstacle layer
+            obs_mask[:, ~visible] = False
 
-        # # Vehicle-class visibility: only Prospectors can directly observe resources.
-        # # Layers are ordered as: 0=obstacles, 1=agents, 2=depots, 3+=resources
-        # resource_layer = 3
-        # if not force_visible:
-        #     if not agent.capabilities[CAP.PROSPECT]:
-        #         # Mask out all resource layers for non-prospector local observations.
-        #         # (Communicated observations will still be merged in `observe()`)
-        #         obs_mask["map"][:, :, resource_layer:] = False
+        # Vehicle-class visibility: only Prospectors can directly observe resources.
+        # Layers are ordered as: 0=obstacles, 1=agents, 2=depots, 3+=resources
+        resource_layer = 5
+        resource_layer_count = len(self.possible_resources)
+        if not force_visible:
+            if not agent.capabilities[CAP.PROSPECT]:
+                # Mask out all resource layers for non-prospector local observations.
+                # (Communicated observations will still be merged in `observe()`)
+                obs_mask[resource_layer:resource_layer + resource_layer_count, :, :] = False
 
-        # # Update the discovered resources mask.
-        # if agent.capabilities[CAP.PROSPECT] and not force_visible:
-        #     for i, r in enumerate(self.possible_resources):
-        #         self.mask_map_resources_discovered |= (self.map_resources[r] > 0) & obs_mask["map"][:, :, resource_layer + i]
+        # Update the discovered resources mask.
+        if agent.capabilities[CAP.PROSPECT] and not force_visible:
+            for i, r in enumerate(self.possible_resources):
+                self.mask_map_resources_discovered |= (self.map_resources[r] > 0) & obs_mask[resource_layer + i, :, :]
         
-        return obs["map"], obs_mask["map"]
-        # return obs, obs_mask
+        return obs, obs_mask
+
+
+    def observe(self, agent, senders=set()):
+        ''' Returns the observation for the given agent.'''
+
+        # Collect local data.
+        local_obs, local_obs_mask = self._observe(agent)
+
+        # Set up the matrices.
+        map = np.copy(local_obs)
+        map_mask = np.zeros_like(local_obs_mask, dtype=bool)
+
+        # Handle communicated data.
+        for sender in senders:
+            sender_obs, sender_obs_mask = self._observe(sender)
+            sender_visible = sender_obs_mask == True
+            map[sender_visible] = sender_obs[sender_visible]
+            map_mask[sender_visible] = True
+        
+        # Apply local observations (overwrite any communicated data).
+        map[local_obs_mask == True] = local_obs[local_obs_mask == True]
+        map_mask |= local_obs_mask
+
+        # Update the local observation.
+        combined_obs = local_obs
+        combined_obs = map
+        combined_obs_mask = local_obs_mask
+        combined_obs_mask = map_mask
+
+        # Debugging: highlight the visible area in the map.
+        # obs[obs_mask, :] += 0.2
+
+        if self.mask_observations:
+            result = combined_obs * combined_obs_mask
+            return result, combined_obs_mask
+        else:
+            # return combined_obs, combined_obs_mask
+            return combined_obs, combined_obs_mask
