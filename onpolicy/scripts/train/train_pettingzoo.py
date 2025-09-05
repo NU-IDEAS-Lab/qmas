@@ -173,6 +173,9 @@ def validateArgs(all_args):
     # Set max_cycles to -1 if skip_steps is set.
     if all_args.skip_steps:
         all_args.max_cycles = -1
+    
+    # Add the number of episodes to args for curriculum learning.
+    all_args.episode_max = int(all_args.num_env_steps) // all_args.episode_length // all_args.n_rollout_threads
 
     # Create an environment object to validate it.
     env_class = get_environment_class(all_args)

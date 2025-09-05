@@ -108,13 +108,13 @@ class Agent(Entity):
             CAP.PROSPECT: False,
             CAP.EXTRACT: False,
             CAP.CARRY: False,
-            CAP.CARRY_CAPACITY: 0.0,
         }
 
 
     def reset(self, *args, **kwargs):
         super().reset(*args, **kwargs)
         self.cargo = {}
+        self.steps_stationary = 0
 
 
 # --- New agent Type subclasses ---
@@ -130,7 +130,6 @@ class Prospector(Agent):
             CAP.PROSPECT: True,
             CAP.EXTRACT: False,
             CAP.CARRY: False,
-            CAP.CARRY_CAPACITY: 0.0
         })
 
 
@@ -145,7 +144,6 @@ class Extractor(Agent):
             CAP.PROSPECT: False,
             CAP.EXTRACT: True,
             CAP.CARRY: False,
-            CAP.CARRY_CAPACITY: 0.0
         })
 
 
@@ -161,7 +159,6 @@ class ProspectorExtractor(Agent):
             CAP.PROSPECT: True,
             CAP.EXTRACT: True,
             CAP.CARRY: False,
-            CAP.CARRY_CAPACITY: 0.0
         })
 
 

@@ -1,5 +1,7 @@
 import torch.nn as nn
 from .util import init
+from .coordconv import CoordConv
+import segmentation_models_pytorch as smp
 
 """CNN Modules and utils."""
 
@@ -42,6 +44,85 @@ class CNNLayer(nn.Module):
         x = self.cnn(x)
         return x
 
+import torch
+class AddCoords(nn.Module):
+
+    def __init__(self, with_r=False):
+        super().__init__()
+        self.with_r = with_r
+
+    def forward(self, input_tensor):
+        """
+        Args:
+            input_tensor: shape(batch, channel, x_dim, y_dim)
+        """
+        batch_size, _, x_dim, y_dim = input_tensor.size()
+
+        xx_channel = torch.arange(x_dim).repeat(1, y_dim, 1)
+        yy_channel = torch.arange(y_dim).repeat(1, x_dim, 1).transpose(1, 2)
+
+        xx_channel = xx_channel.float() / (x_dim - 1)
+        yy_channel = yy_channel.float() / (y_dim - 1)
+
+        xx_channel = xx_channel * 2 - 1
+        yy_channel = yy_channel * 2 - 1
+
+        xx_channel = xx_channel.repeat(batch_size, 1, 1, 1).transpose(2, 3)
+        yy_channel = yy_channel.repeat(batch_size, 1, 1, 1).transpose(2, 3)
+
+        ret = torch.cat([
+            input_tensor,
+            xx_channel.type_as(input_tensor),
+            yy_channel.type_as(input_tensor)], dim=1)
+
+        if self.with_r:
+            rr = torch.sqrt(torch.pow(xx_channel.type_as(input_tensor) - 0.5, 2) + torch.pow(yy_channel.type_as(input_tensor) - 0.5, 2))
+            ret = torch.cat([ret, rr], dim=1)
+
+        return ret
+
+
+class UNetLayer(nn.Module):
+    def __init__(self, obs_shape, hidden_size, use_orthogonal, use_ReLU, kernel_size=3, stride=1):
+        super(UNetLayer, self).__init__()
+
+        active_func = [nn.Tanh(), nn.ReLU()][use_ReLU]
+        init_method = [nn.init.xavier_uniform_, nn.init.orthogonal_][use_orthogonal]
+        gain = nn.init.calculate_gain(['tanh', 'relu'][use_ReLU])
+
+        def init_(m):
+            return init(m, init_method, lambda x: nn.init.constant_(x, 0), gain=gain)
+
+        input_channel = obs_shape[0]
+        input_width = obs_shape[1]
+        input_height = obs_shape[2]
+
+        self.addcoords = AddCoords(with_r=False)
+        input_channel = input_channel + 2
+
+        self.sequence = nn.Sequential(
+            smp.Unet(
+                encoder_name="resnet34",        # choose encoder, e.g. mobilenet_v2 or efficientnet-b7
+                encoder_weights="imagenet",     # use `imagenet` pre-trained weights for encoder initialization
+                in_channels=input_channel,                  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
+                classes=1,                      # model output channels (number of classes in your dataset)
+                activation="sigmoid",          # activation function
+
+            ),
+            # active_func,
+            Flatten(),
+            init_(nn.Linear(input_width * input_height, hidden_size)),
+            active_func,
+            # init_(nn.Linear(hidden_size, hidden_size)),
+            # active_func
+        )
+
+
+    def forward(self, x):
+        x = self.addcoords(x)
+        x = self.sequence(x)
+        return x
+
 
 class CNNBase(nn.Module):
     def __init__(self, args, obs_shape):
@@ -51,7 +132,9 @@ class CNNBase(nn.Module):
         self._use_ReLU = args.use_ReLU
         self.hidden_size = args.hidden_size
 
-        self.cnn = CNNLayer(obs_shape, self.hidden_size, self._use_orthogonal, self._use_ReLU)
+        # self.cnn = CNNLayer(obs_shape, self.hidden_size, self._use_orthogonal, self._use_ReLU)
+        # self.cnn = CoordConv(obs_shape, self.hidden_size, self._use_orthogonal, self._use_ReLU)
+        self.cnn = UNetLayer(obs_shape, self.hidden_size, self._use_orthogonal, self._use_ReLU)
 
     def forward(self, x):
         x = self.cnn(x)

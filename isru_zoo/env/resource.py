@@ -12,6 +12,8 @@ class Resource:
             Resource.resource_count += 1
         else:
             self.resource_id = resource_id
+        
+        assert self.resource_id > 0, "Resource ID must be greater than 0."
     
     def reset(self, quantity=None):
         ''' Resets the resource to its initial state. '''
@@ -25,7 +27,7 @@ class TestResource1(Resource):
     ''' We are using this as the test resource during development. '''
     
     reward_deposit = 1.5
-    reward_extraction = 0.5
+    reward_extraction = 0.1
 
 
 class TestResource2(Resource):
