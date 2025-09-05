@@ -1163,7 +1163,7 @@ class parallel_env_map_obs(parallel_env):
 
     @property
     @functools.cache
-    def state_space_TEST(self):
+    def state_space(self):
         ''' Returns the state space of the environment. '''
 
         agent = self.possible_agents[0]
@@ -1270,7 +1270,7 @@ class parallel_env_map_obs(parallel_env):
         # })
     
 
-    def _state_TEST(self):
+    def _state(self):
         ''' Returns the global state and mask of the environment.'''
 
 
