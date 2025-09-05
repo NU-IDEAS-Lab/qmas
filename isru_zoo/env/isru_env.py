@@ -930,20 +930,20 @@ class parallel_env(ParallelEnv):
 
         reward = 0.0
 
-        if agent.capabilities[CAP.CARRY]:
-            cargo_total = sum(agent.cargo.values())
-            if cargo_total < agent.capabilities[CAP.CARRY_CAPACITY]:
-                # # Reward haulers for moving towards/away from the nearest extractor.
-                prev_nearest_extractor_dist = self._nearest_entity_distance(agent.position - agent.velocity, capability=CAP.EXTRACT)
-                nearest_extractor_dist = self._nearest_entity_distance(agent.position, capability=CAP.EXTRACT)
-                diff = prev_nearest_extractor_dist - nearest_extractor_dist
-                reward += 0.1 * diff
-            else:
-                # Reward haulers for moving towards/away from the nearest depot.
-                prev_nearest_depot_dist = self._nearest_entity_distance(agent.position - agent.velocity, entity_type=ENTITY_TYPE.DEPOT)
-                nearest_depot_dist = self._nearest_entity_distance(agent.position, entity_type=ENTITY_TYPE.DEPOT)
-                diff = prev_nearest_depot_dist - nearest_depot_dist
-                reward += 0.1 * diff
+        # if agent.capabilities[CAP.CARRY]:
+        #     cargo_total = sum(agent.cargo.values())
+        #     if cargo_total < agent.capabilities[CAP.CARRY_CAPACITY]:
+        #         # # Reward haulers for moving towards/away from the nearest extractor.
+        #         prev_nearest_extractor_dist = self._nearest_entity_distance(agent.position - agent.velocity, capability=CAP.EXTRACT)
+        #         nearest_extractor_dist = self._nearest_entity_distance(agent.position, capability=CAP.EXTRACT)
+        #         diff = prev_nearest_extractor_dist - nearest_extractor_dist
+        #         reward += 0.1 * diff
+        #     else:
+        #         # Reward haulers for moving towards/away from the nearest depot.
+        #         prev_nearest_depot_dist = self._nearest_entity_distance(agent.position - agent.velocity, entity_type=ENTITY_TYPE.DEPOT)
+        #         nearest_depot_dist = self._nearest_entity_distance(agent.position, entity_type=ENTITY_TYPE.DEPOT)
+        #         diff = prev_nearest_depot_dist - nearest_depot_dist
+        #         reward += 0.1 * diff
 
         # if agent.capabilities[CAP.PROSPECT]:
         #     # Reward prospectors for the number of resources discovered.
@@ -960,18 +960,18 @@ class parallel_env(ParallelEnv):
                         break
 
         # Reward every step for deposited resources.
-        total_resources = sum(r.quantity for r in self.possible_resources)
-        deposited_resources = sum(depot.stock for depot in self.possible_depots)
-        extant_resources = total_resources - deposited_resources
-        reward += 10.0 * deposited_resources / float(total_resources)
+        # total_resources = sum(r.quantity for r in self.possible_resources)
+        # deposited_resources = sum(depot.stock for depot in self.possible_depots)
+        # extant_resources = total_resources - deposited_resources
+        # reward += 10.0 * deposited_resources / float(total_resources)
 
         # Reward for global objective at the end of the episode.
-        # if end_truncate or end_done:
-        #     total_resources = sum(r.quantity for r in self.possible_resources)
-        #     deposited_resources = sum(depot.stock for depot in self.possible_depots)
-        #     resource_deposit_percentage = deposited_resources / float(total_resources)
-        #     # reward += 1000.0 * resource_deposit_percentage
-        #     reward += 1000.0 * deposited_resources
+        if end_truncate or end_done:
+            total_resources = sum(r.quantity for r in self.possible_resources)
+            deposited_resources = sum(depot.stock for depot in self.possible_depots)
+            resource_deposit_percentage = deposited_resources / float(total_resources)
+            # reward += 1000.0 * resource_deposit_percentage
+            reward += 1000.0 * deposited_resources
 
         return reward
 
