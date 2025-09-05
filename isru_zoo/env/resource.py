@@ -27,7 +27,7 @@ class TestResource1(Resource):
     ''' We are using this as the test resource during development. '''
     
     reward_deposit = 1.5
-    reward_extraction = 0.5
+    reward_extraction = 0.1
 
 
 class TestResource2(Resource):
