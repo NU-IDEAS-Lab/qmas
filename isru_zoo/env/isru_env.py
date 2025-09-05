@@ -840,8 +840,8 @@ class parallel_env(ParallelEnv):
                                 # Remove from the resource map at the extractor's tile
                                 self.map_resources[r][ex_pos_int[0], ex_pos_int[1]] -= take
                                 # Add to the hauler's cargo
-                                reward_dict[agent]+= 100.0 * take
-                                reward_dict[extractor] += 100.0 * take
+                                reward_dict[agent]+= 1.0 * take
+                                reward_dict[extractor] += 1.0 * take
                                 agent.cargo[r.resource_id] = agent.cargo.get(r.resource_id, 0.0) + take
                                 info_dict["resources/step_picked_up"] += take
                         elif val < 0:
@@ -953,12 +953,12 @@ class parallel_env(ParallelEnv):
                         break
 
         # Reward for global objective at the end of the episode.
-        if end_truncate or end_done:
-            total_resources = sum(r.quantity for r in self.possible_resources)
-            deposited_resources = sum(depot.stock for depot in self.possible_depots)
-            resource_deposit_percentage = deposited_resources / float(total_resources)
-            # reward += 1000.0 * resource_deposit_percentage
-            reward += 1000.0 * deposited_resources
+        # if end_truncate or end_done:
+        #     total_resources = sum(r.quantity for r in self.possible_resources)
+        #     deposited_resources = sum(depot.stock for depot in self.possible_depots)
+        #     resource_deposit_percentage = deposited_resources / float(total_resources)
+        #     # reward += 1000.0 * resource_deposit_percentage
+        #     reward += 1000.0 * deposited_resources
 
         return reward
 
