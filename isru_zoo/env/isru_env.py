@@ -180,8 +180,8 @@ class parallel_env(ParallelEnv):
         ''' Sets the environment to its initial state. '''
 
         if seed != None:
-            random.seed(seed)
-
+            np.random.seed(seed)
+        
         # Reset resources.
         for r in self.possible_resources:
             if self.randomize_num_resources:
@@ -863,7 +863,7 @@ class parallel_env(ParallelEnv):
                                 self.map_resources[r][px, py] += drop
                                 reward_dict[agent] += 100.0 * depot.resource.reward_deposit * drop
                                 info_dict["resources/step_dropped_off"] += drop
-                elif agent.capabilities[CAP.EXTRACT]:
+                if agent.capabilities[CAP.EXTRACT]:
                     # Provide reward for Extractors that are sitting on a resource tile.
                     px, py = agent.position.astype(np.int32)
                     # Skip locations with depots.
