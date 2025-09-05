@@ -959,6 +959,12 @@ class parallel_env(ParallelEnv):
                         reward += r.reward_extraction * agent.steps_stationary
                         break
 
+        # Reward every step for deposited resources.
+        total_resources = sum(r.quantity for r in self.possible_resources)
+        deposited_resources = sum(depot.stock for depot in self.possible_depots)
+        extant_resources = total_resources - deposited_resources
+        reward += 10.0 * deposited_resources / float(total_resources)
+
         # Reward for global objective at the end of the episode.
         # if end_truncate or end_done:
         #     total_resources = sum(r.quantity for r in self.possible_resources)
