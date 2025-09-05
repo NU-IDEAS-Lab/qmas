@@ -1354,7 +1354,8 @@ class parallel_env_map_obs(parallel_env):
             map_agents[pos[0], pos[1]] = 1 + 10.0 * a.role.value
             if a == agent and not force_visible:
                 # Distinguish the agent in the map.
-                map_agents[pos[0], pos[1]] *= -1
+                map_agents[pos[0], pos[1]] += 255.0  # Make the ego agent have a very high value
+            # Store the agent's velocity in a separate map.
             map_velocities[pos[0], pos[1], :] = a.velocity.astype(np.float32)
         
         # Load agent cargo into the map.
