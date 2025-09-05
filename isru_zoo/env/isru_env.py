@@ -909,11 +909,12 @@ class parallel_env(ParallelEnv):
         if end_truncate or end_done:
             resources_held = sum(sum(agent.cargo.values()) for agent in self.agents)
             resources_map = sum(self.map_resources[r].sum() for r in self.possible_resources)
+            resources_map_depots = sum(self.map_resources[r][self.map_depots > 0].sum() for r in self.possible_resources)
 
             # Check that everything looks good at the end of the episode.
             assert self._get_num_resources_discovered() <= total_resources, "More resources discovered than available!"
             assert deposited_resources <= total_resources, "More resources deposited than available!"
-            assert total_resources == deposited_resources + resources_held + resources_map, "Resource accounting error!"
+            assert total_resources == deposited_resources + resources_held + resources_map - resources_map_depots, "Resource accounting error!"
 
             for agent in self.agents:
                 truncated_dict[agent] = True
