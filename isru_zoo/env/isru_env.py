@@ -931,18 +931,19 @@ class parallel_env(ParallelEnv):
         reward = 0.0
 
         if agent.capabilities[CAP.CARRY]:
-            pass
-            # cargo_total = sum(agent.cargo.values())
-            # if cargo_total > 0:
-            #     # Reward haulers for carrying resources.
-            #     reward += 0.05 * cargo_total
-            #     # Reward haulers for distance to the nearest depot.
-            #     nearest_depot_dist = np.min([np.linalg.norm(agent.position - depot.position) for depot in self.possible_depots])
-            #     reward += 1.0 / (1.0 + nearest_depot_dist)
-
-            # # Reward haulers for distance to the nearest extractor.
-            # nearest_extractor_dist = self._nearest_extractor_distance(agent.position)
-            # reward += 1.0 / (1.0 + nearest_extractor_dist)
+            cargo_total = sum(agent.cargo.values())
+            if cargo_total < agent.capabilities[CAP.CARRY_CAPACITY]:
+                # # Reward haulers for moving towards/away from the nearest extractor.
+                prev_nearest_extractor_dist = self._nearest_entity_distance(agent.position - agent.velocity, capability=CAP.EXTRACT)
+                nearest_extractor_dist = self._nearest_entity_distance(agent.position, capability=CAP.EXTRACT)
+                diff = prev_nearest_extractor_dist - nearest_extractor_dist
+                reward += 0.1 * diff
+            else:
+                # Reward haulers for moving towards/away from the nearest depot.
+                prev_nearest_depot_dist = self._nearest_entity_distance(agent.position - agent.velocity, entity_type=ENTITY_TYPE.DEPOT)
+                nearest_depot_dist = self._nearest_entity_distance(agent.position, entity_type=ENTITY_TYPE.DEPOT)
+                diff = prev_nearest_depot_dist - nearest_depot_dist
+                reward += 0.1 * diff
 
         # if agent.capabilities[CAP.PROSPECT]:
         #     # Reward prospectors for the number of resources discovered.
@@ -998,15 +999,24 @@ class parallel_env(ParallelEnv):
         return np.sum([np.sum(self.map_resources[r][mask]) for r in self.possible_resources])
 
 
-    def _nearest_extractor_distance(self, position):
-        """Return the minimum Euclidean distance from the given position to any Extractor.
-        If no Extractor exists, return np.inf.
+    def _nearest_entity_distance(self, position, entity_type=ENTITY_TYPE.AGENT, capability=None):
+        """
+        Return the minimum Euclidean distance from the given position to any agent with specified capability.
+        If no such agent exists, return np.inf.
         """
         pos = np.asarray(position, dtype=np.float32)
         dmin = np.inf
-        for a in self.agents:
-            if a.capabilities[CAP.EXTRACT]:
-                d = np.linalg.norm(pos - a.position)
+
+        if entity_type == ENTITY_TYPE.AGENT:
+            entities = self.agents
+        elif entity_type == ENTITY_TYPE.DEPOT:
+            entities = self.possible_depots
+        else:
+            raise ValueError(f"Unsupported entity type: {entity_type}")
+
+        for e in entities:
+            if capability == None or e.capabilities[capability]:
+                d = np.linalg.norm(pos - e.position)
                 if d < dmin:
                     dmin = d
         return dmin
