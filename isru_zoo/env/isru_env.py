@@ -777,6 +777,7 @@ class parallel_env(ParallelEnv):
             "resources/extant": 0.0,
             "resources/total": 0.0,
             "extractors/num_in_place": 0,
+            "communication/messages_sent": 0,
         }
         info_dict.update({agent: {} for agent in self.possible_agents})
         senders = set()
@@ -817,6 +818,7 @@ class parallel_env(ParallelEnv):
                 # Handle communication.
                 if action["communication"][0] >= 0.5:
                     senders.add(agent)
+                    info_dict["communication/messages_sent"] += 1
 
                 # Corrected resource handling for Hauler agents
                 if agent.capabilities[CAP.CARRY]:
