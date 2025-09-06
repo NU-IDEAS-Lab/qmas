@@ -1088,7 +1088,7 @@ class parallel_env_map_obs(parallel_env):
     @property
     def map_shape(self):
         ''' Returns the map shape. '''
-        return (2 * len(self.possible_resources) + 5, *self.world_dims)  # +5 for obstacles, agents, agent_velocities x and y, depots
+        return (2 * len(self.possible_resources) + 7, *self.world_dims)  # +7 for obstacles, agents, agent_velocities x and y, depots, explored, resources observed
 
 
     @property
@@ -1315,7 +1315,17 @@ class parallel_env_map_obs(parallel_env):
             map_cargo.append(m)
 
         # Build the combined map.
-        layers = [self.map_obstacles, map_agents, map_velocities[:, :, 0], map_velocities[:, :, 1], self.map_depots, *self.map_resources.values(), *map_cargo]
+        layers = [
+            self.map_obstacles,
+            map_agents,
+            map_velocities[:, :, 0],
+            map_velocities[:, :, 1],
+            self.map_depots,
+            *self.map_resources.values(),
+            *map_cargo,
+            agent.mask_observed.astype(np.float32),  # Agent's observed area
+            agent.mask_resources_observed.astype(np.float32),  # Agent's observed resources
+        ]
         map_combined = np.stack(layers, axis=0).astype(np.float32)
 
         # Create the observation.
