@@ -849,8 +849,8 @@ class parallel_env(ParallelEnv):
                                 # Remove from the resource map at the extractor's tile
                                 self.map_resources[r][ex_pos_int[0], ex_pos_int[1]] -= take
                                 # Add to the hauler's cargo
-                                reward_dict[agent]+= 0.1 * take
-                                reward_dict[extractor] += 0.1 * take
+                                reward_dict[agent]+= 100.0 * take
+                                reward_dict[extractor] += 100.0 * take
                                 agent.cargo[r.resource_id] = agent.cargo.get(r.resource_id, 0.0) + take
                                 info_dict["resources/step_picked_up"] += take
                         elif val < 0:
@@ -864,7 +864,7 @@ class parallel_env(ParallelEnv):
                                 depot.stock += drop
                                 agent.cargo[r.resource_id] -= drop
                                 self.map_resources[r][px, py] += drop
-                                reward_dict[agent] += 0.5 * depot.resource.reward_deposit * drop
+                                reward_dict[agent] += 100.0 * depot.resource.reward_deposit * drop
                                 info_dict["resources/step_dropped_off"] += drop
                 if agent.capabilities[CAP.EXTRACT]:
                     # Provide reward for Extractors that are sitting on a resource tile.
@@ -934,20 +934,20 @@ class parallel_env(ParallelEnv):
 
         reward = 0.0
 
-        if agent.capabilities[CAP.CARRY]:
-            cargo_total = sum(agent.cargo.values())
-            if cargo_total < agent.capabilities[CAP.CARRY_CAPACITY]:
-                # Reward haulers for moving towards/away from the nearest extractor.
-                prev_nearest_extractor_dist = self._nearest_entity_distance(agent.position - agent.velocity, capability=CAP.EXTRACT)
-                nearest_extractor_dist = self._nearest_entity_distance(agent.position, capability=CAP.EXTRACT)
-                diff = prev_nearest_extractor_dist - nearest_extractor_dist
-                reward += 0.1 * diff
-            else:
-                # Reward haulers for moving towards/away from the nearest depot.
-                prev_nearest_depot_dist = self._nearest_entity_distance(agent.position - agent.velocity, entity_type=ENTITY_TYPE.DEPOT)
-                nearest_depot_dist = self._nearest_entity_distance(agent.position, entity_type=ENTITY_TYPE.DEPOT)
-                diff = prev_nearest_depot_dist - nearest_depot_dist
-                reward += 0.1 * diff
+        # if agent.capabilities[CAP.CARRY]:
+        #     cargo_total = sum(agent.cargo.values())
+        #     if cargo_total < agent.capabilities[CAP.CARRY_CAPACITY]:
+        #         # Reward haulers for moving towards/away from the nearest extractor.
+        #         prev_nearest_extractor_dist = self._nearest_entity_distance(agent.position - agent.velocity, capability=CAP.EXTRACT)
+        #         nearest_extractor_dist = self._nearest_entity_distance(agent.position, capability=CAP.EXTRACT)
+        #         diff = prev_nearest_extractor_dist - nearest_extractor_dist
+        #         reward += 0.1 * diff
+        #     else:
+        #         # Reward haulers for moving towards/away from the nearest depot.
+        #         prev_nearest_depot_dist = self._nearest_entity_distance(agent.position - agent.velocity, entity_type=ENTITY_TYPE.DEPOT)
+        #         nearest_depot_dist = self._nearest_entity_distance(agent.position, entity_type=ENTITY_TYPE.DEPOT)
+        #         diff = prev_nearest_depot_dist - nearest_depot_dist
+        #         reward += 0.1 * diff
 
         if agent.capabilities[CAP.PROSPECT]:
             # Reward prospectors for the fraction of the area explored.
@@ -957,18 +957,18 @@ class parallel_env(ParallelEnv):
         
         if agent.capabilities[CAP.EXTRACT]:
             # Reward extractors for being on a resource tile.
-            # px, py = agent.position.astype(np.int32)
-            # if self.map_depots[px, py] == 0 :
-            #     for r in self.possible_resources:
-            #         if self.map_resources[r][px, py] > 0:
-            #             reward += r.reward_extraction * agent.steps_stationary
-            #             break
+            px, py = agent.position.astype(np.int32)
+            if self.map_depots[px, py] == 0 :
+                for r in self.possible_resources:
+                    if self.map_resources[r][px, py] > 0:
+                        reward += r.reward_extraction * agent.steps_stationary
+                        break
 
             # Reward for inverse distance to nearest resource.
-            resource_pos = self._get_nearest_resource(agent.position)
-            if resource_pos is not None:
-                dist = np.linalg.norm(agent.position - resource_pos)
-                reward += 1.0 / (1.0 + dist)
+            # resource_pos = self._get_nearest_resource(agent.position)
+            # if resource_pos is not None:
+            #     dist = np.linalg.norm(agent.position - resource_pos)
+            #     reward += 1.0 / (1.0 + dist)
 
         # Reward every step for deposited resources.
         # total_resources = sum(r.quantity for r in self.possible_resources)
@@ -977,18 +977,18 @@ class parallel_env(ParallelEnv):
         # reward += 10.0 * deposited_resources / float(total_resources)
 
         # INTRINSIC REWARD: Provide an intrinsic reward at every step for all agents.
-        total_resources = sum(r.quantity for r in self.possible_resources)
-        deposited_resources = sum(depot.stock for depot in self.possible_depots)
-        held_resources = sum(sum(agent.cargo.values()) for agent in self.agents if agent.capabilities[CAP.CARRY])
-        reward += 0.05 * deposited_resources / float(total_resources) + 0.01 * held_resources / float(total_resources)
+        # total_resources = sum(r.quantity for r in self.possible_resources)
+        # deposited_resources = sum(depot.stock for depot in self.possible_depots)
+        # held_resources = sum(sum(agent.cargo.values()) for agent in self.agents if agent.capabilities[CAP.CARRY])
+        # reward += 0.05 * deposited_resources / float(total_resources) + 0.01 * held_resources / float(total_resources)
 
         # Reward for global objective at the end of the episode.
         if end_truncate or end_done:
-            total_resources = sum(r.quantity for r in self.possible_resources)
+            # total_resources = sum(r.quantity for r in self.possible_resources)
             deposited_resources = sum(depot.stock for depot in self.possible_depots)
-            resource_deposit_percentage = deposited_resources / float(total_resources)
+            # resource_deposit_percentage = deposited_resources / float(total_resources)
             # reward += 1000.0 * resource_deposit_percentage
-            reward += 10.0 * deposited_resources
+            reward += 1000.0 * deposited_resources
 
         return reward
 
