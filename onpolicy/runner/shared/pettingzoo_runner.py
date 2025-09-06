@@ -55,6 +55,7 @@ class PettingzooRunner(Runner):
                 self.trainer.policy.lr_decay(episode, episodes)
             
             # Reset the environment and perform warmup.
+            self.trainer.prep_rollout()
             self.warmup()
 
             # Set the delta steps to 1.
@@ -78,6 +79,9 @@ class PettingzooRunner(Runner):
 
             # compute return and update network
             self.compute()
+
+            # Train
+            self.trainer.prep_training()
             train_infos = self.train()
             
             # post process
@@ -120,7 +124,10 @@ class PettingzooRunner(Runner):
             actions_shape = (self.n_rollout_threads, self.num_agents, act_shape)
         
         # Get the shape of action log probabilities from the policy.
-        action_log_prob_shape = (self.n_rollout_threads, self.num_agents, self.policy.actor.act.log_prob_dim)
+        if hasattr(self.policy, "actor") and hasattr(self.policy.actor, "act"):
+            action_log_prob_shape = (self.n_rollout_threads, self.num_agents, self.policy.actor.act.log_prob_dim)
+        else:
+            action_log_prob_shape = (self.n_rollout_threads, self.num_agents, 1)
 
         # Initialize buffer.
         self.buffer.insert(
@@ -145,8 +152,6 @@ class PettingzooRunner(Runner):
 
     @torch.no_grad()
     def collect(self, step):
-        self.trainer.prep_rollout()
-
         share_obs, obs, rnn_states, rnn_states_critic, masks, available_actions = self.buffer.compatibility_get_policy_input(step)
 
         values, action, action_log_prob, rnn_states, rnn_states_critic = self.trainer.policy.get_actions(
@@ -219,7 +224,9 @@ class PettingzooRunner(Runner):
 
     def compute(self):
         """Calculate returns for the collected data."""
-        self.trainer.prep_rollout()
+        
+        if not hasattr(self.trainer.policy, "get_values"):
+            return
 
         share_obs, obs, rnn_states, rnn_states_critic, masks, available_actions = self.buffer.compatibility_get_policy_input(-1)
 
