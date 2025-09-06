@@ -82,6 +82,70 @@ class AddCoords(nn.Module):
         return ret
 
 
+class EncoderLayer(nn.Module):
+    def __init__(self, obs_shape, hidden_size, use_orthogonal, use_ReLU, kernel_size=3, stride=1):
+        super(EncoderLayer, self).__init__()
+
+        active_func = [nn.Tanh(), nn.ReLU()][use_ReLU]
+        init_method = [nn.init.xavier_uniform_, nn.init.orthogonal_][use_orthogonal]
+        gain = nn.init.calculate_gain(['tanh', 'relu'][use_ReLU])
+
+        def init_(m):
+            return init(m, init_method, lambda x: nn.init.constant_(x, 0), gain=gain)
+
+        input_channel = obs_shape[0]
+
+        self.encoder = smp.encoders.get_encoder(
+            "resnet34",
+            in_channels=input_channel,
+            depth=5,
+            weights=None,
+        )
+
+        # For each encoder output, create a 1x1 conv to hidden_size and flatten
+        self.skip_connections = nn.ModuleList()
+        self.flattened_sizes = []
+        for i, in_channels in enumerate(self.encoder.out_channels):
+            conv = init_(nn.Conv2d(in_channels=in_channels,
+                                   out_channels=hidden_size,
+                                   kernel_size=1,
+                                   stride=1))
+            self.skip_connections.append(
+                nn.Sequential(
+                    conv,
+                    active_func,
+                )
+            )
+            # We'll infer the flattened size at runtime
+
+        self.post = None  # Will be initialized after first forward
+
+    def forward(self, x):
+        # Get encoder outputs (list of feature maps)
+        features = self.encoder(x)
+        # Project and flatten each feature map
+        projected = []
+        flattened_sizes = []
+        for i, feat in enumerate(features):
+            out = self.skip_connections[i](feat)
+            batch_size = out.shape[0]
+            flat = out.view(batch_size, -1)
+            projected.append(flat)
+            flattened_sizes.append(flat.shape[1])
+        concat = torch.cat(projected, dim=1)
+        # Lazy init post-processing head with correct input size
+        if self.post is None:
+            input_size = sum(flattened_sizes)
+            self.post = nn.Sequential(
+                nn.Linear(input_size, self.skip_connections[0][0].out_channels),
+                [nn.Tanh(), nn.ReLU()][isinstance(self.skip_connections[0][1], nn.ReLU)],
+                nn.Linear(self.skip_connections[0][0].out_channels, self.skip_connections[0][0].out_channels),
+                [nn.Tanh(), nn.ReLU()][isinstance(self.skip_connections[0][1], nn.ReLU)],
+            ).to(concat.device)
+        x = self.post(concat)
+        return x
+
+
 class UNetLayer(nn.Module):
     def __init__(self, obs_shape, hidden_size, use_orthogonal, use_ReLU, kernel_size=3, stride=1):
         super(UNetLayer, self).__init__()
@@ -107,7 +171,6 @@ class UNetLayer(nn.Module):
                 in_channels=input_channel,                  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
                 classes=1,                      # model output channels (number of classes in your dataset)
                 activation="sigmoid",          # activation function
-
             ),
             # active_func,
             Flatten(),
