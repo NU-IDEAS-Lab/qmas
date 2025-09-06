@@ -83,7 +83,7 @@ class AddCoords(nn.Module):
 
 
 class EncoderLayer(nn.Module):
-    def __init__(self, obs_shape, hidden_size, use_orthogonal, use_ReLU, kernel_size=3, stride=1):
+    def __init__(self, obs_shape, hidden_size, use_orthogonal, use_ReLU):
         super(EncoderLayer, self).__init__()
 
         active_func = [nn.Tanh(), nn.ReLU()][use_ReLU]
@@ -102,47 +102,35 @@ class EncoderLayer(nn.Module):
             weights=None,
         )
 
-        # For each encoder output, create a 1x1 conv to hidden_size and flatten
-        self.skip_connections = nn.ModuleList()
-        self.flattened_sizes = []
-        for i, in_channels in enumerate(self.encoder.out_channels):
-            conv = init_(nn.Conv2d(in_channels=in_channels,
-                                   out_channels=hidden_size,
-                                   kernel_size=1,
-                                   stride=1))
-            self.skip_connections.append(
-                nn.Sequential(
-                    conv,
-                    active_func,
-                )
-            )
-            # We'll infer the flattened size at runtime
+        self.hidden_size = hidden_size
+        self.init_ = init_
+        self.active_func = active_func
 
-        self.post = None  # Will be initialized after first forward
+        self.post = nn.Sequential(
+            init_(nn.Linear(len(self.encoder.out_channels) * hidden_size, hidden_size)),
+            active_func
+        )
 
     def forward(self, x):
         # Get encoder outputs (list of feature maps)
         features = self.encoder(x)
-        # Project and flatten each feature map
-        projected = []
-        flattened_sizes = []
-        for i, feat in enumerate(features):
-            out = self.skip_connections[i](feat)
-            batch_size = out.shape[0]
-            flat = out.view(batch_size, -1)
-            projected.append(flat)
-            flattened_sizes.append(flat.shape[1])
-        concat = torch.cat(projected, dim=1)
-        # Lazy init post-processing head with correct input size
-        if self.post is None:
-            input_size = sum(flattened_sizes)
-            self.post = nn.Sequential(
-                nn.Linear(input_size, self.skip_connections[0][0].out_channels),
-                [nn.Tanh(), nn.ReLU()][isinstance(self.skip_connections[0][1], nn.ReLU)],
-                nn.Linear(self.skip_connections[0][0].out_channels, self.skip_connections[0][0].out_channels),
-                [nn.Tanh(), nn.ReLU()][isinstance(self.skip_connections[0][1], nn.ReLU)],
-            ).to(concat.device)
-        x = self.post(concat)
+        skip_features = []
+        # Dynamically create projection layers for each feature map shape
+        for i, feature in enumerate(features):
+            batch_size = feature.size(0)
+            out_channels = feature.size(1)
+            h = feature.size(2)
+            w = feature.size(3)
+            flatten_size = out_channels * h * w
+            # Create projection layer on the fly if not already created
+            proj = nn.Sequential(
+                Flatten(),
+                self.init_(nn.Linear(flatten_size, self.hidden_size)),
+                self.active_func
+            ).to(feature.device)
+            skip_features.append(proj(feature))
+        x = torch.cat(skip_features, dim=1)
+        x = self.post(x)
         return x
 
 
@@ -198,6 +186,7 @@ class CNNBase(nn.Module):
         # self.cnn = CNNLayer(obs_shape, self.hidden_size, self._use_orthogonal, self._use_ReLU)
         # self.cnn = CoordConv(obs_shape, self.hidden_size, self._use_orthogonal, self._use_ReLU)
         self.cnn = UNetLayer(obs_shape, self.hidden_size, self._use_orthogonal, self._use_ReLU)
+        # self.cnn = EncoderLayer(obs_shape, self.hidden_size, self._use_orthogonal, self._use_ReLU)
 
     def forward(self, x):
         x = self.cnn(x)
