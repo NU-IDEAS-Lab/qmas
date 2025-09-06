@@ -4,9 +4,10 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-    "--experiment_name", "isru-hybridObs-e200-r20rand-h5-512x4",
+    "--experiment_name", "isru-UN-stateHybrid-e1h1p0-e200-r20curr-h5-5x5-512x4",
     "--project_name", "qmas",
-    "--env_class", "isru_zoo.isru_v0.parallel_env",
+    # "--env_class", "isru_zoo.isru_v0.parallel_env",
+    "--env_class", "isru_zoo.isru_v0.parallel_env_map_obs",
     "--user_name", "ideas-mas",
 
 	"--num_extractors", "1",
@@ -18,7 +19,8 @@ args = [
     "--world_size", "5",
     "--num_obstacles", "0",
     "--num_resources", "20",
-    "--randomize_num_resources",
+    # "--randomize_num_resources",
+    "--curriculum_num_resources",
 
     "--observation_radius", "999999",
     # "--observation_mask",
@@ -38,16 +40,16 @@ args = [
     "--share_policy",
     "--no-share_reward",
     "--use_ReLU",
-    "--hidden_size", "512",
-    "--layer_N", "4",
+    "--hidden_size", "128",
+    "--layer_N", "2",
 
     "--diffusion_model_type", "dit1d",
 
     "--seed", "0",
 
-    "--n_rollout_threads", "300",
+    "--n_rollout_threads", "25",
     "--cuda",
-    "--cuda_idx", "5",
+    "--cuda_idx", "3",
 
     "--save_interval", "1000",
     "--results_dir", "/data/group/mas/qmas/results",

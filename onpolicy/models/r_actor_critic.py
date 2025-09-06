@@ -305,6 +305,8 @@ class R_Critic(nn.Module):
         self._use_mlp = True
         self._use_attention = False
 
+        print(f"R_Critic: Use CNN: {self._use_cnn}, Use MLP: {self._use_mlp}")
+
         if self._use_gnn:
             raise NotImplementedError("GNN not implemented for R_Critic")
         else:
