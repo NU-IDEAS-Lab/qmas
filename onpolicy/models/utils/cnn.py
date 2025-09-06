@@ -2,6 +2,7 @@ import torch.nn as nn
 from .util import init
 from .coordconv import CoordConv
 import segmentation_models_pytorch as smp
+from .attention import SelfAttention
 
 """CNN Modules and utils."""
 
@@ -82,6 +83,58 @@ class AddCoords(nn.Module):
         return ret
 
 
+class EncoderLayer(nn.Module):
+    def __init__(self, obs_shape, hidden_size, use_orthogonal, use_ReLU):
+        super(EncoderLayer, self).__init__()
+
+        active_func = [nn.Tanh(), nn.ReLU()][use_ReLU]
+        init_method = [nn.init.xavier_uniform_, nn.init.orthogonal_][use_orthogonal]
+        gain = nn.init.calculate_gain(['tanh', 'relu'][use_ReLU])
+
+        def init_(m):
+            return init(m, init_method, lambda x: nn.init.constant_(x, 0), gain=gain)
+
+        input_channel = obs_shape[0]
+
+        self.encoder = smp.encoders.get_encoder(
+            "resnet34",
+            in_channels=input_channel,
+            depth=5,
+            weights=None,
+        )
+
+        self.hidden_size = hidden_size
+        self.init_ = init_
+        self.active_func = active_func
+
+        self.post = nn.Sequential(
+            init_(nn.Linear(len(self.encoder.out_channels) * hidden_size, hidden_size)),
+            active_func
+        )
+
+    def forward(self, x):
+        # Get encoder outputs (list of feature maps)
+        features = self.encoder(x)
+        skip_features = []
+        # Dynamically create projection layers for each feature map shape
+        for i, feature in enumerate(features):
+            batch_size = feature.size(0)
+            out_channels = feature.size(1)
+            h = feature.size(2)
+            w = feature.size(3)
+            flatten_size = out_channels * h * w
+            # Create projection layer on the fly if not already created
+            proj = nn.Sequential(
+                Flatten(),
+                self.init_(nn.Linear(flatten_size, self.hidden_size)),
+                self.active_func
+            ).to(feature.device)
+            skip_features.append(proj(feature))
+        x = torch.cat(skip_features, dim=1)
+        x = self.post(x)
+        return x
+
+
 class UNetLayer(nn.Module):
     def __init__(self, obs_shape, hidden_size, use_orthogonal, use_ReLU, kernel_size=3, stride=1):
         super(UNetLayer, self).__init__()
@@ -101,14 +154,28 @@ class UNetLayer(nn.Module):
         input_channel = input_channel + 2
 
         self.sequence = nn.Sequential(
+            # smp.DeepLabV3(
+            #     encoder_name="resnet34",        # choose encoder, e.g. mobilenet_v2 or efficientnet-b7
+            #     encoder_weights="imagenet",     # use `imagenet` pre-trained weights for encoder
+            #     in_channels=input_channel,                  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
+            #     classes=1,                      # model output channels (number of classes in your dataset)
+            #     activation="sigmoid",          # activation function
+            # ),
             smp.Unet(
                 encoder_name="resnet34",        # choose encoder, e.g. mobilenet_v2 or efficientnet-b7
                 encoder_weights="imagenet",     # use `imagenet` pre-trained weights for encoder initialization
                 in_channels=input_channel,                  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
                 classes=1,                      # model output channels (number of classes in your dataset)
+                # decoder_interpolation="bilinear",
                 activation="sigmoid",          # activation function
-
             ),
+            # smp.Segformer(
+            #     encoder_name="mit_b0",        # choose encoder, e.g. mobilenet_v2 or efficientnet-b7
+            #     encoder_weights="imagenet",     # use `imagenet` pre-trained weights for encoder initialization
+            #     in_channels=input_channel,                  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
+            #     classes=1,                      # model output channels (number of classes in your dataset)
+            #     activation="sigmoid",          # activation function
+            # ),
             # active_func,
             Flatten(),
             init_(nn.Linear(input_width * input_height, hidden_size)),
@@ -135,6 +202,7 @@ class CNNBase(nn.Module):
         # self.cnn = CNNLayer(obs_shape, self.hidden_size, self._use_orthogonal, self._use_ReLU)
         # self.cnn = CoordConv(obs_shape, self.hidden_size, self._use_orthogonal, self._use_ReLU)
         self.cnn = UNetLayer(obs_shape, self.hidden_size, self._use_orthogonal, self._use_ReLU)
+        # self.cnn = EncoderLayer(obs_shape, self.hidden_size, self._use_orthogonal, self._use_ReLU)
 
     def forward(self, x):
         x = self.cnn(x)
