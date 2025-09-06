@@ -2,6 +2,7 @@ import torch.nn as nn
 from .util import init
 from .coordconv import CoordConv
 import segmentation_models_pytorch as smp
+from .attention import SelfAttention
 
 """CNN Modules and utils."""
 
@@ -153,13 +154,28 @@ class UNetLayer(nn.Module):
         input_channel = input_channel + 2
 
         self.sequence = nn.Sequential(
+            # smp.DeepLabV3(
+            #     encoder_name="resnet34",        # choose encoder, e.g. mobilenet_v2 or efficientnet-b7
+            #     encoder_weights="imagenet",     # use `imagenet` pre-trained weights for encoder
+            #     in_channels=input_channel,                  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
+            #     classes=1,                      # model output channels (number of classes in your dataset)
+            #     activation="sigmoid",          # activation function
+            # ),
             smp.Unet(
                 encoder_name="resnet34",        # choose encoder, e.g. mobilenet_v2 or efficientnet-b7
                 encoder_weights="imagenet",     # use `imagenet` pre-trained weights for encoder initialization
                 in_channels=input_channel,                  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
                 classes=1,                      # model output channels (number of classes in your dataset)
+                # decoder_interpolation="bilinear",
                 activation="sigmoid",          # activation function
             ),
+            # smp.Segformer(
+            #     encoder_name="mit_b0",        # choose encoder, e.g. mobilenet_v2 or efficientnet-b7
+            #     encoder_weights="imagenet",     # use `imagenet` pre-trained weights for encoder initialization
+            #     in_channels=input_channel,                  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
+            #     classes=1,                      # model output channels (number of classes in your dataset)
+            #     activation="sigmoid",          # activation function
+            # ),
             # active_func,
             Flatten(),
             init_(nn.Linear(input_width * input_height, hidden_size)),
