@@ -65,7 +65,7 @@ class QmasPolicy(R_MAPPOPolicy):
 
         predictions = []
         for predictor in self.predictors:
-            pred = predictor.get_prediction(trajectory, visibility_mask, prediction_prev)
+            pred = predictor.get_prediction(trajectory.clone(), visibility_mask.clone(), prediction_prev)
             predictions.append(pred.unsqueeze(0))
         predictions = torch.cat(predictions, dim=0)  # Shape: (num_predictors, T, D_out)
         prediction = predictions.mean(dim=0)
