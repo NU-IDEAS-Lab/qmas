@@ -116,7 +116,7 @@ class parallel_env(ParallelEnv):
 
         # Set up entities.
         self.possible_agents = \
-            [ProspectorExtractor(
+            [Extractor(
                 world_dims=self.world_dims,
                 position=self.get_random_position(),
                 observation_radius=self.default_observation_radius
@@ -126,12 +126,12 @@ class parallel_env(ParallelEnv):
                 position=self.get_random_position(),
                 carry_capacity=self.default_hauler_capacity,
                 observation_radius=self.default_observation_radius
-            ) for _ in range(num_haulers)] #+ \
-            # [Prospector(
-            #     world_dims=self.world_dims,
-            #     position=self.get_random_position(),
-            #     observation_radius=self.default_observation_radius
-            # ) for _ in range(num_prospectors)]
+            ) for _ in range(num_haulers)] + \
+            [Prospector(
+                world_dims=self.world_dims,
+                position=self.get_random_position(),
+                observation_radius=self.default_observation_radius
+            ) for _ in range(num_prospectors)]
 
         # Set up the possible resources.
         self.possible_resources = []
