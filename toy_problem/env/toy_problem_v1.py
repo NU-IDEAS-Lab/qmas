@@ -34,6 +34,8 @@ def add_args(parser):
                              "If false, the state function will return a single copy of the state that is shared among all agents.")
     parser.add_argument("--observation_probability", type=float, default=1.0,
                         help="The probability that an agent will observe another entity.")
+    parser.add_argument("--disturbance_drift_magnitude", type=float, default=0.0,
+                        help="The magnitude of the random disturbance drift applied to adversaries.")
 
 
 def validate_args(parsed_args):
@@ -65,10 +67,11 @@ class parallel_env(ParallelEnv):
                  num_adversaries: int = 1,
                  num_dimensions: int = 2,
                  max_cycles: int = -1,
-                 world_size: float = 50.0,
+                 world_size: float = 60.0,
                  random_start_positions: bool = False,
                  state_per_agent: bool = False,
                  observation_probability: float = 1.0,
+                 disturbance_drift_magnitude: float = 0.0,
                 ):
         """
         Initialize the environment.
@@ -82,6 +85,7 @@ class parallel_env(ParallelEnv):
         self.random_start_positions = random_start_positions
         self.state_per_agent = state_per_agent
         self.observation_probability = observation_probability
+        self.disturbance_drift_magnitude = disturbance_drift_magnitude
 
         # Set up entities.
         self.possible_agents = [
@@ -413,11 +417,11 @@ class parallel_env(ParallelEnv):
         """
         velocity = adversary.velocity.copy()
 
-        if random.random() < 0.3:
+        if np.random.random() < 0.6:
             # Randomly change velocity to create a new pattern
-            velocity += np.random.normal(0, 0.3, size=self.num_dimensions)
+            velocity += np.random.normal(0, 0.4, size=self.num_dimensions)
                 
-        # # Add some random noise to make the trajectory more natural
+        # Add some random noise to make the trajectory more natural
         noise_magnitude = 0.05 * min(1.0, self.step_count / 50.0)  # Gradually increase noise
         velocity += np.random.normal(0.0, noise_magnitude, size=self.num_dimensions)
 
@@ -471,16 +475,22 @@ class parallel_env(ParallelEnv):
         for adversary in self.adversaries:
             adversary.velocity = self._get_adversary_control(adversary)
             adversary.position += adversary.velocity
+
+            # Apply drift disturbance.
+            adversary.position += np.array([self.disturbance_drift_magnitude, 0.0])  # Drift in x-direction
+
             self.state_history[adversary].append(adversary.position.copy())
 
         # Assign per-agent reward based on distance to assigned adversary (by index).
+        tracking_error_sum = 0.0
         for i, agent in enumerate(self.agents):
             if i < len(self.adversaries):
                 assigned_adv = self.adversaries[i]
                 distance = np.linalg.norm(agent.position - assigned_adv.position)
+                tracking_error_sum += distance
                 reward_dict[agent] = -distance
             else:
-                reward_dict[agent] = 0.0  # No assigned adversary
+                reward_dict[agent] = 0.0  # No assigned adversary        
 
         # Perform observations.
         for agent in self.possible_agents:
@@ -488,13 +498,15 @@ class parallel_env(ParallelEnv):
             obs_dict[agent] = agent_observation
             info_dict[agent]["visibility_mask"] = obs_mask
 
+        # Record information.
+        info_dict["tracking_error_mean"] = tracking_error_sum / len(self.agents) if len(self.agents) > 0 else 0.0
+
         # Check truncation conditions.
         if lastStep or (self.max_cycles >= 0 and self.step_count >= self.max_cycles):
             for agent in self.agents:
                 info_dict[agent]["ready"] = True
                 truncated_dict[agent] = True
             self.agents = []
-        
         done_dict = {agent: self.dones[agent] for agent in self.possible_agents}
 
         # Set available actions.
