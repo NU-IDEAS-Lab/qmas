@@ -1224,8 +1224,10 @@ class parallel_env_map_obs(parallel_env):
 
     @property
     @functools.cache
-    def state_space_DISABLED(self):
+    def state_space(self):
         ''' Returns the state space of the environment. '''
+
+        return super(parallel_env_map_obs, self).observation_space(self.possible_agents[0])
 
         agent = self.possible_agents[0]
 
@@ -1314,7 +1316,6 @@ class parallel_env_map_obs(parallel_env):
             ),
         })
 
-        # return super(parallel_env_map_obs, self).observation_space(self.possible_agents[0])
         # return spaces.Dict({
         #     "resources_deposited": spaces.Box(
         #         low=0,
@@ -1331,11 +1332,11 @@ class parallel_env_map_obs(parallel_env):
         # })
     
 
-    def _state_DISABLED(self):
+    def _state(self):
         ''' Returns the global state and mask of the environment.'''
 
 
-        # return super(parallel_env_map_obs, self)._observe(self.possible_agents[0], force_visible=True)[0]
+        return super(parallel_env_map_obs, self)._observe(self.possible_agents[0], force_visible=True)[0]
 
         agent = self.possible_agents[0]
         force_visible = True
