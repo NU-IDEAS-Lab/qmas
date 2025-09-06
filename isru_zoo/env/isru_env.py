@@ -815,8 +815,8 @@ class parallel_env(ParallelEnv):
                     agent.steps_stationary = 1
 
                 # Handle communication.
-                # if action["communication"][0] >= 0.5:
-                #     senders.add(agent)
+                if action["communication"][0] >= 0.5:
+                    senders.add(agent)
 
                 # Corrected resource handling for Hauler agents
                 if agent.capabilities[CAP.CARRY]:
