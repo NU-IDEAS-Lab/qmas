@@ -1503,8 +1503,8 @@ class parallel_env_map_obs(parallel_env):
             map_mask[sender_visible] = True
 
             # Update the agent's known space masks.
-            agent.mask_observed |= sender_obs_mask
-            agent.mask_resources_observed |= sender_obs_mask[5]
+            agent.mask_observed |= sender.mask_observed
+            agent.mask_resources_observed |= sender.mask_resources_observed
         
         # Apply local observations (overwrite any communicated data).
         map[local_obs_mask == True] = local_obs[local_obs_mask == True]
