@@ -398,24 +398,94 @@ class parallel_env(ParallelEnv):
                 None or np.ndarray: None if render_mode is "human", otherwise an RGB array.
         '''
 
+        from matplotlib.colors import ListedColormap
+        import matplotlib
+
         # Plot state as a grid using matplotlib.
         plt.figure(figsize=figsize)
 
+        # LAYERS IN THE MAP:
+        # self.map_obstacles,
+        # map_agents,
+        # map_velocities[:, :, 0],
+        # map_velocities[:, :, 1],
+        # self.map_depots,
+        # *self.map_resources.values(),
+        # *map_cargo,
+        # agent.mask_observed.astype(np.float32),  # Agent's observed area
+        # agent.mask_resources_observed.astype(np.float32),  # Agent's observed resources
+
         # Plot the map layers.
         # map_layers = state["map"]
-        map_layers = state
-        num_layers = map_layers.shape[0]
-        for i in range(num_layers):
-            plt.subplot(2, num_layers, i + 1)
-            plt.imshow(map_layers[i, :, :], cmap="gray", origin="lower")
-            plt.title(f"Layer {i}")
-            plt.axis("off")
-        
-        # Now show the human-readable version of the state below the others.
-        plt.subplot(2, num_layers, 2)
+        num_layers = state.shape[0]
 
-        # Plot the observed area.
-        plt.imshow(state[6], cmap="gray")
+        # Create a gridspec with 2 rows: top row for layers, bottom row for human-readable
+        import matplotlib.gridspec as gridspec
+        fig = plt.gcf()
+        fig.clf()
+        gs = gridspec.GridSpec(2, num_layers, height_ratios=[1, 2])
+
+        # Plot each layer in the top row
+        for i in range(num_layers):
+            ax = fig.add_subplot(gs[0, i])
+            ax.imshow(state[i, :, :], cmap="gray")
+            ax.set_title(f"Layer {i}", fontsize=8)
+            ax.axis("off")
+
+        # Plot the human-readable version spanning the entire bottom row
+        cmap_visibility = ListedColormap(['gray', 'white'])
+        ax_hr = fig.add_subplot(gs[1, :])
+        ax_hr.imshow(state[7], cmap=cmap_visibility)
+        ax_hr.set_title("Human-Readable State")
+        ax_hr.axis("on")
+
+        # Plot obstacles.
+        positions = np.argwhere(state[0] > 0)
+        ax_hr.scatter(positions[:, 1], positions[:, 0], label="Obstacle", marker="X", color="black", s=100)
+
+        # Plot visible depots.
+        positions = np.argwhere(state[4] > 0)
+        ax_hr.scatter(positions[:, 1], positions[:, 0], label="Depot", marker="$\u2302$", color="cyan", s=100)
+
+        # Plot visible resources.
+        resource_start_layer = 5
+        for i in range(resource_start_layer, resource_start_layer + len(self.possible_resources)):
+            positions = np.argwhere(state[i] > 0)
+            if positions.size > 0:
+                ax_hr.scatter(positions[:, 1], positions[:, 0], marker="o", label=f"Resource {i - resource_start_layer}", alpha=0.5)
+        
+        # Plot visible agents.
+        agent_markers = {
+            AGENT_ROLE.EXTRACTOR: "$\u26CF$",
+            AGENT_ROLE.HAULER: "$🚘$",
+            AGENT_ROLE.PROSPECTOR: "$\u1F50D$",
+            AGENT_ROLE.PROSPECTOREXTRACTOR: "$\u2692$",
+        }
+        for role in AGENT_ROLE:
+            positions = np.argwhere(state[1] == 1 + 10 * role.value)
+            ownpos = np.argwhere(state[1] == 256 + 10 * role.value)
+            if ownpos.size > 0:
+                positions = np.vstack([positions, ownpos])
+            if positions.size > 0:
+                ax_hr.scatter(positions[:, 1], positions[:, 0], label=f"{role.name.title()}", marker=agent_markers[role], s=100, alpha=0.5, edgecolor="cyan")
+
+        # Plot a partially-completed ring around the haulers to indicate their cargo.
+        for i in range(resource_start_layer, resource_start_layer + len(self.possible_resources)):
+            cargo_layer = i + len(self.possible_resources)
+            positions = np.argwhere(state[cargo_layer] > 0)
+            for pos in positions:
+                cargo_percentage = state[cargo_layer][pos[0], pos[1]]
+                if cargo_percentage > 0:
+                    # Draw an arc to indicate the amount of cargo.
+                    arc = matplotlib.patches.Arc(
+                        (pos[1], pos[0]), 1.5, 1.5,
+                        angle=0,
+                        theta1=0,
+                        theta2=cargo_percentage * 360,
+                        color="red",
+                        lw=2
+                    )
+                    ax_hr.add_patch(arc)
 
         # Display the total reward for this step. Position this text below the subplots. Do not use suptitle.
         reward = sum(self.last_rewards.values())
