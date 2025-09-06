@@ -1407,6 +1407,10 @@ class parallel_env_map_obs(parallel_env):
 
         # Depots are always visible.
         obs_mask[4] = True
+
+        # The masks themselves are always visible.
+        obs_mask[-2] = True
+        obs_mask[-1] = True
         
         return obs, obs_mask
 
