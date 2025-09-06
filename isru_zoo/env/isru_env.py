@@ -117,15 +117,18 @@ class parallel_env(ParallelEnv):
         # Set up entities.
         self.possible_agents = \
             [ProspectorExtractor(
+                world_dims=self.world_dims,
                 position=self.get_random_position(),
                 observation_radius=self.default_observation_radius
             ) for _ in range(num_extractors)] + \
             [Hauler(
+                world_dims=self.world_dims,
                 position=self.get_random_position(),
                 carry_capacity=self.default_hauler_capacity,
                 observation_radius=self.default_observation_radius
             ) for _ in range(num_haulers)] #+ \
             # [Prospector(
+            #     world_dims=self.world_dims,
             #     position=self.get_random_position(),
             #     observation_radius=self.default_observation_radius
             # ) for _ in range(num_prospectors)]
@@ -204,7 +207,7 @@ class parallel_env(ParallelEnv):
             start_position = positions_available[idx]
             agent.reset(
                 reset_start_position=True,
-                position=start_position
+                position=start_position,
             )
             if agent.capabilities[CAP.CARRY]:
                 agent.cargo = {r.resource_id: 0.0 for r in self.possible_resources}
@@ -265,7 +268,6 @@ class parallel_env(ParallelEnv):
 
         # Reset resources.
         self.map_resources = {}
-        self.mask_map_resources_discovered = np.zeros(self.world_dims, dtype=bool)
         for r in self.possible_resources:
             self.map_resources[r] = np.zeros(self.world_dims, dtype=np.float32)
             for _ in range(r.quantity):
@@ -627,27 +629,7 @@ class parallel_env(ParallelEnv):
     def _observe(self, agent, force_visible=False):
         ''' Returns a populated state/observation space.'''
 
-        # Load agent data into a map.
-        # map_agents = np.zeros(self.world_dims, dtype=np.int32)
-        # for i, a in enumerate(self.agents):
-        #     pos = a.position.astype(np.int32)
-        #     map_agents[pos[0], pos[1]] = 1 + a.role.value
-        #     if a == agent and not force_visible:
-        #         # Distinguish the agent in the map.
-        #         map_agents[pos[0], pos[1]] *= -1
-        
-        # Load agent cargo into the map.
-        # map_cargo = []
-        # for r in self.possible_resources:
-        #     m = np.zeros(self.world_dims, dtype=np.float32)
-        #     for a in self.agents:
-        #         if a.capabilities[CAP.CARRY] and r.resource_id in a.cargo:
-        #             pos = a.position.astype(np.int32)
-        #             m[pos[0], pos[1]] = a.cargo[r.resource_id]
-        #     map_cargo.append(m)
-
         # Build the combined map.
-        # layers = [self.map_obstacles, map_agents, self.map_depots, *self.map_resources.values(), *map_cargo]
         layers = [*self.map_resources.values()]
         map_combined = np.stack(layers, axis=-1).astype(np.float32)
 
@@ -689,29 +671,6 @@ class parallel_env(ParallelEnv):
             "depots": {d: {k: np.ones_like(v, dtype=bool) for k, v in ddict.items()} for d, ddict in obs["depots"].items()},
             "map": np.ones_like(obs["map"], dtype=bool),
         }
-
-        # Calculate the visible area based on a circular observation radius.
-        # if not force_visible or True:
-        #     radius = agent.observation_radius
-        #     pos = agent.position.astype(np.int32)
-        #     visible = (np.arange(self.world_dims[0])[:, None] - pos[0]) ** 2 + \
-        #         (np.arange(self.world_dims[1])[None, :] - pos[1]) ** 2 <= radius ** 2
-        #     # obs["map"][visible, 0] += 0.2 # testing - show the visible area in the obstacle layer
-        #     obs_mask["map"][~visible, :] = False
-
-        # # Vehicle-class visibility: only Prospectors can directly observe resources.
-        # # Layers are ordered as: 0=obstacles, 1=agents, 2=depots, 3+=resources
-        # resource_layer = 3
-        # if not force_visible:
-        #     if not agent.capabilities[CAP.PROSPECT]:
-        #         # Mask out all resource layers for non-prospector local observations.
-        #         # (Communicated observations will still be merged in `observe()`)
-        #         obs_mask["map"][:, :, resource_layer:] = False
-
-        # # Update the discovered resources mask.
-        # if agent.capabilities[CAP.PROSPECT] and not force_visible:
-        #     for i, r in enumerate(self.possible_resources):
-        #         self.mask_map_resources_discovered |= (self.map_resources[r] > 0) & obs_mask["map"][:, :, resource_layer + i]
         
         return obs, obs_mask
 
@@ -970,8 +929,9 @@ class parallel_env(ParallelEnv):
         '''
         Returns the total number of resource cells discovered.
         '''
-        
-        mask = self.mask_map_resources_discovered
+        mask = np.zeros(self.world_dims, dtype=bool)
+        for agent in self.agents:
+            mask |= agent.mask_resources_observed
         return np.sum([np.sum(self.map_resources[r][mask]) for r in self.possible_resources])
 
 
@@ -1371,20 +1331,23 @@ class parallel_env_map_obs(parallel_env):
             # obs[visible, 0] += 0.2 # testing - show the visible area in the obstacle layer
             obs_mask[:, ~visible] = False
 
-        # Vehicle-class visibility: only Prospectors can directly observe resources.
-        # Layers are ordered as: 0=obstacles, 1=agents, 2=depots, 3+=resources
-        resource_layer = 5
-        resource_layer_count = len(self.possible_resources)
+        # Update visibility masks.
         if not force_visible:
-            if not agent.capabilities[CAP.PROSPECT]:
-                # Mask out all resource layers for non-prospector local observations.
-                # (Communicated observations will still be merged in `observe()`)
-                obs_mask[resource_layer:resource_layer + resource_layer_count, :, :] = False
+            # Update the agent's observed resources mask.
+            if agent.capabilities[CAP.PROSPECT]:
+                agent.mask_resources_observed[visible] = True
+            else:
+                # Resources can only be observed for the first time by a prospector.
+                obs_mask[5:5+len(self.possible_resources), ~agent.mask_resources_observed] = False
+            
+            # Update the agent's observed area mask.
+            agent.mask_observed[visible] = True
+        
+        # Obstacles are always visible once seen.
+        obs_mask[0, agent.mask_observed] = True
 
-        # Update the discovered resources mask.
-        if agent.capabilities[CAP.PROSPECT] and not force_visible:
-            for i, r in enumerate(self.possible_resources):
-                self.mask_map_resources_discovered |= (self.map_resources[r] > 0) & obs_mask[resource_layer + i, :, :]
+        # Depots are always visible.
+        obs_mask[4] = True
         
         return obs, obs_mask
 
@@ -1405,6 +1368,10 @@ class parallel_env_map_obs(parallel_env):
             sender_visible = sender_obs_mask == True
             map[sender_visible] = sender_obs[sender_visible]
             map_mask[sender_visible] = True
+
+            # Update the agent's known space masks.
+            agent.mask_observed |= sender_obs_mask
+            agent.mask_resources_observed |= sender_obs_mask[5]
         
         # Apply local observations (overwrite any communicated data).
         map[local_obs_mask == True] = local_obs[local_obs_mask == True]

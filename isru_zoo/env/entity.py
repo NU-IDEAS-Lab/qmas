@@ -100,8 +100,8 @@ class Agent(Entity):
     entity_type = ENTITY_TYPE.AGENT
     role = None # To be set by subclasses
 
-    def __init__(self, *args, speed_max = 1.0, observation_radius=np.inf, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, world_dims, *args, speed_max = 1.0, observation_radius=np.inf, **kwargs):
+        self.world_dims = world_dims
         self.speed_max = speed_max
         self.observation_radius = observation_radius
         self.capabilities = {
@@ -109,12 +109,15 @@ class Agent(Entity):
             CAP.EXTRACT: False,
             CAP.CARRY: False,
         }
+        super().__init__(*args, **kwargs)
 
 
     def reset(self, *args, **kwargs):
         super().reset(*args, **kwargs)
         self.cargo = {}
         self.steps_stationary = 0
+        self.mask_observed = np.zeros(self.world_dims, dtype=bool)
+        self.mask_resources_observed = np.zeros(self.world_dims, dtype=bool)
 
 
 # --- New agent Type subclasses ---
