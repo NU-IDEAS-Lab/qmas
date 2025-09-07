@@ -1,0 +1,1 @@
+from qmas.variant_two_modules.predictor import *

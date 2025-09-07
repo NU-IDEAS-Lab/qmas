@@ -90,12 +90,9 @@ class Predictor(torch.nn.Module):
                 prediction: A tensor of shape (1, T, D) containing the predicted trajectory.
         '''
 
-        # Set up trajectory and visibility mask.
-        trajectory = trajectory.unsqueeze(0)  # Add sample dimension.
+        # Set up visibility mask.
         if visibility_mask == None:
             visibility_mask = torch.ones_like(trajectory)  # Default to all visible.
-        else:
-            visibility_mask = visibility_mask.unsqueeze(0) # Add sample dimension.
 
         # Apply the visibility mask to the trajectory.
         trajectory = trajectory * visibility_mask
@@ -118,7 +115,7 @@ class Predictor(torch.nn.Module):
         prediction, log = self.diffuser.sample(
             prior=trajectory,
             solver="ddpm",
-            n_samples=1,
+            n_samples=trajectory.shape[0],
             sample_steps=5,
             condition_cg=trajectory,
             condition_cg_mask=visibility_mask,

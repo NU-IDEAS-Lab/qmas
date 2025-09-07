@@ -150,7 +150,7 @@ class PettingzooRunner(Runner):
 
 
 
-    @torch.no_grad()
+    # @torch.no_grad()
     def collect(self, step):
         share_obs, obs, rnn_states, rnn_states_critic, masks, available_actions = self.buffer.compatibility_get_policy_input(step)
 
@@ -319,6 +319,10 @@ class PettingzooRunner(Runner):
                         trajectory = torch.stack([t["transition"] for t in buffer[agentIdx]], dim=0)
                         visibility_mask = torch.stack([t["visibility_mask"] for t in buffer[agentIdx]], dim=0)
 
+                        # Add sample dimension (we only have one sample).
+                        trajectory = trajectory.unsqueeze(0)
+                        visibility_mask = visibility_mask.unsqueeze(0)
+
                         # Get the prediction from the predictor.
                         pred, variance = self.trainer.policy.get_prediction(
                             trajectory=trajectory,
@@ -449,6 +453,10 @@ class PettingzooRunner(Runner):
                     for agentIdx in range(self.num_agents):
                         trajectory = torch.stack([t["transition"] for t in buffer[agentIdx]], dim=0)
                         visibility_mask = torch.stack([t["visibility_mask"] for t in buffer[agentIdx]], dim=0)
+
+                        # Add sample dimension (we only have one sample).
+                        trajectory = trajectory.unsqueeze(0)
+                        visibility_mask = visibility_mask.unsqueeze(0)
 
                         # Get the prediction from the predictor.
                         pred, variance = self.trainer.policy.get_prediction(
