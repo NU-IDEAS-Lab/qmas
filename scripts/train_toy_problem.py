@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-    "--experiment_name", "toy-problem-ensemble3-obsprob0.2",
+    "--experiment_name", "1module-toy-problem-ensemble3-obsprob0.5",
     "--project_name", "qmas",
     "--env_class", "toy_problem.toy_problem_v1.parallel_env",
     "--user_name", "ideas-mas",
@@ -13,15 +13,15 @@ args = [
     "--num_adversaries", "1",
     "--state_per_agent",
     "--num_dimensions", "2",
-    "--observation_probability", "0.2",
+    "--observation_probability", "0.5",
     "--random_start_positions",
 
     "--num_env_steps", "3000000",
     "--episode_length", "50",
     "--max_cycles", "50",
 
-    "--algorithm_class", "qmas.variant_two_modules.algorithm.QmasAlgorithm",
-    "--policy_class", "qmas.variant_two_modules.policy.QmasPolicy",
+    "--algorithm_class", "qmas.variant_one_module.algorithm.QmasAlgorithm",
+    "--policy_class", "qmas.variant_one_module.policy.QmasPolicy",
     "--algorithm_name", "mappo",
     "--use_centralized_V",
     "--use_gae",
