@@ -7,7 +7,7 @@ from onpolicy.models.utils.act import ACTLayer
 from onpolicy.utils.util import get_shape_from_obs_space
 
 class QmasActor(torch.nn.Module):
-    ''' This class implements the QMAS actor, including communication (2-module variant). '''
+    ''' This class implements the QMAS actor. '''
     
     def __init__(self, args, obs_space, action_space, device=torch.device("cpu")):
         super().__init__()
