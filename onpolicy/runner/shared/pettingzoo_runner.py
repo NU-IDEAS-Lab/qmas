@@ -47,8 +47,10 @@ class PettingzooRunner(Runner):
     def run(self):
         start = time.time()
         episodes = int(self.num_env_steps) // self.episode_length // self.n_rollout_threads
+        self.policy.episodes = episodes
 
         for episode in (progress_bar := tqdm(range(episodes), dynamic_ncols=True)):
+            self.policy.episode = episode
             start_episode = time.time()
 
             if self.use_linear_lr_decay:

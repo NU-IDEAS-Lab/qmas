@@ -3,6 +3,7 @@ import torch
 import os.path
 from .predictor import Predictor
 from collections import deque
+import gymnasium.spaces as spaces
 
 from onpolicy.utils.util import get_shape_from_obs_space, get_shape_from_act_space
 
@@ -10,7 +11,7 @@ from onpolicy.utils.util import get_shape_from_obs_space, get_shape_from_act_spa
 class QmasPolicy:
     ''' This class implements the QMAS policy, including communication. '''
 
-    def __init__(self, args, obs_space, cent_obs_space, act_space, device=torch.device("cpu")):
+    def __init__(self, args, obs_space, cent_obs_space, action_space, device=torch.device("cpu")):
         self.device = device
         self.lr = args.lr
         self.critic_lr = args.critic_lr
@@ -20,11 +21,11 @@ class QmasPolicy:
 
         self.obs_space = obs_space
         self.share_obs_space = cent_obs_space
-        self.act_space = act_space
+        self.action_space = action_space
         
         # Create the predictor / diffusion model.
         self.obs_dim = np.prod(get_shape_from_obs_space(self.obs_space, flatten_dicts=False)) # observation space for one agent
-        self.action_dim = np.prod(get_shape_from_act_space(act_space)) # action space for one agent
+        self.action_dim = np.prod(get_shape_from_act_space(action_space)) # action space for one agent
 
         if args.prediction_ensemble_size > 1:
             print(f"Creating ensemble of {args.prediction_ensemble_size} predictors.")
@@ -65,8 +66,7 @@ class QmasPolicy:
         return prediction, uncertainty
 
 
-    def get_actions(self, cent_obs, obs, rnn_states_actor, rnn_states_critic, masks, available_actions=None,
-                    deterministic=False):
+    def get_actions(self, cent_obs, obs, rnn_states_actor, rnn_states_critic, masks, available_actions=None, deterministic=False):
         """
         Compute actions for the given inputs.
         """
@@ -92,6 +92,7 @@ class QmasPolicy:
 
         # Create a visibility mask.
         visibility_mask = torch.ones_like(trajectory)
+        # visibility_mask = torch.zeros_like(trajectory)
         # Mark the final action as invisible, since it is not known yet.
         # This is the only part of the trajectory that will be predicted.
         visibility_mask[-1, :self.action_dim] = 0
@@ -105,6 +106,18 @@ class QmasPolicy:
         # Update the trajectory buffer with the new action.
         transition = torch.concatenate([actions.flatten(start_dim=1), obs.flatten(start_dim=1)], 1)
         self.buffer[-1] = transition  # Replace the last element.
+
+        # Exploration vs. exploitation.
+        EPSILLON = self.episode / self.episodes
+        if not deterministic and torch.rand(1).item() > EPSILLON:
+            # Sample random action from the action space.
+            random_actions = []
+            for _ in range(self.args.n_rollout_threads * self.args.num_agents):
+                a = spaces.flatten(self.action_space, self.action_space.sample())
+                random_actions.append(a)
+            actions = torch.tensor(random_actions, device=self.device, dtype=torch.float32)
+
+        print(f"ACTIONS: {actions.flatten()}")
 
         # Set up the returns using dummy values to match what was done in R_MAPPOPolicy.
         values = torch.zeros((self.args.n_rollout_threads, 1, 1), device=self.device)
