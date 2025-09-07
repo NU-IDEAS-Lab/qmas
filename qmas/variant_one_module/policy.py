@@ -121,16 +121,12 @@ class QmasPolicy:
     def save(self, directory, episode):
         ''' Save the policy. '''
 
-        super().save(directory, episode)
-
         for i, predictor in enumerate(self.predictors):
             torch.save(predictor.state_dict(), os.path.join(directory, f"predictor{i}.pt"))
 
 
     def restore(self, directory):
         ''' Restore the policy. '''
-
-        super().restore(directory)
 
         for i, predictor in enumerate(self.predictors):
             predictor_state_dict = torch.load(os.path.join(directory, f"predictor{i}.pt"), map_location=self.device)
