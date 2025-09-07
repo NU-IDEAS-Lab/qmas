@@ -42,7 +42,7 @@ class QmasPolicy:
         self.buffer = deque(maxlen=self.prediction_horizon)
 
 
-    def get_prediction(self, trajectory, visibility_mask=None, prediction_prev=None):
+    def get_prediction(self, trajectory, visibility_mask=None, prediction_prev=None, w_cg=0.1):
         """
         Get a prediction from the ensemble of predictors.
         Args:
@@ -56,7 +56,7 @@ class QmasPolicy:
 
         predictions = []
         for predictor in self.predictors:
-            pred = predictor.get_prediction(trajectory, visibility_mask, prediction_prev)
+            pred = predictor.get_prediction(trajectory, visibility_mask, prediction_prev, w_cg=w_cg)
             predictions.append(pred.unsqueeze(0))
         predictions = torch.cat(predictions, dim=0)  # Shape: (num_predictors, T, D_out)
         prediction = predictions.mean(dim=0)
@@ -97,7 +97,7 @@ class QmasPolicy:
         visibility_mask[-1, :self.action_dim] = 0
 
         # Get the prediction from the ensemble of predictors.
-        prediction, uncertainty = self.get_prediction(trajectory, visibility_mask, prediction_prev=None)
+        prediction, uncertainty = self.get_prediction(trajectory, visibility_mask, prediction_prev=None) #, w_cg=self.args.w_cg_training)
 
         # Pull the action from the prediction.
         actions = prediction[:, -1, :self.action_dim]

@@ -80,7 +80,7 @@ class Predictor(torch.nn.Module):
         self.diffuser.configure_manual_optimizers()
 
 
-    def get_prediction(self, trajectory, visibility_mask=None, prediction_prev=None):
+    def get_prediction(self, trajectory, visibility_mask=None, prediction_prev=None, w_cg=0.1):
         ''' Get a prediction from the diffuser.
             Args:
                 trajectory: A tensor of shape (T, D), where T is the trajectory length and D is the transition dimension (action + observation).
@@ -119,7 +119,7 @@ class Predictor(torch.nn.Module):
             sample_steps=5,
             condition_cg=trajectory,
             condition_cg_mask=visibility_mask,
-            w_cg=0.1,
+            w_cg=w_cg,
             w_cfg=0.0
         )
 
