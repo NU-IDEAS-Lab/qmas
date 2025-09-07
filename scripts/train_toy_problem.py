@@ -16,7 +16,7 @@ args = [
     "--observation_probability", "0.5",
     "--random_start_positions",
 
-    "--num_env_steps", "3000000",
+    "--num_env_steps", "20000000",
     "--episode_length", "50",
     "--max_cycles", "50",
 

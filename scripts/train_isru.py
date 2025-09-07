@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-    "--experiment_name", "isru-UN-stateHybrid-e1h1p0-e200-r20curr-h5-5x5-512x4",
+    "--experiment_name", "1module-isru-e1h1p0-e200-r20-h5-5x5",
     "--project_name", "qmas",
     # "--env_class", "isru_zoo.isru_v0.parallel_env",
     "--env_class", "isru_zoo.isru_v0.parallel_env_map_obs",
@@ -20,18 +20,18 @@ args = [
     "--num_obstacles", "0",
     "--num_resources", "20",
     # "--randomize_num_resources",
-    "--curriculum_num_resources",
+    # "--curriculum_num_resources",
 
-    "--observation_radius", "999999",
+    "--observation_radius", "3",
     # "--observation_mask",
     "--available_actions_mask",
 
-    "--num_env_steps", "5000000",
+    "--num_env_steps", "20000000",
     "--episode_length", "200",
     "--max_cycles", "200",
 
-    # "--algorithm_class", "qmas.variant_two_modules.algorithm.QmasAlgorithm",
-    # "--policy_class", "qmas.variant_two_modules.policy.QmasPolicy",
+    "--algorithm_class", "qmas.variant_one_module.algorithm.QmasAlgorithm",
+    "--policy_class", "qmas.variant_one_module.policy.QmasPolicy",
     "--algorithm_name", "mappo",
     "--use_centralized_V",
     "--use_gae",
@@ -47,7 +47,7 @@ args = [
 
     "--seed", "0",
 
-    "--n_rollout_threads", "25",
+    "--n_rollout_threads", "66",
     "--cuda",
     "--cuda_idx", "3",
 
