@@ -119,6 +119,7 @@ class QmasPolicy:
             for _ in range(self.args.n_rollout_threads * self.args.num_agents):
                 a = spaces.flatten(self.action_space, self.action_space.sample())
                 random_actions.append(a)
+            random_actions = np.array(random_actions)
             actions = torch.tensor(random_actions, device=self.device, dtype=torch.float32)
 
         # Set up the returns using dummy values to match what was done in R_MAPPOPolicy.
