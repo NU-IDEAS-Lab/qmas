@@ -205,10 +205,43 @@ class QmasAlgorithm:
             train_info['diffuser_loss'] += diffuser_loss
             train_info['guide_loss'] += guide_loss
 
+
+    def collect_TESTING_NOT_READY(self, step, buffer):
+        share_obs, obs, rnn_states, rnn_states_critic, masks, available_actions = buffer.compatibility_get_policy_input(step)
+
+        values, action, action_log_prob, rnn_states, rnn_states_critic = self.policy.get_actions(
+            share_obs,
+            obs,
+            rnn_states,
+            rnn_states_critic,
+            masks,
+            available_actions=available_actions
+        )
+
+        # The value function predictions are made once over the entire share_obs.
+        # However, we need to compare them with per-agent returns.
+        # This is done by repeating the value predictions for each agent.
+        values = values.detach().cpu().reshape((self.n_rollout_threads, 1, 1)).repeat(1, self.policy.args.num_agents, 1)
+
+        actions = action.detach().cpu().reshape((self.n_rollout_threads, self.num_agents, *action.shape[1:]))
+        action_log_probs = action_log_prob.detach().cpu().reshape((self.n_rollout_threads, self.num_agents, *action_log_prob.shape[1:]))
+        rnn_states = rnn_states.detach().cpu().reshape((self.n_rollout_threads, self.num_agents, *rnn_states.shape[1:]))
+        rnn_states_critic = rnn_states_critic.detach().cpu().reshape((self.n_rollout_threads, self.num_agents, *rnn_states_critic.shape[1:]))
+
+        if actions.shape[-1] == 1:
+            actions_env = [actions[idx, :, 0].numpy() for idx in range(self.n_rollout_threads)]
+        else:
+            actions_env = [actions[idx, :, :].numpy() for idx in range(self.n_rollout_threads)]
+        
+
+        return values, actions, action_log_probs, rnn_states, rnn_states_critic, actions_env
+
+
     def prep_training(self):
         # super().prep_training()
         for predictor in self.predictors:
             predictor.train()    
+
 
     def prep_rollout(self):
         # super().prep_rollout()
