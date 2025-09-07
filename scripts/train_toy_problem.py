@@ -42,7 +42,7 @@ args = [
     "--cuda",
     "--cuda_idx", "4",
 
-    "--save_interval", "1000",
+    "--save_interval", "100000",
     "--results_dir", "/data/group/mas/qmas/results",
     "--use_wandb",
 ]
