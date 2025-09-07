@@ -98,7 +98,11 @@ class QmasPolicy:
         visibility_mask[:, -1, :self.action_dim] = 0
 
         # Get the prediction from the ensemble of predictors.
-        prediction, uncertainty = self.get_prediction(trajectory, visibility_mask, prediction_prev=None) #, w_cg=self.args.w_cg_training)
+        prediction, uncertainty = self.get_prediction(
+            trajectory.clone().detach(),
+            visibility_mask.clone().detach(),
+            prediction_prev=None
+        ) #, w_cg=self.args.w_cg_training)
 
         # Pull the action from the prediction.
         actions = prediction[:, -1, :self.action_dim]
