@@ -95,7 +95,7 @@ class QmasPolicy:
         # visibility_mask = torch.zeros_like(trajectory)
         # Mark the final action as invisible, since it is not known yet.
         # This is the only part of the trajectory that will be predicted.
-        visibility_mask[-1, :self.action_dim] = 0
+        visibility_mask[:, -1, :self.action_dim] = 0
 
         # Get the prediction from the ensemble of predictors.
         prediction, uncertainty = self.get_prediction(trajectory, visibility_mask, prediction_prev=None) #, w_cg=self.args.w_cg_training)
@@ -116,8 +116,6 @@ class QmasPolicy:
                 a = spaces.flatten(self.action_space, self.action_space.sample())
                 random_actions.append(a)
             actions = torch.tensor(random_actions, device=self.device, dtype=torch.float32)
-
-        print(f"ACTIONS: {actions.flatten()}")
 
         # Set up the returns using dummy values to match what was done in R_MAPPOPolicy.
         values = torch.zeros((self.args.n_rollout_threads, 1, 1), device=self.device)
