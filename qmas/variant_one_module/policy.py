@@ -80,7 +80,7 @@ class QmasPolicy:
         def add_to_buffer(obs):
             # Zeros are the placeholder for the action. They will be filled in by the predictor.
             action = torch.zeros((obs.shape[0], self.action_dim), device=self.device)
-            transition = torch.concatenate([action, obs], 1)
+            transition = torch.concatenate([action.flatten(start_dim=1), obs.flatten(start_dim=1)], 1)
             self.buffer.append(transition)
         while len(self.buffer) < self.prediction_horizon:
             add_to_buffer(obs)
@@ -103,7 +103,7 @@ class QmasPolicy:
         actions = prediction[:, -1, :self.action_dim]
 
         # Update the trajectory buffer with the new action.
-        transition = torch.concatenate([actions, obs], 1)
+        transition = torch.concatenate([actions.flatten(start_dim=1), obs.flatten(start_dim=1)], 1)
         self.buffer[-1] = transition  # Replace the last element.
 
         # Set up the returns using dummy values to match what was done in R_MAPPOPolicy.
