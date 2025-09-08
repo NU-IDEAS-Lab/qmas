@@ -601,19 +601,26 @@ class parallel_env(ParallelEnv):
     def action_space(self, agent):
         ''' Returns the action space for the given agent. '''
         
-        return spaces.Dict({
-            # Movement is specified by relative motion in two dimensions.
-            # The agent can only move one space at a time.
-            "movement": spaces.Box(low=-1, high=1, shape=(2,), dtype=np.int32),
+        return spaces.Box(
+            low=-np.inf,
+            high=np.inf,
+            shape=(*self.world_dims, len(self.world_dims) + 1 + len(self.possible_resources)),
+            dtype=np.float32
+        )
 
-            # Communication is a simple boolean flag.
-            "communication": spaces.Box(low=0, high=1, shape=(1,), dtype=np.int32),
+        # return spaces.Dict({
+        #     # Movement is specified by relative motion in two dimensions.
+        #     # The agent can only move one space at a time.
+        #     "movement": spaces.Box(low=-1, high=1, shape=(2,), dtype=np.int32),
 
-            # Resource actions are represented as a floating point value for each resource type.
-            # To pick up resources, the agent uses a positive number.
-            # To drop resources, the agent uses a negative number.
-            "resources": spaces.Box(low=-self.default_hauler_capacity, high=self.default_hauler_capacity, shape=(len(self.possible_resources),), dtype=np.int32),
-        })
+        #     # Communication is a simple boolean flag.
+        #     "communication": spaces.Box(low=0, high=1, shape=(1,), dtype=np.int32),
+
+        #     # Resource actions are represented as a floating point value for each resource type.
+        #     # To pick up resources, the agent uses a positive number.
+        #     # To drop resources, the agent uses a negative number.
+        #     "resources": spaces.Box(low=-self.default_hauler_capacity, high=self.default_hauler_capacity, shape=(len(self.possible_resources),), dtype=np.int32),
+        # })
 
 
     @functools.cache
@@ -782,12 +789,14 @@ class parallel_env(ParallelEnv):
         # Perform agent actions.
         for agent in self.agents:
             if agent in action_dict:
-                # Parse the action.
-                action = spaces.unflatten(self.action_space(agent), action_dict[agent])
-
-                # Check for action validity.
-                if not self.action_space(agent).contains(action):
-                    raise ValueError(f"Invalid action for agent {agent}: {action}")
+                a_grid = action_dict[agent].reshape(*self.world_dims, -1)
+                agent_pos_int = agent.position.astype(np.int32)
+                a = a_grid[agent_pos_int[0], agent_pos_int[1]]
+                action = {
+                    "movement": a[:2],
+                    "communication": a[2:3],
+                    "resources": a[3:3 + len(self.possible_resources)],
+                }
 
                 # Record the action.
                 agent.last_action = action
