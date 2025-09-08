@@ -793,9 +793,9 @@ class parallel_env(ParallelEnv):
                 agent_pos_int = agent.position.astype(np.int32)
                 a = a_grid[agent_pos_int[0], agent_pos_int[1]]
                 action = {
-                    "movement": a[:2],
-                    "communication": a[2:3],
-                    "resources": a[3:3 + len(self.possible_resources)],
+                    "movement": np.round(a[:2]).astype(np.int32),
+                    "communication": np.round(a[2:3]).astype(np.int32),
+                    "resources": np.round(a[3:3 + len(self.possible_resources)]).astype(np.int32),
                 }
 
                 # Record the action.
