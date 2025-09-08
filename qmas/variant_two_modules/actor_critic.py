@@ -3,6 +3,7 @@ import segmentation_models_pytorch as smp
 import gymnasium.spaces as spaces
 from onpolicy.models.r_actor_critic import R_Critic
 
+from onpolicy.models.utils.util import init, check
 from onpolicy.models.utils.act import ACTLayer
 from onpolicy.utils.util import get_shape_from_obs_space
 
@@ -15,6 +16,7 @@ class QmasActor(torch.nn.Module):
         self.args = args
         self.obs_space = obs_space
         self.action_space = action_space
+        self.tpdv = dict(dtype=torch.float32, device=device)
 
         obs_shape = get_shape_from_obs_space(obs_space)
         input_channel = obs_shape[0]
@@ -27,7 +29,7 @@ class QmasActor(torch.nn.Module):
             encoder_name="resnet34",        # choose encoder, e.g. mobilenet_v2 or efficientnet-b7
             # encoder_weights="imagenet",     # use `imagenet` pre-trained weights for encoder initialization
             in_channels=input_channel,                  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
-            classes=action_dim,                      # model output channels (number of classes in your dataset)
+            classes=action_dim // input_width // input_height,    # model output channels (number of classes in your dataset)
             # decoder_interpolation="bilinear",
             activation="sigmoid",          # activation function
         )
@@ -52,22 +54,17 @@ class QmasActor(torch.nn.Module):
         :return rnn_states: (torch.Tensor) updated rnn states.
         """
         
-        input_shape = obs.shape
+        # Transfer to device.
+        obs = check(obs).to(**self.tpdv)
 
         # Observations are batch, channel, width, height (B, C, W, H) tensors.
         x = self.unet(obs)
         
-        # x is now (B, action_dim, W, H). Restructure it to (B * W * H, action_dim).
-        x = x.permute(0, 2, 3, 1).view(-1, x.shape[1])
+        # x is now (B, action_dim, W, H). Restructure it to (B, W * H * action_dim).
+        x = x.permute(0, 2, 3, 1).flatten(start_dim=1)
 
         # Get the actions and log probabilities.
         actions, action_log_probs = self.act(x, available_actions, deterministic)
-
-        # Restore the actions and log probabilities to (B, W, H, action_dim).
-        actions = actions.view(input_shape[0], input_shape[2], input_shape[3], -1)
-        action_log_probs = action_log_probs.view(input_shape[0], input_shape[2], input_shape[3], -1)
-
-        # TODO: Need to select the specific action for the relevant agents here, based on their position in the grid.
 
         return actions, action_log_probs, rnn_states
 
@@ -87,8 +84,25 @@ class QmasActor(torch.nn.Module):
         :return dist_entropy: (torch.Tensor) action distribution entropy for the given inputs.
         """
 
-        # TODO: Implement this!
-        raise NotImplementedError()
+        # Transfer to device.
+        obs = check(obs).to(**self.tpdv)
+        action = check(action).to(**self.tpdv)
+        if active_masks is not None:
+            active_masks = check(active_masks).to(**self.tpdv)
+
+        # Observations are batch, channel, width, height (B, C, W, H) tensors.
+        x = self.unet(obs)
+        
+        # x is now (B, action_dim, W, H). Restructure it to (B, W * H * action_dim).
+        x = x.permute(0, 2, 3, 1).flatten(start_dim=1)
+
+        action_log_probs, dist_entropy = self.act.evaluate_actions(x,
+                                                                   action, available_actions,
+                                                                   active_masks=
+                                                                   active_masks if self.args.use_policy_active_masks
+                                                                   else None)
+        
+        return action_log_probs, dist_entropy
 
 
 class QmasCritic(R_Critic):
