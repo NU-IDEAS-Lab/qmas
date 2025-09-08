@@ -78,7 +78,7 @@ class QmasAlgorithm(R_MAPPO):
         # Determine what to update.
         # update_actor = np.random.rand() < 0.5
         # update_critic = True
-        update_predictor = True
+        update_predictor = not self.args.prediction_disable
 
         # Phase 1: Policy Training
         policy_info = super().train(buffer, update_actor, update_critic, last_step)
