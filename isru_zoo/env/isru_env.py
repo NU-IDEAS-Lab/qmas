@@ -222,6 +222,11 @@ class parallel_env(ParallelEnv):
             agent: {} for agent in self.agents
         }
 
+        # Add positions to the information dictionary for GridNet-style policy architectures.
+        info["gridnet_action_positions"] = np.array([
+            agent.position.astype(np.int32) for agent in self.possible_agents
+        ])
+
         # Return the initial observation.
         observation = {}
         for agent in self.agents:
@@ -601,19 +606,25 @@ class parallel_env(ParallelEnv):
     def action_space(self, agent):
         ''' Returns the action space for the given agent. '''
         
-        return spaces.Dict({
-            # Movement is specified by relative motion in two dimensions.
-            # The agent can only move one space at a time.
-            "movement": spaces.Box(low=-1, high=1, shape=(2,), dtype=np.int32),
+        return spaces.Box(
+            low=-np.inf,
+            high=np.inf,
+            shape=(*self.world_dims, 2 + 1 + len(self.possible_resources)),  # Movement (2), Communication (1), Resources (len)
+            dtype=np.float32
+        )
+        # return spaces.Dict({
+        #     # Movement is specified by relative motion in two dimensions.
+        #     # The agent can only move one space at a time.
+        #     "movement": spaces.Box(low=-1, high=1, shape=(2,), dtype=np.int32),
 
-            # Communication is a simple boolean flag.
-            "communication": spaces.Box(low=0, high=1, shape=(1,), dtype=np.int32),
+        #     # Communication is a simple boolean flag.
+        #     "communication": spaces.Box(low=0, high=1, shape=(1,), dtype=np.int32),
 
-            # Resource actions are represented as a floating point value for each resource type.
-            # To pick up resources, the agent uses a positive number.
-            # To drop resources, the agent uses a negative number.
-            "resources": spaces.Box(low=-self.default_hauler_capacity, high=self.default_hauler_capacity, shape=(len(self.possible_resources),), dtype=np.int32),
-        })
+        #     # Resource actions are represented as a floating point value for each resource type.
+        #     # To pick up resources, the agent uses a positive number.
+        #     # To drop resources, the agent uses a negative number.
+        #     "resources": spaces.Box(low=-self.default_hauler_capacity, high=self.default_hauler_capacity, shape=(len(self.possible_resources),), dtype=np.int32),
+        # })
 
 
     @functools.cache
@@ -907,6 +918,11 @@ class parallel_env(ParallelEnv):
         info_dict["resources/total"] = total_resources
         for agent in self.possible_agents:
             info_dict[f"rewards/{agent}"] = reward_dict[agent]
+        
+        # Add positions to the information dictionary for GridNet-style policy architectures.
+        info_dict["gridnet_action_positions"] = np.array([
+            agent.position.astype(np.int32) for agent in self.possible_agents
+        ])
 
         # Handle end of episode.
         if end_truncate or end_done:

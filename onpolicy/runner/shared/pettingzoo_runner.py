@@ -110,7 +110,7 @@ class PettingzooRunner(Runner):
 
     def warmup(self):
         # Reset environment.
-        obs, share_obs, available_actions = self.envs.reset()
+        obs, share_obs, available_actions, info = self.envs.reset()
 
         # Get the shape of the action space.
         act_shape = get_shape_from_act_space(self.buffer.act_space)
@@ -138,7 +138,8 @@ class PettingzooRunner(Runner):
             rewards=np.zeros((self.n_rollout_threads, self.num_agents, 1), dtype=np.float32),
             masks=np.ones((self.n_rollout_threads, self.num_agents, 1), dtype=np.float32),
             delta_steps=np.ones((self.n_rollout_threads, self.num_agents, 1), dtype=np.int32),
-            available_actions=available_actions
+            available_actions=available_actions,
+            action_positions=SOMETHING
         )
 
 
@@ -186,6 +187,11 @@ class PettingzooRunner(Runner):
         visibility_mask = None
         if "visibility_mask" in infos[0]:
             visibility_mask = np.array([info["visibility_mask"] for info in infos])
+        
+        # Get GridNet action positions from infos.
+        action_positions = None
+        if "gridnet_action_positions" in infos[0]:
+            action_positions = np.array([info["gridnet_action_positions"] for info in infos])
 
         # Add information to the logger.
         keys = infos[0].keys()
@@ -213,7 +219,8 @@ class PettingzooRunner(Runner):
             masks=masks,
             delta_steps=delta_steps,
             available_actions=available_actions,
-            visibility_mask=visibility_mask
+            visibility_mask=visibility_mask,
+            action_positions=action_positions
         )
 
 

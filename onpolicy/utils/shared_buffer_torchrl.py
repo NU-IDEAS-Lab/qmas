@@ -119,7 +119,7 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
 
     def insert(self, share_obs, obs, rnn_states_actor, rnn_states_critic, actions, action_log_probs,
                value_preds, rewards, masks, bad_masks=None, active_masks=None, delta_steps=None, available_actions=None,
-               visibility_mask=None, legacy_mode=True):
+               visibility_mask=None, action_positions=None, legacy_mode=True):
         """
         Insert data into the buffer.
         :param share_obs: (argparse.Namespace) arguments containing relevant model, policy, and env information.
@@ -149,6 +149,8 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
             delta_steps = np.ones_like(value_preds)
         if visibility_mask is None:
             visibility_mask = np.ones_like(obs)
+        if action_positions is None:
+            action_positions = np.zeros((obs.shape[0], obs.shape[1], 2), dtype=np.int32)
         
         # Convert any np.object arrays to tensors of NonTensorData.
         if isinstance(obs, np.ndarray) and obs.dtype == object:
