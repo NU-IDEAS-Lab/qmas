@@ -56,6 +56,7 @@ class QmasActor(torch.nn.Module):
         
         # Transfer to device.
         obs = check(obs).to(**self.tpdv)
+        rnn_states = check(rnn_states)
 
         # Observations are batch, channel, width, height (B, C, W, H) tensors.
         x = self.unet(obs)
