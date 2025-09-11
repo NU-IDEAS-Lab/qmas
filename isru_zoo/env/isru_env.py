@@ -9,7 +9,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from copy import copy
 
-from isru_zoo.env.entity import ENTITY_TYPE, AGENT_ROLE, CAP, Agent, Depot, Extractor, Hauler, Prospector
+from isru_zoo.env.entity import ENTITY_TYPE, AGENT_ROLE, CAP, Agent, Depot, Extractor, Hauler, Prospector, SuperBot
 from isru_zoo.env.resource import TestResource1, TestResource2
 
 
@@ -116,23 +116,31 @@ class parallel_env(ParallelEnv):
         self.hauler_pickup_threshold = hauler_pickup_threshold
 
         # Set up entities.
-        self.possible_agents = \
-            [Extractor(
-                world_dims=self.world_dims,
-                position=self.get_random_position(),
-                observation_radius=self.default_observation_radius
-            ) for _ in range(num_extractors)] + \
-            [Hauler(
+        # self.possible_agents = \
+        #     [Extractor(
+        #         world_dims=self.world_dims,
+        #         position=self.get_random_position(),
+        #         observation_radius=self.default_observation_radius
+        #     ) for _ in range(num_extractors)] + \
+        #     [Hauler(
+        #         world_dims=self.world_dims,
+        #         position=self.get_random_position(),
+        #         carry_capacity=self.default_hauler_capacity,
+        #         observation_radius=self.default_observation_radius
+        #     ) for _ in range(num_haulers)] + \
+        #     [Prospector(
+        #         world_dims=self.world_dims,
+        #         position=self.get_random_position(),
+        #         observation_radius=self.default_observation_radius
+        #     ) for _ in range(num_prospectors)]
+        self.possible_agents = [
+            SuperBot(
                 world_dims=self.world_dims,
                 position=self.get_random_position(),
                 carry_capacity=self.default_hauler_capacity,
                 observation_radius=self.default_observation_radius
-            ) for _ in range(num_haulers)] + \
-            [Prospector(
-                world_dims=self.world_dims,
-                position=self.get_random_position(),
-                observation_radius=self.default_observation_radius
-            ) for _ in range(num_prospectors)]
+            ) for _ in range(num_extractors + num_haulers + num_prospectors)
+        ]
 
         # Set up the possible resources.
         self.possible_resources = []
