@@ -150,8 +150,8 @@ class UNetLayer(nn.Module):
         input_width = obs_shape[1]
         input_height = obs_shape[2]
 
-        self.addcoords = AddCoords(with_r=False)
-        input_channel = input_channel + 2
+        # self.addcoords = AddCoords(with_r=False)
+        # input_channel = input_channel + 2
 
         self.sequence = nn.Sequential(
             # smp.DeepLabV3(
@@ -186,7 +186,7 @@ class UNetLayer(nn.Module):
 
 
     def forward(self, x):
-        x = self.addcoords(x)
+        # x = self.addcoords(x)
         x = self.sequence(x)
         return x
 
