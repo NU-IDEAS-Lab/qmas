@@ -83,9 +83,9 @@ class AddCoords(nn.Module):
         return ret
 
 
-class EncoderLayer(nn.Module):
+class EncoderSkipConnectionsLayer(nn.Module):
     def __init__(self, obs_shape, hidden_size, use_orthogonal, use_ReLU):
-        super(EncoderLayer, self).__init__()
+        super(EncoderSkipConnectionsLayer, self).__init__()
 
         active_func = [nn.Tanh(), nn.ReLU()][use_ReLU]
         init_method = [nn.init.xavier_uniform_, nn.init.orthogonal_][use_orthogonal]
@@ -132,6 +132,42 @@ class EncoderLayer(nn.Module):
             skip_features.append(proj(feature))
         x = torch.cat(skip_features, dim=1)
         x = self.post(x)
+        return x
+
+
+class EncoderLayer(nn.Module):
+    def __init__(self, obs_shape, hidden_size, use_orthogonal, use_ReLU):
+        super(EncoderLayer, self).__init__()
+
+        active_func = [nn.Tanh(), nn.ReLU()][use_ReLU]
+        init_method = [nn.init.xavier_uniform_, nn.init.orthogonal_][use_orthogonal]
+        gain = nn.init.calculate_gain(['tanh', 'relu'][use_ReLU])
+
+        def init_(m):
+            return init(m, init_method, lambda x: nn.init.constant_(x, 0), gain=gain)
+
+        input_channel = obs_shape[0]
+
+        self.encoder = smp.encoders.get_encoder(
+            "resnet34",
+            in_channels=input_channel,
+            depth=5,
+            weights=None,
+        )
+
+        self.hidden_size = hidden_size
+        self.init_ = init_
+        self.active_func = active_func
+
+        self.post = nn.Sequential(
+            Flatten(),
+            init_(nn.Linear(self.encoder.out_channels[-1], hidden_size)),
+            active_func
+        )
+
+    def forward(self, x):
+        x = self.encoder(x)
+        x = self.post(x[-1])
         return x
 
 
@@ -192,17 +228,23 @@ class UNetLayer(nn.Module):
 
 
 class CNNBase(nn.Module):
-    def __init__(self, args, obs_shape):
+    def __init__(self, args, obs_shape, mode='unet'):
         super(CNNBase, self).__init__()
 
         self._use_orthogonal = args.use_orthogonal
         self._use_ReLU = args.use_ReLU
         self.hidden_size = args.hidden_size
 
-        # self.cnn = CNNLayer(obs_shape, self.hidden_size, self._use_orthogonal, self._use_ReLU)
-        # self.cnn = CoordConv(obs_shape, self.hidden_size, self._use_orthogonal, self._use_ReLU)
-        self.cnn = UNetLayer(obs_shape, self.hidden_size, self._use_orthogonal, self._use_ReLU)
-        # self.cnn = EncoderLayer(obs_shape, self.hidden_size, self._use_orthogonal, self._use_ReLU)
+        MODES = {
+            'cnn': CNNLayer,
+            'coordconv': CoordConv,
+            'unet': UNetLayer,
+            'encoder': EncoderLayer,
+            'encoder_skip': EncoderSkipConnectionsLayer,
+        }
+        assert mode in MODES.keys(), f"mode should be one of {MODES.keys()}"
+        base_class = MODES[mode]
+        self.cnn = base_class(obs_shape, self.hidden_size, self._use_orthogonal, self._use_ReLU)
 
     def forward(self, x):
         x = self.cnn(x)
