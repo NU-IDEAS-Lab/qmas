@@ -1179,7 +1179,12 @@ class parallel_env_simple_obs(parallel_env):
         # Add resource positions.
         for r in self.possible_resources:
             obs["resources"][r] = np.ones((r.quantity_max, len(self.world_dims)), dtype=np.float32) * -1.0
+            # Get locations with resources that are not in depots.
             locations = np.argwhere(self.map_resources[r] > 0)
+            if locations.shape[0] > 0:
+                # Exclude locations that are in depots.
+                depot_mask = self.map_depots[locations[:, 0], locations[:, 1]] == 0
+                locations = locations[depot_mask]
             obs["resources"][r][:locations.shape[0], :] = locations.astype(np.float32)
 
         obs_mask = {
