@@ -1024,8 +1024,8 @@ class parallel_env(ParallelEnv):
             total_resources = sum(r.quantity for r in self.possible_resources)
             deposited_resources = sum(depot.stock for depot in self.possible_depots)
             resource_deposit_percentage = deposited_resources / float(total_resources)
-            reward += 1.0 * resource_deposit_percentage
-            # reward += 1.0 * deposited_resources
+            # reward += 1.0 * resource_deposit_percentage
+            reward += 1.0 * deposited_resources
 
         return reward
 
