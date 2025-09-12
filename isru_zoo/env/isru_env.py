@@ -848,7 +848,7 @@ class parallel_env(ParallelEnv):
                     agent.steps_stationary = 1
 
                 # Handle communication.
-                if action["communication"][0] >= 0.5:
+                if True: #action["communication"][0] >= 0.5:
                     senders.add(agent)
                     info_dict["communication/messages_sent"] += 1
 
