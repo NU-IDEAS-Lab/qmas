@@ -195,6 +195,8 @@ class parallel_env(ParallelEnv):
         if seed != None:
             np.random.seed(seed)
         
+        np.random.seed(0)
+        
         # Reset resources.
         for r in self.possible_resources:
             if self.randomize_num_resources:
@@ -958,6 +960,8 @@ class parallel_env(ParallelEnv):
             for agent in self.agents:
                 truncated_dict[agent] = True
             self.agents = []
+
+            print(f"Episode ended at step {self.step_count} with {deposited_resources} resources deposited ({resource_deposit_percentage*100.0:.2f}%), {resources_held} resources held by agents, and {resources_map} resources remaining on the map.")
 
         # Record last rewards.
         self.last_rewards = copy(reward_dict)
