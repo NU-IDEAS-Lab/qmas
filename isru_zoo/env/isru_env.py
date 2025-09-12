@@ -916,6 +916,7 @@ class parallel_env(ParallelEnv):
         # Calculate the percentage of resources deposited.
         total_resources = sum(r.quantity for r in self.possible_resources)
         deposited_resources = sum(depot.stock for depot in self.possible_depots)
+        held_resources = sum(sum(agent.cargo.values()) for agent in self.agents)
         resource_deposit_percentage = deposited_resources / float(total_resources)
 
         # Check termination conditions.
@@ -936,8 +937,9 @@ class parallel_env(ParallelEnv):
             reward_dict[agent] += self.reward(agent, end_truncate, end_done)
 
         # Update information dictionary.
-        info_dict["resources/discovered"] = self._get_num_resources_discovered()
+        info_dict["resources/discovered"] = self._get_num_extant_resources_discovered() + deposited_resources + held_resources
         info_dict["resources/deposited"] = deposited_resources
+        info_dict["resources/deposited_percentage"] = resource_deposit_percentage
         info_dict["resources/extant"] = total_resources - deposited_resources
         info_dict["resources/total"] = total_resources
         for agent in self.possible_agents:
@@ -950,7 +952,7 @@ class parallel_env(ParallelEnv):
             resources_map_depots = sum(self.map_resources[r][self.map_depots > 0].sum() for r in self.possible_resources)
 
             # Check that everything looks good at the end of the episode.
-            assert self._get_num_resources_discovered() <= total_resources, "More resources discovered than available!"
+            assert self._get_num_extant_resources_discovered() <= total_resources, "More resources discovered than available!"
             assert deposited_resources <= total_resources, "More resources deposited than available!"
             assert total_resources == deposited_resources + resources_held + resources_map - resources_map_depots, "Resource accounting error!"
 
@@ -1078,14 +1080,22 @@ class parallel_env(ParallelEnv):
             return np.sum(agent.mask_observed)
 
 
-    def _get_num_resources_discovered(self):
+    def _get_num_extant_resources_discovered(self, mask=None):
         '''
         Returns the total number of resource cells discovered.
         '''
-        mask = np.zeros(self.world_dims, dtype=bool)
-        for agent in self.agents:
-            mask |= agent.mask_resources_observed
-        return np.sum([np.sum(self.map_resources[r][mask]) for r in self.possible_resources])
+        if mask is None:
+            mask = np.zeros(self.world_dims, dtype=bool)
+            for agent in self.agents:
+                mask |= agent.mask_resources_observed
+        
+        # Do not count resources that are in depots.
+        mask &= (self.map_depots == 0)
+
+        total = 0
+        for r in self.possible_resources:
+            total += np.sum((self.map_resources[r] > 0) & mask)
+        return total
 
 
     def _nearest_entity_distance(self, position, entity_type=ENTITY_TYPE.AGENT, capability=None):
