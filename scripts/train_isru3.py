@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-    "--experiment_name", "isru-UN-stateHybrid-e1h1p0-e200-r20-h5-5x5-512x4",
+    "--experiment_name", "isru-UN-stateHybrid-e1h1p0-e200-r20-h20-20x20-512x4",
     "--project_name", "qmas",
     # "--env_class", "isru_zoo.isru_v0.parallel_env",
     "--env_class", "isru_zoo.isru_v0.parallel_env_map_obs",
@@ -14,9 +14,9 @@ args = [
     "--num_haulers", "1",
     "--num_prospectors", "0",
 
-    "--hauler_capacity", "5",
+    "--hauler_capacity", "20",
 
-    "--world_size", "5",
+    "--world_size", "20",
     "--num_obstacles", "0",
     "--num_resources", "20",
     # "--randomize_num_resources",
@@ -47,9 +47,9 @@ args = [
 
     "--seed", "0",
 
-    "--n_rollout_threads", "50",
+    "--n_rollout_threads", "25",
     "--cuda",
-    "--cuda_idx", "3",
+    "--cuda_idx", "5",
 
     "--save_interval", "1000",
     "--results_dir", "/data/group/mas/qmas/results",

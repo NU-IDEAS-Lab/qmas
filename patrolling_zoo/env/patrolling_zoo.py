@@ -386,7 +386,7 @@ class parallel_env(ParallelEnv):
         return observation, info
 
 
-    def render(self, predicted_positions = None, figsize=(12, 9), history_length=10):
+    def render(self, predicted_positions = None, figsize=(12, 9), history_length=10, **kwargs):
         ''' Renders the environment.
             
             Args:

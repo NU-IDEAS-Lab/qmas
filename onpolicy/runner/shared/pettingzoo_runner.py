@@ -79,6 +79,8 @@ class PettingzooRunner(Runner):
             # compute return and update network
             self.compute()
             train_infos = self.train()
+
+            end = time.time()
             
             # post process
             total_num_steps = (episode + 1) * self.episode_length * self.n_rollout_threads
@@ -89,7 +91,6 @@ class PettingzooRunner(Runner):
 
             # log information
             if total_num_steps % self.log_interval == 0:
-                end = time.time()
                 
                 train_infos["average_episode_rewards"] = avg_episode_rewards
                 train_infos["fps"] = self.episode_length * self.n_rollout_threads / (end - start_episode)
@@ -217,6 +218,7 @@ class PettingzooRunner(Runner):
         )
 
 
+    @torch.no_grad()
     def compute(self):
         """Calculate returns for the collected data."""
         self.trainer.prep_rollout()
@@ -251,14 +253,17 @@ class PettingzooRunner(Runner):
                         continue
 
                 if self.use_wandb:
-                    wandb.log({k: np.mean(v, axis=0)}, step=total_num_steps)
+                    wandb.log({k: np.mean(v)}, step=total_num_steps)
                 else:
                     self.writter.add_scalars(k, {k: np.mean(v)}, total_num_steps)    
 
     # @torch.no_grad()
     def eval(self):
         log_root = zarr.open_group(self.all_args.eval_output_file, mode="a")
-        log_exp = log_root.require_group(self.experiment_name)
+        if self.all_args.eval_series == "":
+            log_exp = log_root.require_group(self.experiment_name)
+        else:
+            log_exp = log_root.require_group(self.all_args.eval_series).require_group(self.experiment_name)
 
         eval_env = self.envs
 
@@ -273,6 +278,7 @@ class PettingzooRunner(Runner):
         HISTORY_LENGTH = self.all_args.prediction_history_window
         buffer = [deque(maxlen=HISTORY_LENGTH) for _ in range(self.num_agents)]
         prediction = torch.zeros((HISTORY_LENGTH, self.num_agents, *obs_shape), dtype=torch.float32)
+        uncertainty = torch.zeros_like(prediction)
         
         prediction_prev = None  # For autoregression
         for i_episode in range(self.all_args.eval_episodes):
@@ -285,7 +291,7 @@ class PettingzooRunner(Runner):
             masks = np.ones((self.n_eval_rollout_threads, self.num_agents, 1), dtype=np.float32)
 
             for i in range(self.num_agents):
-                transition = np.concatenate((np.zeros(act_size, dtype=np.float32), obs[0][i]), axis=0)
+                transition = np.concatenate((np.zeros(act_size, dtype=np.float32), obs[0][i].flatten()), axis=0)
                 buffer[i].append({
                     "transition": torch.from_numpy(transition).to(self.device),
                     "visibility_mask": torch.ones(transition.shape, dtype=torch.float32, device=self.device)
@@ -302,14 +308,14 @@ class PettingzooRunner(Runner):
                     aa = None
                 
                 # Use the prediction from the predictor if available.
-                use_prediction = hasattr(self.policy, "predictor") and len(buffer[0]) == HISTORY_LENGTH and not self.all_args.prediction_disable
+                use_prediction = hasattr(self.policy, "predictors") and len(buffer[0]) == HISTORY_LENGTH and not self.all_args.prediction_disable
                 if use_prediction:
                     for agentIdx in range(self.num_agents):
                         trajectory = torch.stack([t["transition"] for t in buffer[agentIdx]], dim=0)
                         visibility_mask = torch.stack([t["visibility_mask"] for t in buffer[agentIdx]], dim=0)
 
                         # Get the prediction from the predictor.
-                        pred = self.trainer.policy.predictor.get_prediction(
+                        pred, variance = self.trainer.policy.get_prediction(
                             trajectory=trajectory,
                             visibility_mask=visibility_mask,
                             prediction_prev=prediction_prev
@@ -321,37 +327,43 @@ class PettingzooRunner(Runner):
                         # Only take the first sample (n_samples is 1 anyway).
                         # Strip the action part of the prediction.
                         prediction[:, agentIdx, :] = pred[0, :, act_size:]
+                        uncertainty[:, agentIdx, :] = variance[0, :, act_size:]
                 else:
                     prediction.zero_()
                     prediction[-1] = torch.from_numpy(obs[0])
+                    uncertainty.zero_()
                 
+                # Calculate prediction error.
+                prediction_error = torch.abs(prediction[-1] - torch.from_numpy(obs[0]))
+
                 actions, rnn_states = self.trainer.policy.act(
                     prediction[-1], # Use the final timestep of the prediction.
                     np.concatenate(rnn_states if isinstance(rnn_states, (list, tuple)) else [rnn_states]),
                     np.concatenate(masks),
-                    deterministic=True,
+                    deterministic=False,
                     available_actions=aa
                 )
 
                 # [n_envs*n_agents, ...] -> [n_envs, n_agents, ...]
-                actions = actions.detach().cpu().reshape((self.n_render_rollout_threads, self.num_agents, *actions.shape[1:]))
-                # rnn_states = rnn_states.detach().cpu().reshape((self.n_render_rollout_threads, self.num_agents, *rnn_states.shape[1:]))
-                rnn_states = rnn_states.detach().cpu().reshape((self.n_render_rollout_threads, *rnn_states.shape[1:]))
-
-                actions_env = [actions[idx, :, :].numpy() for idx in range(self.n_render_rollout_threads)]
+                actions = actions.detach().cpu().reshape((self.n_eval_rollout_threads, self.num_agents, *actions.shape[1:]))
+                rnn_states = rnn_states.detach().cpu().reshape((self.n_eval_rollout_threads, *rnn_states.shape[1:]))
+                actions_env = [actions[idx, :, :].numpy() for idx in range(self.n_eval_rollout_threads)]
 
                 # Take a step in the environment.
                 obs, share_obs, eval_rewards, dones, infos, available_actions = eval_env.step(actions_env)
                 viz_mask_obs = np.expand_dims(infos[0]["visibility_mask"], 0) if "visibility_mask" in infos[0] else np.ones_like(obs)
                 viz_mask_actions = np.ones(actions.shape, dtype=np.float32)  # Assuming actions are fully visible.
-                viz_mask = np.concatenate([viz_mask_actions, viz_mask_obs], axis=-1)
+                viz_mask = np.concatenate([viz_mask_actions, viz_mask_obs.reshape(self.n_eval_rollout_threads, self.num_agents, -1)], axis=-1)
                 for i in range(self.num_agents):
-                    transition = np.concatenate((actions[0][i].float(), obs[0][i]), axis=0)
+                    transition = np.concatenate((actions[0][i].float(), obs[0][i].flatten()), axis=0)
                     agent_viz_mask = viz_mask[0, i]
                     buffer[i].append({
                         "transition": torch.from_numpy(transition).to(self.device),
                         "visibility_mask": torch.from_numpy(agent_viz_mask).to(self.device)
                     })
+                
+                # Add prediction error to infos for logging.
+                infos[0]["prediction_error_mean"] = prediction_error.mean().item()
 
                 # Log information.
                 keys = infos[0].keys()
@@ -370,6 +382,7 @@ class PettingzooRunner(Runner):
                         )
                         array[i_episode, j] = np.array(infos[0][key])
                         # self.env_infos[key] = [i[key] for i in infos]
+
 
     # @torch.no_grad()
     def render(self, ipython_clear_output=True):        
@@ -390,6 +403,7 @@ class PettingzooRunner(Runner):
         HISTORY_LENGTH = self.all_args.prediction_history_window
         buffer = [deque(maxlen=HISTORY_LENGTH) for _ in range(self.num_agents)]
         prediction = torch.zeros((HISTORY_LENGTH, self.num_agents, *obs_shape), dtype=torch.float32)
+        uncertainty = torch.zeros_like(prediction)
         
         prediction_prev = None  # For autoregression
         for i_episode in range(self.all_args.render_episodes):
@@ -414,6 +428,7 @@ class PettingzooRunner(Runner):
                 frames.append(image)
 
             dones = False
+            reward_total = 0.0
             while not np.all(dones):
                 time_start = time.time()
 
@@ -424,34 +439,36 @@ class PettingzooRunner(Runner):
                     aa = None
                 
                 # Use the prediction from the predictor if available.
-                use_prediction = hasattr(self.policy, "predictor") and len(buffer[0]) == HISTORY_LENGTH and not self.all_args.prediction_disable
+                use_prediction = hasattr(self.policy, "predictors") and len(buffer[0]) == HISTORY_LENGTH and not self.all_args.prediction_disable
                 if use_prediction:
                     for agentIdx in range(self.num_agents):
                         trajectory = torch.stack([t["transition"] for t in buffer[agentIdx]], dim=0)
                         visibility_mask = torch.stack([t["visibility_mask"] for t in buffer[agentIdx]], dim=0)
 
                         # Get the prediction from the predictor.
-                        pred = self.trainer.policy.predictor.get_prediction(
+                        pred, variance = self.trainer.policy.get_prediction(
                             trajectory=trajectory,
                             visibility_mask=visibility_mask,
                             prediction_prev=prediction_prev
                         )
 
                         # Store as the previous prediction.
-                        prediction_prev = pred.detach()
+                        prediction_prev = pred.detach().clone()
 
                         # Only take the first sample (n_samples is 1 anyway).
                         # Strip the action part of the prediction.
                         prediction[:, agentIdx, :] = pred[0, :, act_size:]
+                        uncertainty[:, agentIdx, :] = variance[0, :, act_size:]
                 else:
                     prediction.zero_()
                     prediction[-1] = torch.from_numpy(obs[0])
+                    uncertainty.zero_()
                 
                 actions, rnn_states = self.trainer.policy.act(
                     prediction[-1], # Use the final timestep of the prediction.
                     np.concatenate(rnn_states if isinstance(rnn_states, (list, tuple)) else [rnn_states]),
                     np.concatenate(masks),
-                    deterministic=True,
+                    deterministic=False,
                     available_actions=aa
                 )
 
@@ -459,13 +476,20 @@ class PettingzooRunner(Runner):
                 if ipython_clear_output:
                     clear_output(wait = True)
                 spf = prediction if use_prediction else None
-                render_env.envs[0].env.render(spf, history_length=HISTORY_LENGTH)
+                render_env.envs[0].env.render(spf, history_length=HISTORY_LENGTH, uncertainty=uncertainty)
+
+                # Calculate prediction error.
+                prediction_error = torch.abs(prediction[-1] - torch.from_numpy(obs[0]))
+                print(f"Mean Prediction Error: {prediction_error.mean():.2f}")
 
                 # Prepare the actions for the environment.
                 # [n_envs*n_agents, ...] -> [n_envs, n_agents, ...]
                 actions = actions.detach().cpu().reshape((self.n_render_rollout_threads, self.num_agents, *actions.shape[1:]))
                 rnn_states = rnn_states.detach().cpu().reshape((self.n_render_rollout_threads, *rnn_states.shape[1:]))
                 actions_env = [actions[idx, :, :].numpy() for idx in range(self.n_render_rollout_threads)]
+
+                if render_env.envs[0].env.step_count == 24:
+                    print(f"ready")
 
                 # Take a step in the environment and get the results.
                 obs, share_obs, render_rewards, dones, infos, available_actions = render_env.step(actions_env)
@@ -480,6 +504,8 @@ class PettingzooRunner(Runner):
                         "visibility_mask": torch.from_numpy(agent_viz_mask).to(self.device)
                     })
 
+                reward_total += render_rewards[0].sum()
+
                 time_stop = time.time()
 
                 # append frame
@@ -488,7 +514,7 @@ class PettingzooRunner(Runner):
                     frames.append(image)
                 
                 # Print the FPS information.
-                print(f"Step {render_env.envs[0].env.step_count} - FPS: {1 / (time_stop - time_start):.2f}, Time per step: {time_stop - time_start:.4f}s (excluding render)")
+                print(f"Step {render_env.envs[0].env.step_count} - FPS: {1 / (time_stop - time_start):.2f} (excluding render) - Reward Total: {reward_total:.2f}")
 
             # save gif
             if self.all_args.save_gifs:

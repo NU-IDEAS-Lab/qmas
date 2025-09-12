@@ -11,6 +11,7 @@ class AGENT_ROLE(IntEnum):
     PROSPECTOR = 0
     EXTRACTOR = 1
     HAULER = 2
+    # PROSPECTOREXTRACTOR = 3
 
 
 class CAP(IntEnum):
@@ -99,21 +100,24 @@ class Agent(Entity):
     entity_type = ENTITY_TYPE.AGENT
     role = None # To be set by subclasses
 
-    def __init__(self, *args, speed_max = 1.0, observation_radius=np.inf, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, world_dims, *args, speed_max = 1.0, observation_radius=np.inf, **kwargs):
+        self.world_dims = world_dims
         self.speed_max = speed_max
         self.observation_radius = observation_radius
         self.capabilities = {
             CAP.PROSPECT: False,
             CAP.EXTRACT: False,
             CAP.CARRY: False,
-            CAP.CARRY_CAPACITY: 0.0,
         }
+        super().__init__(*args, **kwargs)
 
 
     def reset(self, *args, **kwargs):
         super().reset(*args, **kwargs)
         self.cargo = {}
+        self.steps_stationary = 0
+        self.mask_observed = np.zeros(self.world_dims, dtype=bool)
+        self.mask_resources_observed = np.zeros(self.world_dims, dtype=bool)
 
 
 # --- New agent Type subclasses ---
@@ -129,7 +133,6 @@ class Prospector(Agent):
             CAP.PROSPECT: True,
             CAP.EXTRACT: False,
             CAP.CARRY: False,
-            CAP.CARRY_CAPACITY: 0.0
         })
 
 
@@ -144,8 +147,22 @@ class Extractor(Agent):
             CAP.PROSPECT: False,
             CAP.EXTRACT: True,
             CAP.CARRY: False,
-            CAP.CARRY_CAPACITY: 0.0
         })
+
+
+# class ProspectorExtractor(Agent):
+#     """ProspectorExtractor: observe and extract resources.
+#     """
+
+#     role = AGENT_ROLE.PROSPECTOREXTRACTOR
+    
+#     def __init__(self, *args, **kwargs):
+#         super().__init__(*args, **kwargs)
+#         self.capabilities.update({
+#             CAP.PROSPECT: True,
+#             CAP.EXTRACT: True,
+#             CAP.CARRY: False,
+#         })
 
 
 class Hauler(Agent):
@@ -158,6 +175,21 @@ class Hauler(Agent):
         self.capabilities.update({
             CAP.PROSPECT: False,
             CAP.EXTRACT: False,
+            CAP.CARRY: True,
+            CAP.CARRY_CAPACITY: carry_capacity
+        })
+
+
+class SuperBot(Agent):
+    """ SuperBot: It can do anything! (TM) """
+
+    role = AGENT_ROLE.PROSPECTOR
+
+    def __init__(self, *args, carry_capacity=1.0, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.capabilities.update({
+            CAP.PROSPECT: True,
+            CAP.EXTRACT: True,
             CAP.CARRY: True,
             CAP.CARRY_CAPACITY: carry_capacity
         })
