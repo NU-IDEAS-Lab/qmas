@@ -74,6 +74,6 @@ class ValueNorm(nn.Module):
         mean, var = self.running_mean_var()
         out = input_vector * torch.sqrt(var)[(None,) * self.norm_axes] + mean[(None,) * self.norm_axes]
         
-        out = out.cpu().numpy()
+        out = out.detach().cpu()
         
         return out

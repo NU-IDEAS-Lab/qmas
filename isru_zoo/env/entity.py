@@ -180,6 +180,21 @@ class Hauler(Agent):
         })
 
 
+class SuperBot(Agent):
+    """ SuperBot: It can do anything! (TM) """
+
+    role = AGENT_ROLE.PROSPECTOR
+
+    def __init__(self, *args, carry_capacity=1.0, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.capabilities.update({
+            CAP.PROSPECT: True,
+            CAP.EXTRACT: True,
+            CAP.CARRY: True,
+            CAP.CARRY_CAPACITY: carry_capacity
+        })
+
+
 class Depot(Entity):
     ''' This base class stores all generic depot state. '''
 

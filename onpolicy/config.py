@@ -307,7 +307,7 @@ def get_config():
     parser.add_argument("--results_dir", type=str, default="", help="file path at which to store results")
 
     # log parameters
-    parser.add_argument("--log_interval", type=int, default=5, help="time duration between contiunous twice log printing.")
+    parser.add_argument("--log_interval", type=int, default=1, help="time duration between contiunous twice log printing.")
 
     # eval parameters
     parser.add_argument("--use_eval", action=argparse.BooleanOptionalAction, default=False, help="by default, do not start evaluation. If set`, start evaluation alongside with training.")

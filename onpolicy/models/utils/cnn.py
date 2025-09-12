@@ -83,9 +83,9 @@ class AddCoords(nn.Module):
         return ret
 
 
-class EncoderLayer(nn.Module):
+class EncoderSkipConnectionsLayer(nn.Module):
     def __init__(self, obs_shape, hidden_size, use_orthogonal, use_ReLU):
-        super(EncoderLayer, self).__init__()
+        super(EncoderSkipConnectionsLayer, self).__init__()
 
         active_func = [nn.Tanh(), nn.ReLU()][use_ReLU]
         init_method = [nn.init.xavier_uniform_, nn.init.orthogonal_][use_orthogonal]
@@ -135,6 +135,42 @@ class EncoderLayer(nn.Module):
         return x
 
 
+class EncoderLayer(nn.Module):
+    def __init__(self, obs_shape, hidden_size, use_orthogonal, use_ReLU):
+        super(EncoderLayer, self).__init__()
+
+        active_func = [nn.Tanh(), nn.ReLU()][use_ReLU]
+        init_method = [nn.init.xavier_uniform_, nn.init.orthogonal_][use_orthogonal]
+        gain = nn.init.calculate_gain(['tanh', 'relu'][use_ReLU])
+
+        def init_(m):
+            return init(m, init_method, lambda x: nn.init.constant_(x, 0), gain=gain)
+
+        input_channel = obs_shape[0]
+
+        self.encoder = smp.encoders.get_encoder(
+            "resnet34",
+            in_channels=input_channel,
+            depth=5,
+            weights=None,
+        )
+
+        self.hidden_size = hidden_size
+        self.init_ = init_
+        self.active_func = active_func
+
+        self.post = nn.Sequential(
+            Flatten(),
+            init_(nn.Linear(self.encoder.out_channels[-1], hidden_size)),
+            active_func
+        )
+
+    def forward(self, x):
+        x = self.encoder(x)
+        x = self.post(x[-1])
+        return x
+
+
 class UNetLayer(nn.Module):
     def __init__(self, obs_shape, hidden_size, use_orthogonal, use_ReLU, kernel_size=3, stride=1):
         super(UNetLayer, self).__init__()
@@ -150,8 +186,8 @@ class UNetLayer(nn.Module):
         input_width = obs_shape[1]
         input_height = obs_shape[2]
 
-        self.addcoords = AddCoords(with_r=False)
-        input_channel = input_channel + 2
+        # self.addcoords = AddCoords(with_r=False)
+        # input_channel = input_channel + 2
 
         self.sequence = nn.Sequential(
             # smp.DeepLabV3(
@@ -167,6 +203,8 @@ class UNetLayer(nn.Module):
                 in_channels=input_channel,                  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
                 classes=1,                      # model output channels (number of classes in your dataset)
                 # decoder_interpolation="bilinear",
+                # decoder_use_norm=False,
+                # decoder_attention_type="scse",
                 activation="sigmoid",          # activation function
             ),
             # smp.Segformer(
@@ -186,23 +224,29 @@ class UNetLayer(nn.Module):
 
 
     def forward(self, x):
-        x = self.addcoords(x)
+        # x = self.addcoords(x)
         x = self.sequence(x)
         return x
 
 
 class CNNBase(nn.Module):
-    def __init__(self, args, obs_shape):
+    def __init__(self, args, obs_shape, mode='unet'):
         super(CNNBase, self).__init__()
 
         self._use_orthogonal = args.use_orthogonal
         self._use_ReLU = args.use_ReLU
         self.hidden_size = args.hidden_size
 
-        # self.cnn = CNNLayer(obs_shape, self.hidden_size, self._use_orthogonal, self._use_ReLU)
-        # self.cnn = CoordConv(obs_shape, self.hidden_size, self._use_orthogonal, self._use_ReLU)
-        self.cnn = UNetLayer(obs_shape, self.hidden_size, self._use_orthogonal, self._use_ReLU)
-        # self.cnn = EncoderLayer(obs_shape, self.hidden_size, self._use_orthogonal, self._use_ReLU)
+        MODES = {
+            'cnn': CNNLayer,
+            'coordconv': CoordConv,
+            'unet': UNetLayer,
+            'encoder': EncoderLayer,
+            'encoder_skip': EncoderSkipConnectionsLayer,
+        }
+        assert mode in MODES.keys(), f"mode should be one of {MODES.keys()}"
+        base_class = MODES[mode]
+        self.cnn = base_class(obs_shape, self.hidden_size, self._use_orthogonal, self._use_ReLU)
 
     def forward(self, x):
         x = self.cnn(x)
