@@ -1,3 +1,4 @@
+from enum import IntEnum
 from pettingzoo import ParallelEnv
 from pettingzoo.utils import parallel_to_aec
 
@@ -8,7 +9,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from copy import copy
 
-from isru_zoo.env.entity import ENTITY_TYPE, AGENT_ROLE, CAP, Agent, Depot, Extractor, Hauler, Prospector
+from isru_zoo.env.entity import ENTITY_TYPE, AGENT_ROLE, CAP, Agent, Depot, Extractor, Hauler, Prospector, SuperBot
 from isru_zoo.env.resource import TestResource1, TestResource2
 
 
@@ -24,12 +25,20 @@ def add_args(parser):
                         help="The number of prospector vehicles to place in the world.")
     parser.add_argument("--num_obstacles", type=int, default=0,
                         help="The number of obstacles to place in the world.")
+    parser.add_argument("--num_resources", type=int, default=20,
+                        help="The number of resources to place in the world.")
+    parser.add_argument("--randomize_num_resources", action="store_true",
+                        help="Whether to randomize the number of resources at each reset up to `num_resources`.")
+    parser.add_argument("--curriculum_num_resources", action="store_true",
+                        help="Whether to increase the number of resources over time up to `num_resources`.")
     parser.add_argument("--world_size", type=int, default=50,
                         help="The size of the world. The world is a square with side length `world_size`.")
     parser.add_argument("--observation_radius", type=int, default=10,
                         help="The radius within which agents can observe each other and resources.")
     parser.add_argument("--observation_mask", action="store_true",
                         help="Whether to apply visibility mask to returned observations.")
+    parser.add_argument("--available_actions_mask", action="store_true",
+                        help="Whether to return an available actions mask for each agent.")
     parser.add_argument("--hauler_capacity", type=float, default=10.0,
                         help="The maximum amount of resources a hauler can carry.")
     parser.add_argument("--hauler_pickup_threshold", type=float, default=1.5,
@@ -74,10 +83,15 @@ class parallel_env(ParallelEnv):
             num_haulers: int = 2,
             num_prospectors: int = 1,
             max_cycles: int = -1,
+            episode_max: int = 1000,
             num_obstacles: int = 10,
+            num_resources: int = 20,
+            randomize_num_resources: bool = False,
+            curriculum_num_resources: bool = False,
             world_size: int = 50,
             observation_radius: int = 10,
             observation_mask: bool = False,
+            available_actions_mask: bool = False,
             hauler_capacity: float = 10.0,
             hauler_pickup_threshold: float = 1.5,
             render_mode: str = "human",
@@ -89,34 +103,48 @@ class parallel_env(ParallelEnv):
 
         # Configuration.
         self.max_cycles = max_cycles
+        self.episode_max = episode_max
         self.world_dims = np.array([world_size, world_size], dtype=np.int32)
         self.num_obstacles = num_obstacles
+        self.randomize_num_resources = randomize_num_resources
+        self.curriculum_num_resources = curriculum_num_resources
         self.render_mode = render_mode
         self.mask_observations = observation_mask
+        self.mask_available_actions = available_actions_mask
         self.default_observation_radius = observation_radius
         self.default_hauler_capacity = hauler_capacity
         self.hauler_pickup_threshold = hauler_pickup_threshold
 
         # Set up entities.
-        self.possible_agents = \
-            [Extractor(
-                position=self.get_random_position(),
-                observation_radius=self.default_observation_radius
-            ) for _ in range(num_extractors)] + \
-            [Hauler(
+        # self.possible_agents = \
+        #     [Extractor(
+        #         world_dims=self.world_dims,
+        #         position=self.get_random_position(),
+        #         observation_radius=self.default_observation_radius
+        #     ) for _ in range(num_extractors)] + \
+        #     [Hauler(
+        #         world_dims=self.world_dims,
+        #         position=self.get_random_position(),
+        #         carry_capacity=self.default_hauler_capacity,
+        #         observation_radius=self.default_observation_radius
+        #     ) for _ in range(num_haulers)] + \
+        #     [Prospector(
+        #         world_dims=self.world_dims,
+        #         position=self.get_random_position(),
+        #         observation_radius=self.default_observation_radius
+        #     ) for _ in range(num_prospectors)]
+        self.possible_agents = [
+            SuperBot(
+                world_dims=self.world_dims,
                 position=self.get_random_position(),
                 carry_capacity=self.default_hauler_capacity,
                 observation_radius=self.default_observation_radius
-            ) for _ in range(num_haulers)] + \
-            [Prospector(
-                position=self.get_random_position(),
-                observation_radius=self.default_observation_radius
-            ) for _ in range(num_prospectors)]
+            ) for _ in range(num_extractors + num_haulers + num_prospectors)
+        ]
 
         # Set up the possible resources.
-        self.possible_resources = [
-            TestResource1(10)
-        ]
+        self.possible_resources = []
+        self.possible_resources.append(TestResource1(num_resources, resource_id=1))
 
         # Set up depots.
         self.possible_depots = [
@@ -125,9 +153,6 @@ class parallel_env(ParallelEnv):
                 resource = r
             ) for r in self.possible_resources
         ]
-
-        # Record the map shape.
-        self.map_shape = (*self.world_dims, 2 * len(self.possible_resources) + 3)  # +3 for obstacles, agents, depots
 
         # Set up spaces.
         self.observation_spaces = spaces.Dict({
@@ -139,6 +164,7 @@ class parallel_env(ParallelEnv):
         self.nearest_tile=None
         
         # Reset the environment.
+        self.reset_count = 0
         self.reset()
 
 
@@ -166,19 +192,22 @@ class parallel_env(ParallelEnv):
         ''' Sets the environment to its initial state. '''
 
         if seed != None:
-            random.seed(seed)
+            np.random.seed(seed)
         
-        origin = np.array([0.0, 0.0], dtype=np.float32)
-        world_indices_x = np.arange(self.world_dims[0])
-        world_indices_y = np.arange(self.world_dims[1])
+        # Reset resources.
+        for r in self.possible_resources:
+            if self.randomize_num_resources:
+                r.reset(quantity=np.random.randint(1, r.quantity_max))
+            elif self.curriculum_num_resources:
+                # Scale the number of resources logarithmically with episode number.
+                episode = self.reset_count / 2.0
+                quantity = int(np.ceil((np.log1p(episode) / np.log1p(self.episode_max)) * r.quantity_max))
+                r.reset(quantity=quantity)
+            else:
+                r.reset()
 
-        # Reset obstacles.
-        self.map_obstacles = np.zeros(self.world_dims, dtype=np.float32)
-        self.map_obstacles[
-            np.random.choice(world_indices_x, self.num_obstacles),
-            np.random.choice(world_indices_y, self.num_obstacles)
-        ] = 1.0
-        positions_available = np.argwhere(self.map_obstacles == 0)
+        # Generate new map (obstacles, resources, etc.) and get available positions.
+        positions_available = self.generate_map()        
 
         # Reset the agents.
         self.agents = copy(self.possible_agents)
@@ -187,47 +216,15 @@ class parallel_env(ParallelEnv):
             start_position = positions_available[idx]
             agent.reset(
                 reset_start_position=True,
-                position=start_position
+                position=start_position,
             )
-            agent.reward = 0.0
-
-            # Haulers start empty: cargo per resource_id -> 0.0
             if agent.capabilities[CAP.CARRY]:
                 agent.cargo = {r.resource_id: 0.0 for r in self.possible_resources}
-
-        # Reset depots.
-        # Ensure they are placed in an available location.
-        self.map_depots = np.zeros(self.world_dims, dtype=np.float32)
-        for depot in self.possible_depots:
-            idx = np.random.randint(positions_available.shape[0])
-            depot.reset(
-                reset_start_position=True,
-                position=positions_available[idx]
-            )
-            self.map_depots[depot.position[0], depot.position[1]] = depot.resource_id
-        
-        # Build stable resource index mappings for action vector <-> resource objects
-        self.resource_list = list(self.possible_resources)
-        self.rid_to_idx = {r.resource_id: i for i, r in enumerate(self.resource_list)}
-        self.idx_to_res = {i: r for i, r in enumerate(self.resource_list)}
-
-        # Reset resources.
-        self.map_resources = {}
-        self.mask_map_resources_discovered = np.zeros(self.world_dims, dtype=bool)
-        for r in self.possible_resources:
-            self.map_resources[r] = np.zeros(self.world_dims, dtype=np.float32)
-            for _ in range(r.quantity):
-                idx = np.random.randint(positions_available.shape[0])
-                pos = positions_available[idx]
-                self.map_resources[r][pos[0], pos[1]] += 1.0
 
         # Reset other state.
         self.step_count = 0
         self.last_rewards = {agent: 0.0 for agent in self.possible_agents}
         self.dones = dict.fromkeys(self.agents, False)
-
-        # Set available actions.
-        self.available_actions_dict = {agent: self._getAvailableActions(agent) for agent in self.agents}
 
         info = {
             agent: {} for agent in self.agents
@@ -239,8 +236,81 @@ class parallel_env(ParallelEnv):
             obs, obs_mask = self.observe(agent)
             observation[agent] = obs
             info[agent]["visibility_mask"] = obs_mask
+        
+        self.reset_count += 1
 
         return observation, info
+
+
+    def generate_map(self):
+        ''' Generates a random map for the environment. '''
+
+        world_indices_x = np.arange(self.world_dims[0])
+        world_indices_y = np.arange(self.world_dims[1])
+
+        mask_available = np.ones(self.world_dims, dtype=bool)
+
+        # Reset obstacles.
+        self.map_obstacles = np.zeros(self.world_dims, dtype=np.float32)
+        positions_available = np.argwhere(mask_available)
+        indices = np.random.choice(positions_available.shape[0], self.num_obstacles, replace=False)
+        for i in indices:
+            pos = positions_available[i]
+            self.map_obstacles[pos[0], pos[1]] = 1.0
+            mask_available[pos[0], pos[1]] = False
+
+        # Reset depots.
+        # Ensure they are placed in an available location.
+        self.map_depots = np.zeros(self.world_dims, dtype=np.float32)
+        positions_available = np.argwhere(mask_available)
+        indices = np.random.choice(positions_available.shape[0], len(self.possible_depots), replace=False)
+        for i, depot in enumerate(self.possible_depots):
+            idx = indices[i]
+            depot.reset(
+                reset_start_position=True,
+                position=positions_available[idx]
+            )
+            assert depot.resource_id != 0, "A resource_id of 0 is indistinguishable from empty space!"
+            self.map_depots[depot.position[0], depot.position[1]] = depot.resource_id
+            mask_available[depot.position[0], depot.position[1]] = False
+
+        # Build stable resource index mappings for action vector <-> resource objects
+        self.resource_list = list(self.possible_resources)
+        self.rid_to_idx = {r.resource_id: i for i, r in enumerate(self.resource_list)}
+        self.idx_to_res = {i: r for i, r in enumerate(self.resource_list)}
+
+        # Reset resources.
+        self.map_resources = {}
+        for r in self.possible_resources:
+            self.map_resources[r] = np.zeros(self.world_dims, dtype=np.float32)
+            positions_available = np.argwhere(mask_available)
+            indices = np.random.choice(positions_available.shape[0], r.quantity, replace=False)
+            for i in range(r.quantity):
+                idx = indices[i]
+                pos = positions_available[idx]
+                self.map_resources[r][pos[0], pos[1]] += 1.0
+                mask_available[pos[0], pos[1]] = False
+
+        # Ensure that the map was correctly generated.
+        mask_resources = np.zeros(self.world_dims, dtype=bool)
+        for r in self.possible_resources:
+            mask_resources = mask_resources | (self.map_resources[r] > 0)
+        mask_depots = self.map_depots > 0
+        mask_obstacles = self.map_obstacles > 0
+        assert np.sum(mask_resources & mask_obstacles) == 0, "Some resources are located inside obstacles!"
+        assert np.sum(mask_resources & mask_depots) == 0, "Some resources are located inside depots!"
+        assert np.sum(mask_depots & mask_obstacles) == 0, "Some depots are located inside obstacles!"
+        assert np.sum(mask_resources) == sum(r.quantity for r in self.possible_resources), "Incorrect resource count!"
+        assert np.sum(mask_depots) == len(self.possible_depots), "Incorrect depot count!"
+        assert np.sum(mask_obstacles) == self.num_obstacles, "Incorrect obstacle count!"
+
+        return positions_available
+
+
+    @property
+    def map_shape(self):
+        ''' Returns the map shape. '''
+        return (2 * len(self.possible_resources) + 3, *self.world_dims)  # +3 for obstacles, agents, depots
 
 
     def get_random_position(self):
@@ -249,7 +319,80 @@ class parallel_env(ParallelEnv):
         return np.random.uniform(0, self.world_dims).astype(np.float32)
 
 
-    def render(self, pred=None, figsize=(9, 6), history_length=2):
+    def render(self, pred=None, figsize=(9, 6), history_length=2, **kwargs):
+        ''' Renders the environment.
+            
+            Args:
+                figsize (tuple, optional): The size of the figure in inches.
+                
+            Returns:
+                None
+        '''
+
+        # # Convert the predicted state back into a dictionary (unflatten).
+        # pred_unflattened = []
+        # pred_steps = pred.shape[0] if pred is not None else 0
+        # for i in range(pred_steps):
+        #     p = spaces.unflatten(self.observation_spaces, pred[i].flatten())
+        #     pred_unflattened.append(p)
+
+        # Plot state as a grid using matplotlib.
+        plt.figure(figsize=figsize)
+
+        # Plot the depots.
+        for i, r in enumerate(self.possible_resources):
+            color = plt.cm.get_cmap("tab10")(i)
+            # Plot depot for this resource type.
+            depot_positions = np.argwhere(self.map_depots == r.resource_id)
+            if depot_positions.size > 0:
+                plt.scatter(depot_positions[:, 0], depot_positions[:, 1], label=f"Depot {r.resource_id}", marker="s", color=color, edgecolor="black", s=100)
+
+        # Plot the agents.
+        for agent in self.agents:
+            pos = agent.position.astype(np.int32)
+            if agent.capabilities[CAP.CARRY]:
+                plt.scatter(pos[0], pos[1], label=f"Hauler {self.possible_agents.index(agent)}", marker="^", s=100, alpha=0.5, color="red", edgecolor="black")
+            elif agent.capabilities[CAP.EXTRACT]:
+                plt.scatter(pos[0], pos[1], label=f"Extractor {self.possible_agents.index(agent)}", marker="o", s=100, alpha=0.5, color="yellow", edgecolor="black")
+            elif agent.capabilities[CAP.PROSPECT]:
+                plt.scatter(pos[0], pos[1], label=f"Prospector {self.possible_agents.index(agent)}", marker="*", s=100, alpha=0.5, color="green", edgecolor="black")
+
+        # Plot the resources.
+        for i, r in enumerate(self.possible_resources):
+            color = plt.cm.get_cmap("tab10")(i)
+            positions = np.argwhere(self.map_resources[r] > 0)
+            if positions.size > 0:
+                plt.scatter(positions[:, 0], positions[:, 1], label=f"Resource {r.resource_id}", alpha=0.5)
+                            
+        # Display the total reward for this step. Position this text below the subplots. Do not use suptitle.
+        reward = sum(self.last_rewards.values())
+        resources_deposited = sum(depot.stock for depot in self.possible_depots)
+        resources_held = sum(sum(agent.cargo.values()) for agent in self.agents if agent.capabilities[CAP.CARRY])
+        plt.figtext(0.5, 0.01, f"Step: {self.step_count}, Combined Step Reward: {reward:.2f}, Resources Deposited: {resources_deposited}, Resources Held: {resources_held}", ha="center", fontsize=8)
+
+        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.xlim(-1, self.world_dims[0])
+        plt.ylim(-1, self.world_dims[1])
+        plt.gca().set_aspect('equal', adjustable='box')
+
+        if self.render_mode == "human":
+            # Show the plot.
+            plt.show()
+            return None
+        elif self.render_mode == "rgb_array":
+            # Save the plot to a buffer and return it as an RGB array.
+            from io import BytesIO
+            io_buf = BytesIO()
+            plt.savefig(io_buf, format='raw')
+            io_buf.seek(0)
+            img_arr = np.reshape(np.frombuffer(io_buf.getvalue(), dtype=np.uint8),
+                                newshape=(int(plt.bbox.bounds[3]), int(plt.bbox.bounds[2]), -1))
+            io_buf.close()
+            plt.close()
+            return img_arr
+
+
+    def render_OLD(self, pred=None, figsize=(9, 6), history_length=2):
         ''' Renders the environment.
             
             Args:
@@ -284,19 +427,97 @@ class parallel_env(ParallelEnv):
                 None or np.ndarray: None if render_mode is "human", otherwise an RGB array.
         '''
 
+        from matplotlib.colors import ListedColormap
+        import matplotlib
+        MAP_LAYERS = parallel_env_map_obs.MAP_LAYERS
+
         # Plot state as a grid using matplotlib.
         plt.figure(figsize=figsize)
 
         # Plot the map layers.
         # map_layers = state["map"]
-        map_layers = state
-        num_layers = map_layers.shape[-1]
+        num_layers = state.shape[0]
+
+        # Create a gridspec with 2 rows: top row for layers, bottom row for human-readable
+        import matplotlib.gridspec as gridspec
+        fig = plt.gcf()
+        fig.clf()
+        gs = gridspec.GridSpec(2, num_layers, height_ratios=[1, 2])
+
+        # Plot each layer in the top row
         for i in range(num_layers):
-            plt.subplot(1, num_layers, i + 1)
-            plt.imshow(map_layers[:, :, i], cmap="gray", origin="lower")
-            plt.title(f"Layer {i}")
-            plt.axis("off")
+            ax = fig.add_subplot(gs[0, i])
+            if i == MAP_LAYERS.RELATIVE_POS_X or i == MAP_LAYERS.RELATIVE_POS_Y:
+                ax.imshow(np.abs(state[i, :, :]), cmap="coolwarm", vmin=-self.default_observation_radius, vmax=self.default_observation_radius)
+            else:
+                ax.imshow(state[i, :, :], cmap="plasma")
+            name = MAP_LAYERS(i).name if i in MAP_LAYERS._value2member_map_ else f"Layer {i}"
+            ax.set_title(name, fontsize=8, rotation=30)
+            ax.axis("off")
+
+        # Plot the human-readable version spanning the entire bottom row
+        cmap_visibility = ListedColormap(['gray', 'white'])
+        ax_hr = fig.add_subplot(gs[1, :])
+        ax_hr.imshow(state[MAP_LAYERS.MASK_OBSERVED], cmap=cmap_visibility)
+        ax_hr.set_title("Human-Readable State")
+        ax_hr.axis("on")
+
+        # Plot obstacles.
+        positions = np.argwhere(state[MAP_LAYERS.OBSTACLES] > 0)
+        ax_hr.scatter(positions[:, 1], positions[:, 0], label="Obstacle", marker="X", color="black", s=100)
+
+        # Plot visible depots.
+        positions = np.argwhere(state[MAP_LAYERS.DEPOTS] > 0)
+        ax_hr.scatter(positions[:, 1], positions[:, 0], label="Depot", marker="$\u2302$", color="cyan", s=100)
+
+        # Plot visible resources.
+        resource_start_layer = parallel_env_map_obs.MAP_LAYER_START_RESOURCES
+        for i in range(resource_start_layer, resource_start_layer + len(self.possible_resources)):
+            positions = np.argwhere(state[i] > 0)
+            if positions.size > 0:
+                ax_hr.scatter(positions[:, 1], positions[:, 0], marker="o", label=f"Resource {i - resource_start_layer}", alpha=0.5)
         
+        # Plot prospectors.
+        positions = np.argwhere(state[MAP_LAYERS.AGENTS_PROSPECTOR] > 0)
+        if positions.size > 0:
+            ax_hr.scatter(positions[:, 1], positions[:, 0], label="Prospector", marker="$🔍$", s=100, alpha=0.5, color="green", edgecolor="black")
+        
+        # Plot extractors.
+        positions = np.argwhere(state[MAP_LAYERS.AGENTS_EXTRACTOR] > 0)
+        if positions.size > 0:
+            ax_hr.scatter(positions[:, 1], positions[:, 0], label="Extractor", marker="$\u26CF$", s=100, alpha=0.5, color="yellow", edgecolor="black")
+
+        # Plot haulers.
+        positions = np.argwhere(state[MAP_LAYERS.AGENTS_HAULER] > 0)
+        if positions.size > 0:
+            ax_hr.scatter(positions[:, 1], positions[:, 0], label="Hauler", marker="$🚘$", s=100, alpha=0.5, color="red", edgecolor="black")
+
+        # Plot this agent as a square with a black border around the original icon.
+        # Position is where MAP_LAYERS.RELATIVE_POS_X and MAP_LAYERS.RELATIVE_POS_Y are both 0.
+        where_x_zero = state[MAP_LAYERS.RELATIVE_POS_X] == 0
+        where_y_zero = state[MAP_LAYERS.RELATIVE_POS_Y] == 0
+        positions = np.argwhere(where_x_zero & where_y_zero)
+        if positions.size > 0:
+            ax_hr.scatter(positions[:, 1], positions[:, 0], label="Self", marker="s", s=150, facecolors='none', edgecolors='black', linewidths=2)
+
+        # Plot a partially-completed ring around the haulers to indicate their cargo.
+        for i in range(resource_start_layer, resource_start_layer + len(self.possible_resources)):
+            cargo_layer = i + len(self.possible_resources)
+            positions = np.argwhere(state[cargo_layer] > 0)
+            for pos in positions:
+                cargo_percentage = state[cargo_layer][pos[0], pos[1]]
+                if cargo_percentage > 0:
+                    # Draw an arc to indicate the amount of cargo.
+                    arc = matplotlib.patches.Arc(
+                        (pos[1], pos[0]), 1.5, 1.5,
+                        angle=0,
+                        theta1=0,
+                        theta2=cargo_percentage * 360,
+                        color="red",
+                        lw=2
+                    )
+                    ax_hr.add_patch(arc)
+
         # Display the total reward for this step. Position this text below the subplots. Do not use suptitle.
         reward = sum(self.last_rewards.values())
         plt.figtext(0.5, 0.01, f"Step: {self.step_count}, Combined Step Reward: {reward:.2f}", ha="center", fontsize=8)
@@ -322,32 +543,92 @@ class parallel_env(ParallelEnv):
     def state_space(self):
         ''' Returns the state space of the environment. '''
 
-        # Create the state space.
-        # The state space is a complete observation of the environment.
-        # This is not part of the standard PettingZoo API, but is useful for centralized training.
-        # return spaces.Dict({
-        #     "id": spaces.Discrete(len(self.possible_agents)),
-        #     "map": spaces.Box(
-        #         low=-np.inf,
-        #         high=np.inf,
-        #         shape=self.map_shape,
-        #         dtype=np.float32
-        #     )
-        # })
-
-        return spaces.Box(
-            low=-np.inf,
-            high=np.inf,
-            shape=self.map_shape,
-            dtype=np.float32
-        )
+        return self.observation_space(self.possible_agents[0])
 
 
     @functools.cache
     def observation_space(self, agent):
         ''' Returns the observation space for the given agent. '''
 
-        return self.state_space
+        def agent_obs_space(agent):
+            ''' Returns the observation space for a single agent. '''
+
+            return spaces.Dict({
+                "position": spaces.Box(
+                    low=0,
+                    high=np.max(self.world_dims),
+                    shape=(2,),
+                    dtype=np.float32
+                ),
+                "velocity": spaces.Box(
+                    low=-1,
+                    high=1,
+                    shape=(2,),
+                    dtype=np.float32
+                ),
+                "role": spaces.Box(
+                    low=0,
+                    high=len(AGENT_ROLE),
+                    shape=(1,),
+                    dtype=np.int32
+                ),
+                "cargo": spaces.Box(
+                    low=0,
+                    high=self.default_hauler_capacity,
+                    shape=(len(self.possible_resources),),
+                    dtype=np.float32
+                ),
+            })
+
+        # Set up agent state spaces. Ensure that each agent's data is first for its own observation.
+        # Python dictionaries maintain insertion order as of Python 3.7.
+        agent_spaces = {}
+        agent_spaces[agent] = agent_obs_space(agent)
+        for other_agent in self.possible_agents:
+            if other_agent != agent:
+                agent_spaces[other_agent] = agent_obs_space(other_agent)
+
+        # Create the state space.
+        # The state space is a complete observation of the environment.
+        # This is not part of the standard PettingZoo API, but is useful for centralized training.
+        return spaces.Dict({
+            "role": spaces.Box(
+                low=0,
+                high=len(AGENT_ROLE),
+                shape=(1,),
+                dtype=np.int32
+            ),
+            "agents": spaces.Dict(agent_spaces),
+            "depots": spaces.Dict({
+                depot: spaces.Dict({
+                    "position": spaces.Box(
+                        low=0,
+                        high=np.max(self.world_dims),
+                        shape=(2,),
+                        dtype=np.float32
+                    ),
+                    "stock": spaces.Box(
+                        low=0,
+                        high=np.inf,
+                        shape=(1,),
+                        dtype=np.float32
+                    ),
+                }) for depot in self.possible_depots
+            }),
+            "map": spaces.Box(
+                low=-np.inf,
+                high=np.inf,
+                shape=(*self.world_dims, len(self.possible_resources)),
+                dtype=np.float32
+            )
+        })
+
+        # return spaces.Box(
+        #     low=-np.inf,
+        #     high=np.inf,
+        #     shape=self.map_shape,
+        #     dtype=np.float32
+        # )
 
 
     @functools.cache
@@ -359,7 +640,7 @@ class parallel_env(ParallelEnv):
             # The agent can only move one space at a time.
             "movement": spaces.Box(low=-1, high=1, shape=(2,), dtype=np.int32),
 
-            # Communication is a simple boolean flag.
+            # Communication is a request flag (request-based comm).
             "communication": spaces.Box(low=0, high=1, shape=(1,), dtype=np.int32),
 
             # Resource actions are represented as a floating point value for each resource type.
@@ -380,7 +661,10 @@ class parallel_env(ParallelEnv):
             elif action_space.__class__.__name__ == "Discrete":
                 return spaces.MultiBinary(action_space.n)
             elif action_space.__class__.__name__ == "MultiDiscrete":
-                return spaces.MultiBinary(len(action_space.nvec), np.max(action_space.nvec))
+                return spaces.MultiBinary(action_space.nvec)
+            elif isinstance(action_space, spaces.Box) and np.issubdtype(action_space.dtype, np.integer):
+                diff = action_space.high - action_space.low + 1
+                return spaces.MultiBinary(diff)
             else:
                 raise NotImplementedError(f"Action space {action_space} not supported for action masking.")
         return get_available_action_space(action_space)
@@ -390,137 +674,112 @@ class parallel_env(ParallelEnv):
         ''' Returns the global state of the environment.
             This is useful for centralized training, decentralized execution. '''
         
-        state = self._populateStateSpace(self.possible_agents[0], force_visible=True)[0]
+        state = self._state()
 
         return state
+
+
+    def _state(self):
+        ''' Returns the global state and mask of the environment.'''
+
+        return self._observe(self.possible_agents[0], force_visible=True)[0]
 
 
     def observe(self, agent, senders=set()):
         ''' Returns the observation for the given agent.'''
 
         # Collect local data.
-        local_obs, local_obs_mask = self._populateStateSpace(agent)
+        local_obs, local_obs_mask = self._observe(agent)
 
         return local_obs, local_obs_mask
 
-        # Set up the matrices.
-        map = np.copy(local_obs["map"])
-        map_mask = np.zeros_like(local_obs_mask["map"], dtype=bool)
-
-        # Handle communicated data.
-        for sender in senders:
-            sender_obs, sender_obs_mask = self._populateStateSpace(sender)
-            sender_visible = sender_obs_mask["map"] == True
-            map[sender_visible] = sender_obs["map"][sender_visible]
-            map_mask[sender_visible] = True
-        
-        # Apply local observations (overwrite any communicated data).
-        map[local_obs_mask["map"] == True] = local_obs["map"][local_obs_mask["map"] == True]
-        map_mask |= local_obs_mask["map"]
-
-        # Update the local observation.
-        combined_obs = local_obs
-        combined_obs["map"] = map
-        combined_obs_mask = local_obs_mask
-        combined_obs_mask["map"] = map_mask
-
-        # Debugging: highlight the visible area in the map.
-        # obs["map"][obs_mask["map"], :] += 0.2
-
-        if self.mask_observations:
-            result = combined_obs["map"] * combined_obs_mask["map"]
-            return result, combined_obs_mask["map"]
-        else:
-            # return combined_obs, combined_obs_mask
-            return combined_obs["map"], combined_obs_mask["map"]
-
 
     def available_actions(self, agent):
-        ''' Returns the dictionary of available actions for all agents.
-            This is not standard in the Pettingzoo API but is useful. '''
-        return self.available_actions_dict[agent]
+        ''' Returns the available actions for this agent. '''
+
+        if not self.mask_available_actions:
+            return None
+
+        result = self.available_actions_space(agent).sample()
+
+        other_agent_pos = [a.position for a in self.agents if a != agent]
+        
+        # Prevent movement into obstacles or out of bounds or into another agent.
+        for dx in range(-1, 2):
+            for dy in range(-1, 2):
+                vel = np.array([dx, dy], dtype=np.int32)
+                pos = (agent.position + vel).astype(np.int32)
+                idx = vel + 1  # Shift from [-1, 0, 1] to [0, 1, 2] for indexing
+                if pos[0] < 0 or pos[0] >= self.world_dims[0] or \
+                        pos[1] < 0 or pos[1] >= self.world_dims[1] or \
+                        self.map_obstacles[pos[0], pos[1]] == 1 or \
+                        any(np.array_equal(pos, oap.astype(np.int32)) for oap in other_agent_pos):
+                    # This movement would go out of bounds or into an obstacle; disable it.
+                    result["movement"][idx[0], idx[1]] = 0
+                else:
+                    result["movement"][idx[0], idx[1]] = 1
+
+        # Communication is always available.
+        result["communication"] = np.ones_like(result["communication"])
+
+        if agent.capabilities[CAP.CARRY]:
+            # Hauler agents can always pick up or drop off resources.
+            result["resources"] = np.ones_like(result["resources"])
+        else:
+            # Non-hauler agents cannot pick up or drop off resources.
+            result["resources"] = np.zeros_like(result["resources"])
+        
+        result_flattened = spaces.flatten(self.available_actions_space(agent), result)
+        return result_flattened
 
 
-    def _populateStateSpace(self, agent, force_visible=False):
+    def _observe(self, agent, force_visible=False):
         ''' Returns a populated state/observation space.'''
 
-        # Load agent data into a map.
-        map_agents = np.zeros(self.world_dims, dtype=np.int32)
-        for i, a in enumerate(self.agents):
-            pos = a.position.astype(np.int32)
-            map_agents[pos[0], pos[1]] = 1 + a.role.value
-            if a == agent and not force_visible:
-                # Distinguish the agent in the map.
-                map_agents[pos[0], pos[1]] *= -1
-        
-        # Load agent cargo into the map.
-        map_cargo = []
-        for r in self.possible_resources:
-            m = np.zeros(self.world_dims, dtype=np.float32)
-            for a in self.agents:
-                if a.capabilities[CAP.CARRY] and r.resource_id in a.cargo:
-                    pos = a.position.astype(np.int32)
-                    m[pos[0], pos[1]] = a.cargo[r.resource_id]
-            map_cargo.append(m)
-
         # Build the combined map.
-        layers = [self.map_obstacles, map_agents, self.map_depots, *self.map_resources.values(), *map_cargo]
+        layers = [*self.map_resources.values()]
         map_combined = np.stack(layers, axis=-1).astype(np.float32)
 
         # Create the observation.
         obs = {
-            "id": self.possible_agents.index(agent),
+            "role": np.array([agent.role.value], dtype=np.int32),
+            "agents": {},
+            "depots": {
+                d: {
+                    "position": d.position.astype(np.float32),
+                    "stock": np.array([d.stock], dtype=np.float32),
+                } for d in self.possible_depots
+            },
             "map": map_combined
         }
+
+        def get_agent_state(a):
+            return {
+                "position": a.position.astype(np.float32),
+                "velocity": a.velocity.astype(np.float32),
+                "role": np.array([a.role.value], dtype=np.int32),
+                "cargo": np.array(
+                    [a.cargo.get(r.resource_id, 0.0) for r in self.possible_resources],
+                    dtype=np.float32
+                ) / a.capabilities.get(CAP.CARRY_CAPACITY, 1.0),  # Normalize cargo by capacity
+            }
+
+        # Insert the ego agent first. Python dictionaries preserve insertion order.
+        obs["agents"][agent] = get_agent_state(agent)
+
+        # Add the rest of the agents.
+        for a in self.possible_agents:
+            if a != agent:
+                obs["agents"][a] = get_agent_state(a)
+
         obs_mask = {
-            "id": True,
-            "map": np.ones_like(map_combined, dtype=bool)
+            "role": np.ones_like(obs["role"], dtype=bool),
+            "agents": {a: {k: np.ones_like(v, dtype=bool) for k, v in adict.items()} for a, adict in obs["agents"].items()},
+            "depots": {d: {k: np.ones_like(v, dtype=bool) for k, v in ddict.items()} for d, ddict in obs["depots"].items()},
+            "map": np.ones_like(obs["map"], dtype=bool),
         }
-
-        # Calculate the visible area based on a circular observation radius.
-        if not force_visible or True:
-            radius = agent.observation_radius
-            pos = agent.position.astype(np.int32)
-            visible = (np.arange(self.world_dims[0])[:, None] - pos[0]) ** 2 + \
-                (np.arange(self.world_dims[1])[None, :] - pos[1]) ** 2 <= radius ** 2
-            # obs["map"][visible, 0] += 0.2 # testing - show the visible area in the obstacle layer
-            obs_mask["map"][~visible, :] = False
-
-        # Vehicle-class visibility: only Prospectors can directly observe resources.
-        # Layers are ordered as: 0=obstacles, 1=agents, 2=depots, 3+=resources
-        resource_layer = 3
-        if not force_visible:
-            if not agent.capabilities[CAP.PROSPECT]:
-                # Mask out all resource layers for non-prospector local observations.
-                # (Communicated observations will still be merged in `observe()`)
-                obs_mask["map"][:, :, resource_layer:] = False
-
-        # Update the discovered resources mask.
-        if agent.capabilities[CAP.PROSPECT] and not force_visible:
-            for i, r in enumerate(self.possible_resources):
-                self.mask_map_resources_discovered |= (self.map_resources[r] > 0) & obs_mask["map"][:, :, resource_layer + i]
         
-        return obs["map"], obs_mask["map"]
-        # return obs, obs_mask
-
-
-    def _update_adversary_velocity(self, adversary):
-        """
-        Update velocity based on the step count to create a more complex pattern.
-        This function creates a time-varying velocity that follows different patterns.
-        """
-        if random.random() < 0.3:
-            # Randomly change velocity to create a new pattern
-            adversary.velocity += np.random.normal(0, 0.3, size=self.num_dimensions)
-                
-        # # Add some random noise to make the trajectory more natural
-        noise_magnitude = 0.05 * min(1.0, self.step_count / 50.0)  # Gradually increase noise
-        adversary.velocity += np.random.normal(0, noise_magnitude, size=self.num_dimensions)
-
-        # Normalize velocity to keep it within a reasonable range.
-        norm = np.linalg.norm(adversary.velocity)
-        if norm > 1.0:
-            adversary.velocity = adversary.velocity / norm
+        return obs, obs_mask
 
 
     def step(self, action_dict={}, lastStep=False):
@@ -549,9 +808,10 @@ class parallel_env(ParallelEnv):
             "resources/extant": 0.0,
             "resources/total": 0.0,
             "extractors/num_in_place": 0,
+            "communication/requests_made": 0,
         }
         info_dict.update({agent: {} for agent in self.possible_agents})
-        senders = set()
+        requesters = set()
         
         # Perform agent actions.
         for agent in self.agents:
@@ -565,26 +825,31 @@ class parallel_env(ParallelEnv):
 
                 # Record the action.
                 agent.last_action = action
-                self._populateStateSpace(agent)
+                
                 # Set agent velocity.
                 agent.velocity = action["movement"].astype(np.int32)
                 agent.velocity = np.clip(agent.velocity, -1.0, 1.0)
 
                 # Move the agent.
-                raw_position=agent.position + agent.velocity
+                position_prev = np.copy(agent.position)
+                agent.position = agent.position + agent.velocity
                 pos_min = np.array([0.0, 0.0], dtype=np.float32)
                 pos_max = self.world_dims.astype(np.float32) - 1.0
-                new_position = np.clip(raw_position, pos_min, pos_max)
-                new_position_int = new_position.astype(np.int32)
+                agent.position = np.clip(agent.position, pos_min, pos_max)
 
-                if self.map_obstacles[new_position_int[0], new_position_int[1]] == 1 or not np.array_equal(raw_position, new_position):
-                    reward_dict[agent] -= 2.0
+                # Correct agent velocity to reflect actual movement (in case of collisions).
+                agent.velocity = agent.position - position_prev
+
+                # Check for how long the agent has been stationary.
+                if np.linalg.norm(agent.velocity) < 1e-5:
+                    agent.steps_stationary += 1
                 else:
-                    agent.position=new_position
+                    agent.steps_stationary = 1
 
-                # Handle communication.
+                # Handle communication (request-based): agent requests others' observations.
                 if action["communication"][0] >= 0.5:
-                    senders.add(agent)
+                    requesters.add(agent)
+                    info_dict["communication/requests_made"] += 1
 
                 # Corrected resource handling for Hauler agents
                 if agent.capabilities[CAP.CARRY]:
@@ -604,7 +869,11 @@ class parallel_env(ParallelEnv):
                             extractor, ex_pos_int = self._find_extractor_over_resource(agent.position, r)
                             if extractor is None:
                                 # No eligible extractor-on-resource in range; cannot pick up
-                                reward_dict[agent] -= 0.001
+                                # reward_dict[agent] -= 0.001
+                                continue
+
+                            # Do not allow pickup from depots.
+                            if self.map_depots[ex_pos_int[0], ex_pos_int[1]] != 0:
                                 continue
 
                             available = self.map_resources[r][ex_pos_int[0], ex_pos_int[1]]
@@ -614,9 +883,9 @@ class parallel_env(ParallelEnv):
                                 # Remove from the resource map at the extractor's tile
                                 self.map_resources[r][ex_pos_int[0], ex_pos_int[1]] -= take
                                 # Add to the hauler's cargo
-                                reward_dict[agent]+= 0.2*take
+                                reward_dict[agent]+= 100.0 * take
+                                reward_dict[extractor] += 100.0 * take
                                 agent.cargo[r.resource_id] = agent.cargo.get(r.resource_id, 0.0) + take
-                                free -= take
                                 info_dict["resources/step_picked_up"] += take
                         elif val < 0:
                             r = self.idx_to_res[idx]
@@ -625,14 +894,13 @@ class parallel_env(ParallelEnv):
                             drop = min(want_drop, have)
 
                             if drop > 0 and self.map_depots[px, py] == r.resource_id:
-                                for depot in self.possible_depots:
-                                    if depot.resource_id == r.resource_id and np.all(depot.position == [px, py]):
-                                        depot.stock += drop
-                                        break
+                                depot = self.possible_depots[idx]
+                                depot.stock += drop
                                 agent.cargo[r.resource_id] -= drop
-                                reward_dict[agent] += depot.resource.reward_deposit * drop
+                                self.map_resources[r][px, py] += drop
+                                reward_dict[agent] += 100.0 * depot.resource.reward_deposit * drop
                                 info_dict["resources/step_dropped_off"] += drop
-                elif agent.capabilities[CAP.EXTRACT]:
+                if agent.capabilities[CAP.EXTRACT]:
                     # Provide reward for Extractors that are sitting on a resource tile.
                     px, py = agent.position.astype(np.int32)
                     # Skip locations with depots.
@@ -641,7 +909,7 @@ class parallel_env(ParallelEnv):
                         for r in self.possible_resources:
                             if self.map_resources[r][px, py] > 0:
                                 # Extractor is sitting on a resource tile.
-                                reward_dict[agent] += r.reward_extraction
+                                # reward_dict[agent] += r.reward_extraction
                                 info_dict["extractors/num_in_place"] += 1
 
         # Calculate the percentage of resources deposited.
@@ -651,49 +919,114 @@ class parallel_env(ParallelEnv):
 
         # Check termination conditions.
         end_truncate = lastStep or (self.max_cycles >= 0 and self.step_count >= self.max_cycles)
-        end_done = False  # No done conditions for now.
+        end_done = deposited_resources >= total_resources
 
         # Perform post-step calculations.
         for agent in self.possible_agents:
-            # Calculate the previous number of resources discovered.
-            resources_discovered_prev = self._get_num_resources_discovered()
-
             # Perform observation.
+            requested = (agent in requesters)
+            senders_set = (set(self.agents) - {agent}) if requested else set()
             agent_observation, obs_mask = self.observe(
                 agent,
-                senders = senders - {agent}
+                senders = senders_set
             )
             obs_dict[agent] = agent_observation
             info_dict[agent]["visibility_mask"] = obs_mask
 
-            # Reward prospectors for new resources discovered.
-            if agent.capabilities[CAP.PROSPECT]:
-                resources_discovered = self._get_num_resources_discovered()
-                reward_dict[agent] += 1.0 * (resources_discovered - resources_discovered_prev)
-
-            # Reward all agents for progress towards full resource deposit.
-            reward_dict[agent] += 5.0 * resource_deposit_percentage
-
-        # Handle end of episode.
-        if end_truncate or end_done:
-            for agent in self.agents:
-                truncated_dict[agent] = True
-            self.agents = []
+            # Provide reward.
+            reward_dict[agent] += self.reward(agent, end_truncate, end_done)
 
         # Update information dictionary.
         info_dict["resources/discovered"] = self._get_num_resources_discovered()
         info_dict["resources/deposited"] = deposited_resources
         info_dict["resources/extant"] = total_resources - deposited_resources
         info_dict["resources/total"] = total_resources
+        for agent in self.possible_agents:
+            info_dict[f"rewards/{agent}"] = reward_dict[agent]
 
+        # Handle end of episode.
+        if end_truncate or end_done:
+            resources_held = sum(sum(agent.cargo.values()) for agent in self.agents)
+            resources_map = sum(self.map_resources[r].sum() for r in self.possible_resources)
+            resources_map_depots = sum(self.map_resources[r][self.map_depots > 0].sum() for r in self.possible_resources)
 
-        # Set available actions.
-        self.available_actions_dict = {agent: self._getAvailableActions(agent) for agent in self.possible_agents}
+            # Check that everything looks good at the end of the episode.
+            assert self._get_num_resources_discovered() <= total_resources, "More resources discovered than available!"
+            assert deposited_resources <= total_resources, "More resources deposited than available!"
+            assert total_resources == deposited_resources + resources_held + resources_map - resources_map_depots, "Resource accounting error!"
+
+            for agent in self.agents:
+                truncated_dict[agent] = True
+            self.agents = []
 
         # Record last rewards.
         self.last_rewards = copy(reward_dict)
 
         return obs_dict, reward_dict, self.dones, truncated_dict, info_dict
+
+
+    def reward(self, agent, end_truncate, end_done):
+        ''' Returns the reward for the given agent. '''
+
+        reward = 0.0
+
+        # if agent.capabilities[CAP.CARRY]:
+        #     cargo_total = sum(agent.cargo.values())
+        #     if cargo_total < agent.capabilities[CAP.CARRY_CAPACITY]:
+        #         # Reward haulers for moving towards/away from the nearest extractor.
+        #         prev_nearest_extractor_dist = self._nearest_entity_distance(agent.position - agent.velocity, capability=CAP.EXTRACT)
+        #         nearest_extractor_dist = self._nearest_entity_distance(agent.position, capability=CAP.EXTRACT)
+        #         diff = prev_nearest_extractor_dist - nearest_extractor_dist
+        #         reward += 0.1 * diff
+        #     else:
+        #         # Reward haulers for moving towards/away from the nearest depot.
+        #         prev_nearest_depot_dist = self._nearest_entity_distance(agent.position - agent.velocity, entity_type=ENTITY_TYPE.DEPOT)
+        #         nearest_depot_dist = self._nearest_entity_distance(agent.position, entity_type=ENTITY_TYPE.DEPOT)
+        #         diff = prev_nearest_depot_dist - nearest_depot_dist
+        #         reward += 0.1 * diff
+
+        if agent.capabilities[CAP.PROSPECT]:
+            # Reward prospectors for the fraction of the area explored.
+            visible_cells = self._get_visible_cell_count(agent, use_resource_mask=True)
+            total_cells = np.prod(self.world_dims)
+            reward += 0.1 * (visible_cells / float(total_cells))
+        
+        if agent.capabilities[CAP.EXTRACT]:
+            # Reward extractors for being on a resource tile.
+            px, py = agent.position.astype(np.int32)
+            if self.map_depots[px, py] == 0 :
+                for r in self.possible_resources:
+                    if self.map_resources[r][px, py] > 0:
+                        reward += r.reward_extraction * agent.steps_stationary
+                        break
+
+            # Reward for inverse distance to nearest resource.
+            # resource_pos = self._get_nearest_resource(agent.position)
+            # if resource_pos is not None:
+            #     dist = np.linalg.norm(agent.position - resource_pos)
+            #     reward += 1.0 / (1.0 + dist)
+
+        # Reward every step for deposited resources.
+        # total_resources = sum(r.quantity for r in self.possible_resources)
+        # deposited_resources = sum(depot.stock for depot in self.possible_depots)
+        # extant_resources = total_resources - deposited_resources
+        # reward += 10.0 * deposited_resources / float(total_resources)
+
+        # INTRINSIC REWARD: Provide an intrinsic reward at every step for all agents.
+        # total_resources = sum(r.quantity for r in self.possible_resources)
+        # deposited_resources = sum(depot.stock for depot in self.possible_depots)
+        # held_resources = sum(sum(agent.cargo.values()) for agent in self.agents if agent.capabilities[CAP.CARRY])
+        # reward += 0.05 * deposited_resources / float(total_resources) + 0.01 * held_resources / float(total_resources)
+
+        # Reward for global objective at the end of the episode.
+        if end_truncate or end_done:
+            # total_resources = sum(r.quantity for r in self.possible_resources)
+            deposited_resources = sum(depot.stock for depot in self.possible_depots)
+            # resource_deposit_percentage = deposited_resources / float(total_resources)
+            # reward += 1000.0 * resource_deposit_percentage
+            reward += 1000.0 * deposited_resources
+
+        return reward
 
 
     def get_nearest_uncleaned(self, agent):
@@ -716,41 +1049,75 @@ class parallel_env(ParallelEnv):
         return (self.nearest_tile - pos).astype(np.float32)
 
 
+    def _get_nearest_resource(self, position):
+        '''
+        Returns the nearest position of the given resource type from the specified position.
+        If no such resource exists, returns None.
+        '''
+        
+        pos = np.asarray(position, dtype=np.float32)
+        dmin = np.inf
+        nearest_pos = None
+
+        for r in self.possible_resources:
+            locations = np.argwhere(self.map_resources[r] > 0)
+            for loc in locations:
+                d = np.linalg.norm(pos - loc)
+                if d < dmin:
+                    dmin = d
+                    nearest_pos = loc
+        return nearest_pos
+
+
+    def _get_visible_cell_count(self, agent, use_resource_mask=False):
+        '''
+        Returns the total number of cells seen by the given agent.
+        '''
+        if use_resource_mask:
+            return np.sum(agent.mask_resources_observed)
+        else:
+            return np.sum(agent.mask_observed)
+
+
     def _get_num_resources_discovered(self):
         '''
         Returns the total number of resource cells discovered.
         '''
-        
-        mask = self.mask_map_resources_discovered
+        mask = np.zeros(self.world_dims, dtype=bool)
+        for agent in self.agents:
+            mask |= agent.mask_resources_observed
         return np.sum([np.sum(self.map_resources[r][mask]) for r in self.possible_resources])
 
 
-    def _nearest_extractor_distance(self, position):
-        """Return the minimum Euclidean distance from the given position to any Extractor.
-        If no Extractor exists, return np.inf.
+    def _nearest_entity_distance(self, position, entity_type=ENTITY_TYPE.AGENT, capability=None):
+        """
+        Return the minimum Euclidean distance from the given position to any agent with specified capability.
+        If no such agent exists, return np.inf.
         """
         pos = np.asarray(position, dtype=np.float32)
         dmin = np.inf
-        for a in self.agents:
-            if a.capabilities[CAP.EXTRACT]:
-                d = np.linalg.norm(pos - a.position)
+
+        if entity_type == ENTITY_TYPE.AGENT:
+            entities = self.agents
+        elif entity_type == ENTITY_TYPE.DEPOT:
+            entities = self.possible_depots
+        else:
+            raise ValueError(f"Unsupported entity type: {entity_type}")
+
+        for e in entities:
+            if capability == None or e.capabilities[capability]:
+                d = np.linalg.norm(pos - e.position)
                 if d < dmin:
                     dmin = d
         return dmin
 
 
-    def _getAvailableActions(self, agent):
-        ''' Returns the available actions for the given agent. '''
-
-        return None
-
 class parallel_env_simple_obs(parallel_env):
     ''' A simple observation version of the ISRU environment. '''
 
-    @property
     @functools.cache
-    def state_space(self):
-        ''' Returns the state space of the environment. '''
+    def observation_space(self, agent):
+        ''' Returns the observation space for the given agent. '''
 
         return spaces.Dict({
             "id": spaces.Box(
@@ -806,14 +1173,14 @@ class parallel_env_simple_obs(parallel_env):
                 r: spaces.Box(
                     low=0,
                     high=np.max(self.world_dims),
-                    shape=(r.quantity, len(self.world_dims)),
+                    shape=(r.quantity_max, len(self.world_dims)),
                     dtype=np.float32
                 ) for r in self.possible_resources
             }),
         })
 
 
-    def _populateStateSpace(self, agent, force_visible=False):
+    def _observe(self, agent, force_visible=False):
         ''' Fills in the state/observation space for the given agent. '''
 
         # Create the observation.
@@ -827,7 +1194,7 @@ class parallel_env_simple_obs(parallel_env):
                     "cargo": np.array(
                         [a.cargo.get(r.resource_id, 0.0) for r in self.possible_resources],
                         dtype=np.float32
-                    )
+                    ) / a.capabilities.get(CAP.CARRY_CAPACITY, 1.0),  # Normalize cargo by capacity
                 } for a in self.possible_agents
             },
             "depots": {
@@ -841,8 +1208,13 @@ class parallel_env_simple_obs(parallel_env):
 
         # Add resource positions.
         for r in self.possible_resources:
-            obs["resources"][r] = np.ones((r.quantity, len(self.world_dims)), dtype=np.float32) * -1.0
+            obs["resources"][r] = np.ones((r.quantity_max, len(self.world_dims)), dtype=np.float32) * -1.0
+            # Get locations with resources that are not in depots.
             locations = np.argwhere(self.map_resources[r] > 0)
+            if locations.shape[0] > 0:
+                # Exclude locations that are in depots.
+                depot_mask = self.map_depots[locations[:, 0], locations[:, 1]] == 0
+                locations = locations[depot_mask]
             obs["resources"][r][:locations.shape[0], :] = locations.astype(np.float32)
 
         obs_mask = {
@@ -869,68 +1241,352 @@ class parallel_env_simple_obs(parallel_env):
         return obs, obs_mask
 
 
-    def render(self, pred=None, figsize=(9, 6), history_length=2):
-        ''' Renders the environment.
-            
-            Args:
-                figsize (tuple, optional): The size of the figure in inches.
-                
-            Returns:
-                None
-        '''
+class parallel_env_map_obs(parallel_env):
+    ''' A map-based observation version of the ISRU environment. Intended for use with CNNs. '''
 
-        # Convert the predicted state back into a dictionary (unflatten).
-        pred_unflattened = []
-        pred_steps = pred.shape[0] if pred is not None else 0
-        for i in range(pred_steps):
-            p = spaces.unflatten(self.observation_spaces, pred[i].flatten())
-            pred_unflattened.append(p)
+    class MAP_LAYERS(IntEnum):
+        OBSTACLES = 0
+        AGENTS_PROSPECTOR = 1
+        AGENTS_EXTRACTOR = 2
+        AGENTS_HAULER = 3
+        RELATIVE_POS_X = 4
+        RELATIVE_POS_Y = 5
+        DEPOTS = 6
+        MASK_OBSERVED = 7
+        MASK_RESOURCES_OBSERVED = 8
+    MAP_LAYER_START_RESOURCES = len(MAP_LAYERS)
 
-        # Get the true environment state.
-        state = self.state()
+    @property
+    def map_shape(self):
+        ''' Returns the map shape. '''
+        return (2 * len(self.possible_resources) + len(parallel_env_map_obs.MAP_LAYERS), *self.world_dims)
 
-        # Plot state as a grid using matplotlib.
-        plt.figure(figsize=figsize)
 
-        # Plot the depots.
-        plt.scatter(*np.argwhere(self.map_depots > 0).T, label="Depots", marker="s", color="black")
+    @property
+    @functools.cache
+    def state_space(self):
+        ''' Returns the state space of the environment. '''
+
+        return super(parallel_env_map_obs, self).observation_space(self.possible_agents[0])
+
+        agent = self.possible_agents[0]
+
+        def agent_obs_space(agent):
+            ''' Returns the observation space for a single agent. '''
+
+            return spaces.Dict({
+                "position": spaces.Box(
+                    low=0,
+                    high=np.max(self.world_dims),
+                    shape=(2,),
+                    dtype=np.float32
+                ),
+                "velocity": spaces.Box(
+                    low=-1,
+                    high=1,
+                    shape=(2,),
+                    dtype=np.float32
+                ),
+                "role": spaces.Box(
+                    low=0,
+                    high=len(AGENT_ROLE),
+                    shape=(1,),
+                    dtype=np.int32
+                ),
+                "cargo": spaces.Box(
+                    low=0,
+                    high=self.default_hauler_capacity,
+                    shape=(len(self.possible_resources),),
+                    dtype=np.float32
+                ),
+            })
+
+        # Set up agent state spaces. Ensure that each agent's data is first for its own observation.
+        # Python dictionaries maintain insertion order as of Python 3.7.
+        agent_spaces = {}
+        agent_spaces[agent] = agent_obs_space(agent)
+        for other_agent in self.possible_agents:
+            if other_agent != agent:
+                agent_spaces[other_agent] = agent_obs_space(other_agent)
+
+        # Create the state space.
+        # The state space is a complete observation of the environment.
+        # This is not part of the standard PettingZoo API, but is useful for centralized training.
+        return spaces.Dict({
+            "role": spaces.Box(
+                low=0,
+                high=len(AGENT_ROLE),
+                shape=(1,),
+                dtype=np.int32
+            ),
+            "agents": spaces.Dict(agent_spaces),
+            "depots": spaces.Dict({
+                depot: spaces.Dict({
+                    "position": spaces.Box(
+                        low=0,
+                        high=np.max(self.world_dims),
+                        shape=(2,),
+                        dtype=np.float32
+                    ),
+                    "stock": spaces.Box(
+                        low=0,
+                        high=np.inf,
+                        shape=(1,),
+                        dtype=np.float32
+                    ),
+                }) for depot in self.possible_depots
+            }),
+            "resources_extant": spaces.Box(
+                low=0,
+                high=np.inf,
+                shape=(1,),
+                dtype=np.float32
+            ),
+            "resources_deposited": spaces.Box(
+                low=0,
+                high=np.inf,
+                shape=(1,),
+                dtype=np.float32
+            ),
+            "extractors_in_place": spaces.Box(
+                low=0,
+                high=len([a for a in self.possible_agents if a.capabilities[CAP.EXTRACT]]),
+                shape=(1,),
+                dtype=np.int32
+            ),
+        })
+
+        # return spaces.Dict({
+        #     "resources_deposited": spaces.Box(
+        #         low=0,
+        #         high=np.inf,
+        #         shape=(1,),
+        #         dtype=np.float32
+        #     ),
+        #     "extractors_in_place": spaces.Box(
+        #         low=0,
+        #         high=len([a for a in self.possible_agents if a.capabilities[CAP.EXTRACT]]),
+        #         shape=(1,),
+        #         dtype=np.int32
+        #     ),
+        # })
+    
+
+    def _state(self):
+        ''' Returns the global state and mask of the environment.'''
+
+
+        return super(parallel_env_map_obs, self)._observe(self.possible_agents[0], force_visible=True)[0]
+
+        agent = self.possible_agents[0]
+        force_visible = True
+
+        # Create the observation.
+        obs = {
+            "role": np.array([agent.role.value], dtype=np.int32),
+            "agents": {},
+            "depots": {
+                d: {
+                    "position": d.position.astype(np.float32),
+                    "stock": np.array([d.stock], dtype=np.float32),
+                } for d in self.possible_depots
+            },
+            "resources_extant": np.array([sum(r.quantity for r in self.possible_resources) - sum(depot.stock for depot in self.possible_depots)], dtype=np.float32),
+            "resources_deposited": np.array([sum(depot.stock for depot in self.possible_depots)], dtype=np.float32),
+            "extractors_in_place": np.array([0], dtype=np.int32),
+        }
+
+        extractors_in_place = 0
+        for a in self.agents:
+            if a.capabilities[CAP.EXTRACT]:
+                px, py = a.position.astype(np.int32)
+                if self.map_depots[px, py] == 0 :
+                    for r in self.possible_resources:
+                        if self.map_resources[r][px, py] > 0:
+                            extractors_in_place += 1
+                            break
+        obs["extractors_in_place"] = np.array([extractors_in_place], dtype=np.int32)
+
+        def get_agent_state(a):
+            return {
+                "position": a.position.astype(np.float32),
+                "velocity": a.velocity.astype(np.float32),
+                "role": np.array([a.role.value], dtype=np.int32),
+                "cargo": np.array(
+                    [a.cargo.get(r.resource_id, 0.0) for r in self.possible_resources],
+                    dtype=np.float32
+                ) / a.capabilities.get(CAP.CARRY_CAPACITY, 1.0),  # Normalize cargo by capacity
+            }
+
+        # Insert the ego agent first. Python dictionaries preserve insertion order.
+        obs["agents"][agent] = get_agent_state(agent)
+
+        # Add the rest of the agents.
+        for a in self.possible_agents:
+            if a != agent:
+                obs["agents"][a] = get_agent_state(a)
+
+        return obs
+
+        # def extractors_in_place():
+        #     count = 0
+        #     for a in self.agents:
+        #         if a.capabilities[CAP.EXTRACT]:
+        #             px, py = a.position.astype(np.int32)
+        #             if self.map_depots[px, py] == 0 :
+        #                 for r in self.possible_resources:
+        #                     if self.map_resources[r][px, py] > 0:
+        #                         count += 1
+        #                         break
+        #     return count
+
+
+        # state = {
+        #     "resources_deposited": np.array([sum(depot.stock for depot in self.possible_depots)], dtype=np.float32),
+        #     "extractors_in_place": np.array([extractors_in_place()], dtype=np.int32),
+        # }
+
+        # return state
+
+
+    @functools.cache
+    def observation_space(self, agent):
+        ''' Returns the observation space for the given agent. '''
+
+        return spaces.Box(
+            low=-np.inf,
+            high=np.inf,
+            shape=self.map_shape,
+            dtype=np.float32
+        )
+
+
+    def _observe(self, agent, force_visible=False):
+        ''' Fills in the state/observation space for the given agent. '''
+
+        layers = [None for _ in range(self.map_shape[0])]
+
+        # Set up the agent maps.
+        map_agents = np.zeros((*self.world_dims, len(AGENT_ROLE) + 1), dtype=np.int32)
+        for i, a in enumerate(self.possible_agents):
+            pos = a.position.astype(np.int32)
+            map_agents[pos[0], pos[1], a.role.value] = 1
         
-        # Plot the resources.
-        for i, r in enumerate(self.possible_resources):
-            plt.scatter(*np.argwhere(self.map_resources[r] > 0).T, label=f"Resource {r.resource_id}", alpha=0.5)
+        # Set up the cargo maps.
+        map_cargo = []
+        for r in self.possible_resources:
+            m = np.zeros(self.world_dims, dtype=np.float32)
+            for a in self.agents:
+                if a.capabilities[CAP.CARRY] and r.resource_id in a.cargo:
+                    pos = a.position.astype(np.int32)
+                    m[pos[0], pos[1]] = a.cargo[r.resource_id] / a.capabilities.get(CAP.CARRY_CAPACITY, 1.0)  # Normalize cargo by capacity
+            map_cargo.append(m)
         
-        # Plot the agents.
-        for agent in self.agents:
+        # Set up relative position maps. They should be 0 at the agent position and increase by 1 for each cell away.
+        map_rel_pos_x = np.zeros(self.world_dims, dtype=np.float32)
+        map_rel_pos_x[:, :] = np.arange(self.world_dims[0], dtype=np.float32)[:, None] - agent.position[0]
+        map_rel_pos_y = np.zeros(self.world_dims, dtype=np.float32)
+        map_rel_pos_y[:, :] = np.arange(self.world_dims[1], dtype=np.float32)[None, :] - agent.position[1]
+        
+        # Set up the visibility mask.
+        obs_mask = np.ones(self.map_shape, dtype=bool)
+
+        # Calculate the visible area based on a circular observation radius.
+        if not force_visible or True:
+            radius = agent.observation_radius
             pos = agent.position.astype(np.int32)
-            if agent.capabilities[CAP.CARRY]:
-                plt.scatter(pos[1], pos[0], label=f"Hauler {self.possible_agents.index(agent)}", marker="^", s=100, edgecolor="black")
-            elif agent.capabilities[CAP.EXTRACT]:
-                plt.scatter(pos[1], pos[0], label=f"Extractor {self.possible_agents.index(agent)}", marker="o", s=100, edgecolor="black")
-            elif agent.capabilities[CAP.PROSPECT]:
-                plt.scatter(pos[1], pos[0], label=f"Prospector {self.possible_agents.index(agent)}", marker="*", s=100, edgecolor="black")
+            visible = (np.arange(self.world_dims[0])[:, None] - pos[0]) ** 2 + \
+                (np.arange(self.world_dims[1])[None, :] - pos[1]) ** 2 <= radius ** 2
+            # obs[visible, 0] += 0.2 # testing - show the visible area in the obstacle layer
+            obs_mask[:, ~visible] = False
+
+        # Update visibility information.
+        if not force_visible:
+            # Update the agent's observed resources mask.
+            if agent.capabilities[CAP.PROSPECT]:
+                agent.mask_resources_observed[visible] = True
+            else:
+                # Resources can only be observed for the first time by a prospector.
+                obs_mask[self.MAP_LAYER_START_RESOURCES:self.MAP_LAYER_START_RESOURCES+len(self.possible_resources), ~agent.mask_resources_observed] = False
+            
+            # Update the agent's observed area mask.
+            agent.mask_observed[visible] = True
+
+        # The relative position layers are always visible.
+        obs_mask[self.MAP_LAYERS.RELATIVE_POS_X] = True
+        obs_mask[self.MAP_LAYERS.RELATIVE_POS_Y] = True
+
+        # Obstacles are always visible once seen.
+        obs_mask[self.MAP_LAYERS.OBSTACLES, agent.mask_observed] = True
+
+        # Depots are always visible.
+        obs_mask[self.MAP_LAYERS.DEPOTS] = True
+
+        # The masks themselves are always visible.
+        obs_mask[self.MAP_LAYERS.MASK_OBSERVED] = True
+        obs_mask[self.MAP_LAYERS.MASK_RESOURCES_OBSERVED] = True
+
+        # Load most map layers.
+        layers[self.MAP_LAYERS.OBSTACLES] = self.map_obstacles
+        layers[self.MAP_LAYERS.AGENTS_PROSPECTOR] = map_agents[:, :, AGENT_ROLE.PROSPECTOR.value]
+        layers[self.MAP_LAYERS.AGENTS_EXTRACTOR] = map_agents[:, :, AGENT_ROLE.EXTRACTOR.value]
+        layers[self.MAP_LAYERS.AGENTS_HAULER] = map_agents[:, :, AGENT_ROLE.HAULER.value]
+        layers[self.MAP_LAYERS.RELATIVE_POS_X] = map_rel_pos_x
+        layers[self.MAP_LAYERS.RELATIVE_POS_Y] = map_rel_pos_y
+        layers[self.MAP_LAYERS.DEPOTS] = self.map_depots
+        layers[self.MAP_LAYERS.MASK_OBSERVED] = agent.mask_observed.astype(np.float32)
+        layers[self.MAP_LAYERS.MASK_RESOURCES_OBSERVED] = agent.mask_resources_observed.astype(np.float32)
+
+        # Load resources and cargo into the map.
+        for i, r in enumerate(self.possible_resources):
+            layers[self.MAP_LAYER_START_RESOURCES + i] = self.map_resources[r]
+            layers[self.MAP_LAYER_START_RESOURCES + len(self.possible_resources) + i] = map_cargo[i]
         
-        # Display the total reward for this step. Position this text below the subplots. Do not use suptitle.
-        reward = sum(self.last_rewards.values())
-        resources_deposited = sum(depot.stock for depot in self.possible_depots)
-        plt.figtext(0.5, 0.01, f"Step: {self.step_count}, Combined Step Reward: {reward:.2f}, Resources Deposited: {resources_deposited}", ha="center", fontsize=8)
+        # Build the combined map.
+        obs = np.stack(layers, axis=0).astype(np.float32)
+        
+        return obs, obs_mask
 
-        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-        plt.xlim(-1, self.world_dims[1])
-        plt.ylim(-1, self.world_dims[0])
-        plt.gca().set_aspect('equal', adjustable='box')
 
-        if self.render_mode == "human":
-            # Show the plot.
-            plt.show()
-            return None
-        elif self.render_mode == "rgb_array":
-            # Save the plot to a buffer and return it as an RGB array.
-            from io import BytesIO
-            io_buf = BytesIO()
-            plt.savefig(io_buf, format='raw')
-            io_buf.seek(0)
-            img_arr = np.reshape(np.frombuffer(io_buf.getvalue(), dtype=np.uint8),
-                                newshape=(int(plt.bbox.bounds[3]), int(plt.bbox.bounds[2]), -1))
-            io_buf.close()
-            plt.close()
-            return img_arr
+    def observe(self, agent, senders=set()):
+        ''' Returns the observation for the given agent.'''
+
+        # Collect local data.
+        local_obs, local_obs_mask = self._observe(agent)
+
+        # Set up the matrices.
+        map = np.copy(local_obs)
+        map_mask = np.zeros_like(local_obs_mask, dtype=bool)
+
+        # Handle communicated data.
+        for sender in senders:
+            sender_obs, sender_obs_mask = self._observe(sender)
+
+            sender_visible = sender_obs_mask == True
+            map[sender_visible] = sender_obs[sender_visible]
+            map_mask[sender_visible] = True
+
+            # Update the agent's known space masks.
+            agent.mask_observed |= sender.mask_observed
+            agent.mask_resources_observed |= sender.mask_resources_observed
+        
+        # Apply local observations (overwrite any communicated data).
+        map[local_obs_mask == True] = local_obs[local_obs_mask == True]
+        map_mask |= local_obs_mask
+
+        # Apply the local relative position layers (overwrite any communicated data).
+        map[self.MAP_LAYERS.RELATIVE_POS_X] = local_obs[self.MAP_LAYERS.RELATIVE_POS_X]
+        map[self.MAP_LAYERS.RELATIVE_POS_Y] = local_obs[self.MAP_LAYERS.RELATIVE_POS_Y]
+        map_mask[self.MAP_LAYERS.RELATIVE_POS_X] = True
+        map_mask[self.MAP_LAYERS.RELATIVE_POS_Y] = True
+
+        # Update the local observation.
+        combined_obs = map
+        combined_obs_mask = map_mask
+
+        if self.mask_observations:
+            result = combined_obs * combined_obs_mask
+            return result, combined_obs_mask
+        else:
+            # return combined_obs, combined_obs_mask
+            return combined_obs, combined_obs_mask
