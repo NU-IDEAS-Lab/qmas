@@ -313,7 +313,7 @@ class R_Critic(nn.Module):
             input_dim = np.prod(obs_shape)
 
             if self._use_cnn:
-                self.cnn = CNNBase(args, obs_shape)
+                self.cnn = CNNBase(args, obs_shape, mode='cnn')
                 input_dim = self.hidden_size
 
             if self._use_attention:            
