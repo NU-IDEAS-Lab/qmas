@@ -248,27 +248,31 @@ class parallel_env(ParallelEnv):
         world_indices_x = np.arange(self.world_dims[0])
         world_indices_y = np.arange(self.world_dims[1])
 
+        mask_available = np.ones(self.world_dims, dtype=bool)
+
         # Reset obstacles.
         self.map_obstacles = np.zeros(self.world_dims, dtype=np.float32)
-        self.map_obstacles[
-            np.random.choice(world_indices_x, self.num_obstacles),
-            np.random.choice(world_indices_y, self.num_obstacles)
-        ] = 1.0
-        positions_available_mask = self.map_obstacles == 0
-        positions_available = np.argwhere(positions_available_mask)
+        positions_available = np.argwhere(mask_available)
+        indices = np.random.choice(positions_available.shape[0], self.num_obstacles, replace=False)
+        for i in indices:
+            pos = positions_available[i]
+            self.map_obstacles[pos[0], pos[1]] = 1.0
+            mask_available[pos[0], pos[1]] = False
 
         # Reset depots.
         # Ensure they are placed in an available location.
         self.map_depots = np.zeros(self.world_dims, dtype=np.float32)
-        for depot in self.possible_depots:
-            idx = np.random.randint(positions_available.shape[0])
+        positions_available = np.argwhere(mask_available)
+        indices = np.random.choice(positions_available.shape[0], len(self.possible_depots), replace=False)
+        for i, depot in enumerate(self.possible_depots):
+            idx = indices[i]
             depot.reset(
                 reset_start_position=True,
                 position=positions_available[idx]
             )
+            assert depot.resource_id != 0, "A resource_id of 0 is indistinguishable from empty space!"
             self.map_depots[depot.position[0], depot.position[1]] = depot.resource_id
-            positions_available_mask[depot.position[0], depot.position[1]] = False
-        positions_available = np.argwhere(positions_available_mask)
+            mask_available[depot.position[0], depot.position[1]] = False
 
         # Build stable resource index mappings for action vector <-> resource objects
         self.resource_list = list(self.possible_resources)
@@ -279,10 +283,26 @@ class parallel_env(ParallelEnv):
         self.map_resources = {}
         for r in self.possible_resources:
             self.map_resources[r] = np.zeros(self.world_dims, dtype=np.float32)
-            for _ in range(r.quantity):
-                idx = np.random.randint(positions_available.shape[0])
+            positions_available = np.argwhere(mask_available)
+            indices = np.random.choice(positions_available.shape[0], r.quantity, replace=False)
+            for i in range(r.quantity):
+                idx = indices[i]
                 pos = positions_available[idx]
                 self.map_resources[r][pos[0], pos[1]] += 1.0
+                mask_available[pos[0], pos[1]] = False
+
+        # Ensure that the map was correctly generated.
+        mask_resources = np.zeros(self.world_dims, dtype=bool)
+        for r in self.possible_resources:
+            mask_resources = mask_resources | (self.map_resources[r] > 0)
+        mask_depots = self.map_depots > 0
+        mask_obstacles = self.map_obstacles > 0
+        assert np.sum(mask_resources & mask_obstacles) == 0, "Some resources are located inside obstacles!"
+        assert np.sum(mask_resources & mask_depots) == 0, "Some resources are located inside depots!"
+        assert np.sum(mask_depots & mask_obstacles) == 0, "Some depots are located inside obstacles!"
+        assert np.sum(mask_resources) == sum(r.quantity for r in self.possible_resources), "Incorrect resource count!"
+        assert np.sum(mask_depots) == len(self.possible_depots), "Incorrect depot count!"
+        assert np.sum(mask_obstacles) == self.num_obstacles, "Incorrect obstacle count!"
 
         return positions_available
 
