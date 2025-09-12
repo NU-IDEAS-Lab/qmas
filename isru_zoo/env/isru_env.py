@@ -944,7 +944,8 @@ class parallel_env(ParallelEnv):
             info_dict[f"rewards/{agent}"] = reward_dict[agent]
 
         # Handle end of episode.
-        if end_truncate or end_done:
+        # if end_truncate or end_done:
+        if end_truncate:
             resources_held = sum(sum(agent.cargo.values()) for agent in self.agents)
             resources_map = sum(self.map_resources[r].sum() for r in self.possible_resources)
             resources_map_depots = sum(self.map_resources[r][self.map_depots > 0].sum() for r in self.possible_resources)
