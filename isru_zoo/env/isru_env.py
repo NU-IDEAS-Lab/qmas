@@ -474,11 +474,9 @@ class parallel_env(ParallelEnv):
         ax_hr.scatter(positions[:, 1], positions[:, 0], label="Depot", marker="$\u2302$", color="cyan", s=100)
 
         # Plot visible resources.
-        resource_start_layer = parallel_env_map_obs.MAP_LAYER_START_RESOURCES
-        for i in range(resource_start_layer, resource_start_layer + len(self.possible_resources)):
-            positions = np.argwhere(state[i] > 0)
-            if positions.size > 0:
-                ax_hr.scatter(positions[:, 1], positions[:, 0], marker="o", label=f"Resource {i - resource_start_layer}", alpha=0.5)
+        positions = np.argwhere(state[MAP_LAYERS.RESOURCES_EXTANT] > 0)
+        if positions.size > 0:
+            ax_hr.scatter(positions[:, 1], positions[:, 0], marker="o", label=f"Resource", alpha=0.5)
         
         # Plot prospectors.
         positions = np.argwhere(state[MAP_LAYERS.AGENTS_PROSPECTOR] > 0)
@@ -504,22 +502,21 @@ class parallel_env(ParallelEnv):
             ax_hr.scatter(positions[:, 1], positions[:, 0], label="Self", marker="s", s=150, facecolors='none', edgecolors='black', linewidths=2)
 
         # Plot a partially-completed ring around the haulers to indicate their cargo.
-        for i in range(resource_start_layer, resource_start_layer + len(self.possible_resources)):
-            cargo_layer = i + len(self.possible_resources)
-            positions = np.argwhere(state[cargo_layer] > 0)
-            for pos in positions:
-                cargo_percentage = state[cargo_layer][pos[0], pos[1]]
-                if cargo_percentage > 0:
-                    # Draw an arc to indicate the amount of cargo.
-                    arc = matplotlib.patches.Arc(
-                        (pos[1], pos[0]), 1.5, 1.5,
-                        angle=0,
-                        theta1=0,
-                        theta2=cargo_percentage * 360,
-                        color="red",
-                        lw=2
-                    )
-                    ax_hr.add_patch(arc)
+        cargo_layer = MAP_LAYERS.RESOURCES_CARGO
+        positions = np.argwhere(state[cargo_layer] > 0)
+        for pos in positions:
+            cargo_percentage = state[cargo_layer][pos[0], pos[1]]
+            if cargo_percentage > 0:
+                # Draw an arc to indicate the amount of cargo.
+                arc = matplotlib.patches.Arc(
+                    (pos[1], pos[0]), 1.5, 1.5,
+                    angle=0,
+                    theta1=0,
+                    theta2=cargo_percentage * 360,
+                    color="red",
+                    lw=2
+                )
+                ax_hr.add_patch(arc)
 
         # Display the total reward for this step. Position this text below the subplots. Do not use suptitle.
         reward = sum(self.last_rewards.values())
