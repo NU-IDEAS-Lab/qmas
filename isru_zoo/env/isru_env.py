@@ -1260,14 +1260,16 @@ class parallel_env_map_obs(parallel_env):
         RELATIVE_POS_X = 4
         RELATIVE_POS_Y = 5
         DEPOTS = 6
-        MASK_OBSERVED = 7
-        MASK_RESOURCES_OBSERVED = 8
-    MAP_LAYER_START_RESOURCES = len(MAP_LAYERS)
+        RESOURCES_EXTANT = 7
+        RESOURCES_DEPOSITED = 8
+        RESOURCES_CARGO = 9
+        MASK_OBSERVED = 10
+        MASK_RESOURCES_OBSERVED = 11
 
     @property
     def map_shape(self):
         ''' Returns the map shape. '''
-        return (2 * len(self.possible_resources) + len(parallel_env_map_obs.MAP_LAYERS), *self.world_dims)
+        return (len(parallel_env_map_obs.MAP_LAYERS), *self.world_dims)
 
 
     @property
@@ -1480,15 +1482,22 @@ class parallel_env_map_obs(parallel_env):
             pos = a.position.astype(np.int32)
             map_agents[pos[0], pos[1], a.role.value] = 1
         
-        # Set up the cargo maps.
-        map_cargo = []
-        for r in self.possible_resources:
-            m = np.zeros(self.world_dims, dtype=np.float32)
-            for a in self.agents:
-                if a.capabilities[CAP.CARRY] and r.resource_id in a.cargo:
-                    pos = a.position.astype(np.int32)
-                    m[pos[0], pos[1]] = a.cargo[r.resource_id] / a.capabilities.get(CAP.CARRY_CAPACITY, 1.0)  # Normalize cargo by capacity
-            map_cargo.append(m)
+        # Set up the resource, cargo, and deposited resource maps.
+        map_resources_extant = np.zeros(self.world_dims, dtype=np.float32)
+        map_resources_deposited = np.zeros(self.world_dims, dtype=np.float32)
+        map_resources_cargo = np.zeros(self.world_dims, dtype=np.float32)
+        for r_idx, r in enumerate(self.possible_resources):
+            map_resources_extant += (self.map_resources[r] > 0).astype(np.float32)
+            for d in self.possible_depots:
+                if d.resource == r:
+                    pos = d.position.astype(np.int32)
+                    map_resources_deposited[pos[0], pos[1]] = d.stock #/ r.quantity
+        for a in self.agents:
+            if a.capabilities[CAP.CARRY]:
+                cargo_amount = sum(a.cargo.values())
+                pos = a.position.astype(np.int32)
+                map_resources_cargo[pos[0], pos[1]] += cargo_amount / a.capabilities[CAP.CARRY_CAPACITY]
+    
         
         # Set up relative position maps. They should be 0 at the agent position and increase by 1 for each cell away.
         map_rel_pos_x = np.zeros(self.world_dims, dtype=np.float32)
@@ -1505,7 +1514,6 @@ class parallel_env_map_obs(parallel_env):
             pos = agent.position.astype(np.int32)
             visible = (np.arange(self.world_dims[0])[:, None] - pos[0]) ** 2 + \
                 (np.arange(self.world_dims[1])[None, :] - pos[1]) ** 2 <= radius ** 2
-            # obs[visible, 0] += 0.2 # testing - show the visible area in the obstacle layer
             obs_mask[:, ~visible] = False
 
         # Update visibility information.
@@ -1515,7 +1523,7 @@ class parallel_env_map_obs(parallel_env):
                 agent.mask_resources_observed[visible] = True
             else:
                 # Resources can only be observed for the first time by a prospector.
-                obs_mask[self.MAP_LAYER_START_RESOURCES:self.MAP_LAYER_START_RESOURCES+len(self.possible_resources), ~agent.mask_resources_observed] = False
+                obs_mask[self.MAP_LAYERS.RESOURCES_EXTANT, ~agent.mask_resources_observed] = False
             
             # Update the agent's observed area mask.
             agent.mask_observed[visible] = True
@@ -1542,14 +1550,12 @@ class parallel_env_map_obs(parallel_env):
         layers[self.MAP_LAYERS.RELATIVE_POS_X] = map_rel_pos_x
         layers[self.MAP_LAYERS.RELATIVE_POS_Y] = map_rel_pos_y
         layers[self.MAP_LAYERS.DEPOTS] = self.map_depots
+        layers[self.MAP_LAYERS.RESOURCES_EXTANT] = map_resources_extant
+        layers[self.MAP_LAYERS.RESOURCES_DEPOSITED] = map_resources_deposited
+        layers[self.MAP_LAYERS.RESOURCES_CARGO] = map_resources_cargo
         layers[self.MAP_LAYERS.MASK_OBSERVED] = agent.mask_observed.astype(np.float32)
         layers[self.MAP_LAYERS.MASK_RESOURCES_OBSERVED] = agent.mask_resources_observed.astype(np.float32)
 
-        # Load resources and cargo into the map.
-        for i, r in enumerate(self.possible_resources):
-            layers[self.MAP_LAYER_START_RESOURCES + i] = self.map_resources[r]
-            layers[self.MAP_LAYER_START_RESOURCES + len(self.possible_resources) + i] = map_cargo[i]
-        
         # Build the combined map.
         obs = np.stack(layers, axis=0).astype(np.float32)
         
