@@ -218,6 +218,7 @@ class PettingzooRunner(Runner):
         )
 
 
+    @torch.no_grad()
     def compute(self):
         """Calculate returns for the collected data."""
         self.trainer.prep_rollout()
