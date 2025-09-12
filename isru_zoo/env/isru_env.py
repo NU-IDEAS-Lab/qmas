@@ -145,6 +145,7 @@ class parallel_env(ParallelEnv):
         # Set up the possible resources.
         self.possible_resources = []
         self.possible_resources.append(TestResource1(num_resources, resource_id=1))
+        assert len(self.possible_resources) == 1, "only one resource type currently supported"
 
         # Set up depots.
         self.possible_depots = [
