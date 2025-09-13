@@ -287,10 +287,27 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
     # Everything below here is for compatibility with the old replay buffer class.
 
     def feed_forward_generator(self, advantages, num_mini_batch=None, mini_batch_size=None, last_step=-1):
-        sample, info = self.sample(return_info=True)
-        sample["advantages"] = advantages[info["index"]]
+        # batch_size = self.n_rollout_threads * self.episode_length * self.num_agents
+        batch_size = self.episode_length
 
-        yield self.compatibility_transform_sample(sample)
+        if mini_batch_size is None:
+            assert batch_size >= num_mini_batch, (
+                "PPO requires the number of processes ({}) "
+                "* number of steps ({}) * number of agents ({}) = {} "
+                "to be greater than or equal to the number of PPO mini batches ({})."
+                "".format(self.n_rollout_threads, len(self), self.num_agents,
+                          self.n_rollout_threads * len(self) * self.num_agents,
+                          num_mini_batch))
+            mini_batch_size = batch_size // num_mini_batch
+
+        for _ in range(batch_size // mini_batch_size):
+            sample, info = self.sample(
+                batch_size=mini_batch_size,
+                return_info=True
+            )
+            sample["advantages"] = advantages[info["index"]]
+
+            yield self.compatibility_transform_sample(sample)
 
 
     def recurrent_generator(self, advantages, num_mini_batch, data_chunk_length, last_step=-1):
