@@ -152,7 +152,7 @@ class EncoderLayer(nn.Module):
             "resnet34",
             in_channels=input_channel,
             depth=5,
-            weights=None,
+            weights="imagenet",
         )
 
         self.hidden_size = hidden_size
