@@ -1533,6 +1533,7 @@ class parallel_env_map_obs(parallel_env):
 
         # Temporarily use a single boolean map for depots.
         map_depots = self.map_depots > 0
+        assert len(self.possible_resources) == 1, "Currently only supports one resource type."
         
         # Set up relative position maps. They should be 0 at the agent position and increase by 1 for each cell away.
         map_rel_pos_x = np.zeros(self.world_dims, dtype=np.float32)
