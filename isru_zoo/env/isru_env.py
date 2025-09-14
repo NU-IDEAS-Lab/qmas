@@ -1530,7 +1530,9 @@ class parallel_env_map_obs(parallel_env):
                 cargo_amount = sum(a.cargo.values())
                 pos = a.position.astype(np.int32)
                 map_resources_cargo[pos[0], pos[1]] += cargo_amount / a.capabilities[CAP.CARRY_CAPACITY]
-    
+
+        # Temporarily use a single boolean map for depots.
+        map_depots = self.map_depots > 0
         
         # Set up relative position maps. They should be 0 at the agent position and increase by 1 for each cell away.
         map_rel_pos_x = np.zeros(self.world_dims, dtype=np.float32)
@@ -1582,7 +1584,7 @@ class parallel_env_map_obs(parallel_env):
         layers[self.MAP_LAYERS.AGENTS_HAULER] = map_agents[:, :, AGENT_ROLE.HAULER.value]
         layers[self.MAP_LAYERS.RELATIVE_POS_X] = map_rel_pos_x
         layers[self.MAP_LAYERS.RELATIVE_POS_Y] = map_rel_pos_y
-        layers[self.MAP_LAYERS.DEPOTS] = self.map_depots
+        layers[self.MAP_LAYERS.DEPOTS] = map_depots
         layers[self.MAP_LAYERS.RESOURCES_EXTANT] = map_resources_extant
         layers[self.MAP_LAYERS.RESOURCES_DEPOSITED] = map_resources_deposited
         layers[self.MAP_LAYERS.RESOURCES_CARGO] = map_resources_cargo
