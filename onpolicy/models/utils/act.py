@@ -72,6 +72,10 @@ class ACTLayer(nn.Module):
         action_outs = get_action_out(action_space)
         self.action_outs = nn.ModuleList(action_outs)
         self.log_prob_dim = len(action_outs)
+
+        print(f"Action output distributions:")
+        for i, module in enumerate(self.action_outs):
+            print(f"  {i}: {module.__class__.__name__}, action_dim: {module.action_dim}, available_action_dim: {module.available_action_dim}")
     
 
     def forward(self, x, available_actions=None, deterministic=False):
@@ -109,6 +113,8 @@ class ACTLayer(nn.Module):
             actions.append(action)
             action_log_probs.append(action_log_prob)
         
+        assert available_actions is None or available_actions_idx == available_actions.shape[1], "Incorrect available_actions size!"
+
         actions = torch.cat(actions, -1)
         # action_log_probs = torch.sum(torch.cat(action_log_probs, -1), -1, keepdim=True)
         action_log_probs = torch.cat(action_log_probs, -1)
