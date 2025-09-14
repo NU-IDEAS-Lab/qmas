@@ -1035,7 +1035,8 @@ class parallel_env(ParallelEnv):
         # reward += 0.05 * deposited_resources / float(total_resources) + 0.01 * held_resources / float(total_resources)
 
         # Reward for global objective at the end of the episode.
-        if end_truncate or end_done:
+        # if end_truncate or end_done:
+        if True:
             total_resources = sum(r.quantity for r in self.possible_resources)
             deposited_resources = sum(depot.stock for depot in self.possible_depots)
             resource_deposit_percentage = deposited_resources / float(total_resources)
