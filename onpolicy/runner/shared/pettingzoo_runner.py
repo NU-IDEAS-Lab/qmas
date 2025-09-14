@@ -257,7 +257,7 @@ class PettingzooRunner(Runner):
                 else:
                     self.writter.add_scalars(k, {k: np.mean(v)}, total_num_steps)    
 
-    # @torch.no_grad()
+    @torch.no_grad()
     def eval(self):
         log_root = zarr.open_group(self.all_args.eval_output_file, mode="a")
         if self.all_args.eval_series == "":
@@ -384,7 +384,7 @@ class PettingzooRunner(Runner):
                         # self.env_infos[key] = [i[key] for i in infos]
 
 
-    # @torch.no_grad()
+    @torch.no_grad()
     def render(self, ipython_clear_output=True):        
 
         if ipython_clear_output:
