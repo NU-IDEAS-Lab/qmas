@@ -634,9 +634,9 @@ class parallel_env(ParallelEnv):
         ''' Returns the action space for the given agent. '''
         
         return spaces.Dict({
-            # Movement is specified by relative motion in two dimensions.
+            # Movement is specified in terms of the Moore neighborhood.
             # The agent can only move one space at a time.
-            "movement": spaces.Box(low=-1, high=1, shape=(2,), dtype=np.int32),
+            "movement": spaces.Box(low=0, high=8, shape=(1,), dtype=np.int32),
 
             # Communication is a simple boolean flag.
             "communication": spaces.Box(low=0, high=1, shape=(1,), dtype=np.int32),
@@ -703,19 +703,21 @@ class parallel_env(ParallelEnv):
         other_agent_pos = [a.position for a in self.agents if a != agent]
         
         # Prevent movement into obstacles or out of bounds or into another agent.
-        for dx in range(-1, 2):
-            for dy in range(-1, 2):
-                vel = np.array([dx, dy], dtype=np.int32)
-                pos = (agent.position + vel).astype(np.int32)
-                idx = vel + 1  # Shift from [-1, 0, 1] to [0, 1, 2] for indexing
-                if pos[0] < 0 or pos[0] >= self.world_dims[0] or \
-                        pos[1] < 0 or pos[1] >= self.world_dims[1] or \
-                        self.map_obstacles[pos[0], pos[1]] == 1 or \
-                        any(np.array_equal(pos, oap.astype(np.int32)) for oap in other_agent_pos):
-                    # This movement would go out of bounds or into an obstacle; disable it.
-                    result["movement"][idx[0], idx[1]] = 0
-                else:
-                    result["movement"][idx[0], idx[1]] = 1
+        for move in range(9):
+            velocity = self._moore_index_to_velocity(move)
+            new_pos = agent.position + velocity
+            new_pos_int = new_pos.astype(np.int32)
+            if np.any(new_pos < 0) or np.any(new_pos >= self.world_dims):
+                # Out of bounds.
+                result["movement"][move] = 0
+            elif self.map_obstacles[new_pos_int[0], new_pos_int[1]] > 0:
+                # Obstacle in the way.
+                result["movement"][move] = 0
+            elif any(np.array_equal(new_pos_int, oap.astype(np.int32)) for oap in other_agent_pos):
+                # Another agent is in the way.
+                result["movement"][move] = 0
+            else:
+                result["movement"][move] = 1
 
         # Communication is always available.
         result["communication"] = np.ones_like(result["communication"])
@@ -825,7 +827,7 @@ class parallel_env(ParallelEnv):
                 agent.last_action = action
                 
                 # Set agent velocity.
-                agent.velocity = action["movement"].astype(np.int32)
+                agent.velocity = self._moore_index_to_velocity(action["movement"][0])
                 agent.velocity = np.clip(agent.velocity, -1.0, 1.0)
 
                 # Move the agent.
@@ -1116,6 +1118,23 @@ class parallel_env(ParallelEnv):
                 if d < dmin:
                     dmin = d
         return dmin
+
+
+    def _moore_index_to_velocity(self, index):
+        ''' Converts a Moore neighborhood index (0-8) to a velocity vector. '''
+        if index < 0 or index > 8:
+            raise ValueError(f"Invalid Moore neighborhood index: {index}")
+        dx = (index // 3) - 1
+        dy = (index % 3) - 1
+        return np.array([dx, dy], dtype=np.int32)
+
+
+    def _velocity_to_moore_index(self, velocity):
+        ''' Converts a velocity vector to a Moore neighborhood index (0-8). '''
+        dx, dy = velocity
+        if dx < -1 or dx > 1 or dy < -1 or dy > 1:
+            raise ValueError(f"Invalid velocity for Moore neighborhood: {velocity}")
+        return (dx + 1) * 3 + (dy + 1)
 
 
 class parallel_env_simple_obs(parallel_env):
