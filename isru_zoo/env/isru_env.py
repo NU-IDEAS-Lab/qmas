@@ -640,7 +640,7 @@ class parallel_env(ParallelEnv):
             # The agent can only move one space at a time.
             "movement": spaces.Box(low=-1, high=1, shape=(2,), dtype=np.int32),
 
-            # Communication is a simple boolean flag.
+            # Communication is a request flag (request-based comm).
             "communication": spaces.Box(low=0, high=1, shape=(1,), dtype=np.int32),
 
             # Resource actions are represented as a floating point value for each resource type.
@@ -808,10 +808,10 @@ class parallel_env(ParallelEnv):
             "resources/extant": 0.0,
             "resources/total": 0.0,
             "extractors/num_in_place": 0,
-            "communication/messages_sent": 0,
+            "communication/requests_made": 0,
         }
         info_dict.update({agent: {} for agent in self.possible_agents})
-        senders = set()
+        requesters = set()
         
         # Perform agent actions.
         for agent in self.agents:
@@ -846,10 +846,10 @@ class parallel_env(ParallelEnv):
                 else:
                     agent.steps_stationary = 1
 
-                # Handle communication.
+                # Handle communication (request-based): agent requests others' observations.
                 if action["communication"][0] >= 0.5:
-                    senders.add(agent)
-                    info_dict["communication/messages_sent"] += 1
+                    requesters.add(agent)
+                    info_dict["communication/requests_made"] += 1
 
                 # Corrected resource handling for Hauler agents
                 if agent.capabilities[CAP.CARRY]:
@@ -924,9 +924,11 @@ class parallel_env(ParallelEnv):
         # Perform post-step calculations.
         for agent in self.possible_agents:
             # Perform observation.
+            requested = (agent in requesters)
+            senders_set = (set(self.agents) - {agent}) if requested else set()
             agent_observation, obs_mask = self.observe(
                 agent,
-                senders = senders - {agent}
+                senders = senders_set
             )
             obs_dict[agent] = agent_observation
             info_dict[agent]["visibility_mask"] = obs_mask
