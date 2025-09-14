@@ -115,15 +115,16 @@ class Predictor(torch.nn.Module):
         self.diffuser.fix_mask = torch.nn.Parameter(visibility_mask, requires_grad=False)
 
         # Sample from the diffusion model.
-        prediction, log = self.diffuser.sample(
-            prior=trajectory,
-            solver="ddpm",
-            n_samples=1,
-            sample_steps=5,
-            condition_cg=trajectory,
-            condition_cg_mask=visibility_mask,
-            w_cg=0.1,
-            w_cfg=0.0
-        )
+        with torch.enable_grad():
+            prediction, log = self.diffuser.sample(
+                prior=trajectory,
+                solver="ddpm",
+                n_samples=1,
+                sample_steps=5,
+                condition_cg=trajectory,
+                condition_cg_mask=visibility_mask,
+                w_cg=0.1,
+                w_cfg=0.0
+            )
 
         return prediction
