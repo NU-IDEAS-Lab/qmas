@@ -79,6 +79,8 @@ class PettingzooRunner(Runner):
             # compute return and update network
             self.compute()
             train_infos = self.train()
+
+            end = time.time()
             
             # post process
             total_num_steps = (episode + 1) * self.episode_length * self.n_rollout_threads
@@ -89,7 +91,6 @@ class PettingzooRunner(Runner):
 
             # log information
             if total_num_steps % self.log_interval == 0:
-                end = time.time()
                 
                 train_infos["average_episode_rewards"] = avg_episode_rewards
                 train_infos["fps"] = self.episode_length * self.n_rollout_threads / (end - start_episode)
@@ -217,6 +218,7 @@ class PettingzooRunner(Runner):
         )
 
 
+    @torch.no_grad()
     def compute(self):
         """Calculate returns for the collected data."""
         self.trainer.prep_rollout()
@@ -255,7 +257,7 @@ class PettingzooRunner(Runner):
                 else:
                     self.writter.add_scalars(k, {k: np.mean(v)}, total_num_steps)    
 
-    # @torch.no_grad()
+    @torch.no_grad()
     def eval(self):
         log_root = zarr.open_group(self.all_args.eval_output_file, mode="a")
         if self.all_args.eval_series == "":
@@ -382,7 +384,7 @@ class PettingzooRunner(Runner):
                         # self.env_infos[key] = [i[key] for i in infos]
 
 
-    # @torch.no_grad()
+    @torch.no_grad()
     def render(self, ipython_clear_output=True):        
 
         if ipython_clear_output:

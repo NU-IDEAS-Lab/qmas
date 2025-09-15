@@ -218,113 +218,45 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
         self.empty()
 
 
-    def compute_returns(self, next_value, value_normalizer=None, last_step=-1):
+    def compute_returns(self, next_value, value_normalizer=None):
         """
         Compute returns either as discounted sum of rewards, or using GAE.
         :param next_value: (np.ndarray) value predictions for the step after the last episode step.
         :param value_normalizer: (PopArt) If not None, PopArt value normalizer instance.
         """
 
-        # if last_step == -1:
         last_step = len(self) - 1
 
-        # Check whether we should use the AMADM GAE modification from https://arxiv.org/abs/2308.06036
-        # Unfortunately, I don't have time to implement for all of the other options (like use_proper_time_limits),
-        # so I just ignore them!
-        if self._use_gae_amadm:
+        if self._use_gae:
             self["value_preds"][last_step] = next_value
             gae = 0
             for step in reversed(range(last_step)):
-                if self._use_popart or self._use_valuenorm:
-                    delta = self["rewards"][step] + np.power(self.gamma, self["delta_steps"][step]) * value_normalizer.denormalize(
-                        self["value_preds"][step + 1]) * self.masks[step + 1] \
-                            - value_normalizer.denormalize(self["value_preds"][step])
-                    gae = delta + np.power(self.gamma * self.gae_lambda, self["delta_steps"][step]) * self.masks[step + 1] * gae
-                    self["returns"][step] = gae + value_normalizer.denormalize(self["value_preds"][step])
+                # Check whether we should use the AMADM GAE modification from https://arxiv.org/abs/2308.06036
+                if self._use_gae_amadm:
+                    exponent = self["delta_steps"][step]
                 else:
-                    delta = self["rewards"][step] + np.power(self.gamma, self["delta_steps"][step]) * self["value_preds"][step + 1] * self.masks[step + 1] - \
-                            self["value_preds"][step]
-                    gae = delta + np.power(self.gamma * self.gae_lambda, self["delta_steps"][step]) * self.masks[step + 1] * gae
-                    self["returns"][step] = gae + self["value_preds"][step]
-        
-        elif self._use_proper_time_limits:
-            if self._use_gae:
-                self["value_preds"][last_step] = next_value
-                gae = 0
-                for step in reversed(range(self["rewards"].shape[0])):
-                    if self._use_popart or self._use_valuenorm:
-                        # step + 1
-                        delta = self["rewards"][step] + self.gamma * value_normalizer.denormalize(
-                            self["value_preds"][step + 1]) * self.masks[step + 1] \
-                                - value_normalizer.denormalize(self["value_preds"][step])
-                        gae = delta + self.gamma * self.gae_lambda * gae * self.masks[step + 1]
-                        gae = gae * self.bad_masks[step + 1]
-                        self["returns"][step] = gae + value_normalizer.denormalize(self["value_preds"][step])
-                    else:
-                        delta = self["rewards"][step] + self.gamma * self["value_preds"][step + 1] * self.masks[step + 1] - \
-                                self["value_preds"][step]
-                        gae = delta + self.gamma * self.gae_lambda * self.masks[step + 1] * gae
-                        gae = gae * self.bad_masks[step + 1]
-                        self["returns"][step] = gae + self["value_preds"][step]
-            else:
-                self["returns"][last_step] = next_value
-                for step in reversed(range(self["rewards"].shape[0])):
-                    if self._use_popart or self._use_valuenorm:
-                        self["returns"][step] = (self["returns"][step + 1] * self.gamma * self.masks[step + 1] + self["rewards"][
-                            step]) * self.bad_masks[step + 1] \
-                                             + (1 - self.bad_masks[step + 1]) * value_normalizer.denormalize(
-                            self["value_preds"][step])
-                    else:
-                        self["returns"][step] = (self["returns"][step + 1] * self.gamma * self.masks[step + 1] + self["rewards"][
-                            step]) * self.bad_masks[step + 1] \
-                                             + (1 - self.bad_masks[step + 1]) * self["value_preds"][step]
+                    exponent = torch.ones_like(self["delta_steps"][step])
+                
+                if self._use_popart or self._use_valuenorm:
+                    value_preds_curr = value_normalizer.denormalize(self["value_preds"][step])
+                    value_preds_next = value_normalizer.denormalize(self["value_preds"][step + 1])
+                else:
+                    value_preds_curr = self["value_preds"][step]
+                    value_preds_next = self["value_preds"][step + 1]
+
+                delta = self["rewards"][step] + self.gamma ** exponent * value_preds_next * self.masks[step + 1] - value_preds_curr
+                
+                gae = delta + np.power(self.gamma * self.gae_lambda, exponent) * self.masks[step + 1] * gae
+
+                if self._use_proper_time_limits:
+                    gae = gae * self.bad_masks[step + 1]
+
+                self["returns"][step] = gae + value_normalizer.denormalize(self["value_preds"][step])
+
         else:
-            if self._use_gae:
-                self["value_preds"][last_step] = next_value
-                gae = 0
-                for step in reversed(range(self["rewards"].shape[0])):
-                    if self._use_popart or self._use_valuenorm:
-                        if self.algo == "mat" or self.algo == "mat_dec":
-                            value_t = value_normalizer.denormalize(self["value_preds"][step])
-                            value_t_next = value_normalizer.denormalize(self["value_preds"][step + 1])
-                            rewards_t = self["rewards"][step]
-
-                            # mean_v_t = np.mean(value_t, axis=-2, keepdims=True)
-                            # mean_v_t_next = np.mean(value_t_next, axis=-2, keepdims=True)
-                            # delta = rewards_t + self.gamma * self.masks[step + 1] * mean_v_t_next - mean_v_t
-
-                            delta = rewards_t + self.gamma * self.masks[step + 1] * value_t_next - value_t
-                            gae = delta + self.gamma * self.gae_lambda * self.masks[step + 1] * gae
-                            self.advantages[step] = gae
-                            self["returns"][step] = gae + value_t
-                        else:
-                            delta = self["rewards"][step] + self.gamma * value_normalizer.denormalize(
-                                self["value_preds"][step + 1]) * self.masks[step + 1] \
-                                    - value_normalizer.denormalize(self["value_preds"][step])
-                            gae = delta + self.gamma * self.gae_lambda * self.masks[step + 1] * gae
-                            self["returns"][step] = gae + value_normalizer.denormalize(self["value_preds"][step])
-                    else:
-                        if self.algo == "mat" or self.algo == "mat_dec":
-                            rewards_t = self["rewards"][step]
-                            mean_v_t = np.mean(self["value_preds"][step], axis=-2, keepdims=True)
-                            mean_v_t_next = np.mean(self["value_preds"][step + 1], axis=-2, keepdims=True)
-                            delta = rewards_t + self.gamma * self.masks[step + 1] * mean_v_t_next - mean_v_t
-
-                            # delta = rewards_t + self.gamma * self["value_preds"][step + 1] * \
-                            #         self.masks[step + 1] - self["value_preds"][step]
-                            gae = delta + self.gamma * self.gae_lambda * self.masks[step + 1] * gae
-                            self.advantages[step] = gae
-                            self["returns"][step] = gae + self["value_preds"][step]
-
-                        else:
-                            delta = self["rewards"][step] + self.gamma * self["value_preds"][step + 1] * \
-                                    self.masks[step + 1] - self["value_preds"][step]
-                            gae = delta + self.gamma * self.gae_lambda * self.masks[step + 1] * gae
-                            self["returns"][step] = gae + self["value_preds"][step]
-            else:
-                self["returns"][last_step] = next_value
-                for step in reversed(range(self["rewards"].shape[0])):
-                    self["returns"][step] = self["returns"][step + 1] * self.gamma * self.masks[step + 1] + self["rewards"][step]
+            self["returns"][last_step] = next_value
+            for step in reversed(range(last_step)):
+                self["returns"][step] = self["returns"][step + 1] * self.gamma * self.masks[step + 1] + self["rewards"][step]
 
 
     def sample_trajectories(self, num_mini_batch, trajectory_size, legacy_mode=False):
@@ -355,10 +287,27 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
     # Everything below here is for compatibility with the old replay buffer class.
 
     def feed_forward_generator(self, advantages, num_mini_batch=None, mini_batch_size=None, last_step=-1):
-        sample, info = self.sample(return_info=True)
-        sample["advantages"] = advantages[info["index"]]
+        # batch_size = self.n_rollout_threads * self.episode_length * self.num_agents
+        batch_size = self.episode_length
 
-        yield self.compatibility_transform_sample(sample)
+        if mini_batch_size is None:
+            assert batch_size >= num_mini_batch, (
+                "PPO requires the number of processes ({}) "
+                "* number of steps ({}) * number of agents ({}) = {} "
+                "to be greater than or equal to the number of PPO mini batches ({})."
+                "".format(self.n_rollout_threads, len(self), self.num_agents,
+                          self.n_rollout_threads * len(self) * self.num_agents,
+                          num_mini_batch))
+            mini_batch_size = batch_size // num_mini_batch
+
+        for _ in range(batch_size // mini_batch_size):
+            sample, info = self.sample(
+                batch_size=mini_batch_size,
+                return_info=True
+            )
+            sample["advantages"] = advantages[info["index"]]
+
+            yield self.compatibility_transform_sample(sample)
 
 
     def recurrent_generator(self, advantages, num_mini_batch, data_chunk_length, last_step=-1):
