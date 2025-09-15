@@ -907,8 +907,8 @@ class parallel_env(ParallelEnv):
                                 # Remove from the resource map at the extractor's tile
                                 self.map_resources[r][ex_pos_int[0], ex_pos_int[1]] -= take
                                 # Add to the hauler's cargo
-                                # reward_dict[agent]+= 1.0 * take
-                                # reward_dict[extractor] += 1.0 * take
+                                reward_dict[agent]+= 1.0 * take
+                                reward_dict[extractor] += 1.0 * take
                                 agent.cargo[r.resource_id] = agent.cargo.get(r.resource_id, 0.0) + take
                                 info_dict["resources/step_picked_up"] += take
                         elif val < 0:
@@ -921,7 +921,7 @@ class parallel_env(ParallelEnv):
                                 depot = self.possible_depots[idx]
                                 depot.stock += drop
                                 agent.cargo[r.resource_id] -= drop
-                                reward_dict[agent] += 100.0 * depot.resource.reward_deposit * drop
+                                reward_dict[agent] += 1.0 * depot.resource.reward_deposit * drop
                                 info_dict["resources/step_dropped_off"] += drop
                 if agent.capabilities[CAP.EXTRACT]:
                     # Provide reward for Extractors that are sitting on a resource tile.
@@ -1009,20 +1009,20 @@ class parallel_env(ParallelEnv):
         #         diff = prev_nearest_depot_dist - nearest_depot_dist
         #         reward += 0.1 * diff
 
-        # if agent.capabilities[CAP.PROSPECT]:
-        #     # Reward prospectors for the fraction of the area explored.
-        #     visible_cells = self._get_visible_cell_count(agent, use_resource_mask=True)
-        #     total_cells = np.prod(self.world_dims)
-        #     reward += 0.1 * (visible_cells / float(total_cells))
+        if agent.capabilities[CAP.PROSPECT]:
+            # Reward prospectors for the fraction of the area explored.
+            visible_cells = self._get_visible_cell_count(agent, use_resource_mask=True)
+            total_cells = np.prod(self.world_dims)
+            reward += 0.1 * (visible_cells / float(total_cells))
         
-        # if agent.capabilities[CAP.EXTRACT]:
-        #     # Reward extractors for being on a resource tile.
-        #     px, py = agent.position.astype(np.int32)
-        #     if self.map_depots[px, py] == 0 :
-        #         for r in self.possible_resources:
-        #             if self.map_resources[r][px, py] > 0:
-        #                 reward += r.reward_extraction * agent.steps_stationary
-        #                 break
+        if agent.capabilities[CAP.EXTRACT]:
+            # Reward extractors for being on a resource tile.
+            px, py = agent.position.astype(np.int32)
+            if self.map_depots[px, py] == 0 :
+                for r in self.possible_resources:
+                    if self.map_resources[r][px, py] > 0:
+                        reward += r.reward_extraction * agent.steps_stationary
+                        break
 
             # Reward for inverse distance to nearest resource.
             # resource_pos = self._get_nearest_resource(agent.position)
@@ -1043,13 +1043,12 @@ class parallel_env(ParallelEnv):
         # reward += 0.05 * deposited_resources / float(total_resources) + 0.01 * held_resources / float(total_resources)
 
         # Reward for global objective at the end of the episode.
-        # if end_truncate or end_done:
-        if True:
-            total_resources = sum(r.quantity for r in self.possible_resources)
+        if end_truncate or end_done:
+            # total_resources = sum(r.quantity for r in self.possible_resources)
             deposited_resources = sum(depot.stock for depot in self.possible_depots)
-            resource_deposit_percentage = deposited_resources / float(total_resources)
-            # reward += 1.0 * resource_deposit_percentage
-            reward += 1.0 * deposited_resources
+            # resource_deposit_percentage = deposited_resources / float(total_resources)
+            # reward += 1000.0 * resource_deposit_percentage
+            reward += 1000.0 * deposited_resources
 
         return reward
 

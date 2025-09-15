@@ -155,9 +155,9 @@ class PettingzooEnv(object):
 
     def seed(self, seed=None):
         if seed is None:
-            random.seed(1)
-        else:
-            random.seed(seed)
+            seed = 1
+        random.seed(seed)
+        np.random.seed(seed)
 
     def close(self):
         self.env.close()

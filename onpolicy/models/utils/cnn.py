@@ -152,7 +152,7 @@ class EncoderLayer(nn.Module):
             "resnet34",
             in_channels=input_channel,
             depth=5,
-            weights="imagenet",
+            weights=None,
         )
 
         self.hidden_size = hidden_size
@@ -199,7 +199,7 @@ class UNetLayer(nn.Module):
             # ),
             smp.Unet(
                 encoder_name="resnet34",        # choose encoder, e.g. mobilenet_v2 or efficientnet-b7
-                encoder_weights="imagenet",     # use `imagenet` pre-trained weights for encoder initialization
+                encoder_weights=None,     # use `imagenet` pre-trained weights for encoder initialization
                 in_channels=input_channel,                  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
                 classes=1,                      # model output channels (number of classes in your dataset)
                 # decoder_interpolation="bilinear",
