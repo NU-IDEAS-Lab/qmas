@@ -899,8 +899,8 @@ class parallel_env(ParallelEnv):
                                 # Remove from the resource map at the extractor's tile
                                 self.map_resources[r][ex_pos_int[0], ex_pos_int[1]] -= take
                                 # Add to the hauler's cargo
-                                reward_dict[agent]+= 100.0 * take
-                                reward_dict[extractor] += 100.0 * take
+                                reward_dict[agent]+= 1.0 * take
+                                reward_dict[extractor] += 1.0 * take
                                 agent.cargo[r.resource_id] = agent.cargo.get(r.resource_id, 0.0) + take
                                 info_dict["resources/step_picked_up"] += take
                         elif val < 0:
@@ -913,7 +913,7 @@ class parallel_env(ParallelEnv):
                                 depot = self.possible_depots[idx]
                                 depot.stock += drop
                                 agent.cargo[r.resource_id] -= drop
-                                reward_dict[agent] += 100.0 * depot.resource.reward_deposit * drop
+                                reward_dict[agent] += 1.0 * depot.resource.reward_deposit * drop
                                 info_dict["resources/step_dropped_off"] += drop
                 if agent.capabilities[CAP.EXTRACT]:
                     # Provide reward for Extractors that are sitting on a resource tile.
