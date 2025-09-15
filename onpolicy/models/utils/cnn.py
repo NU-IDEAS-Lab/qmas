@@ -159,15 +159,22 @@ class EncoderLayer(nn.Module):
         self.init_ = init_
         self.active_func = active_func
 
-        self.post = nn.Sequential(
-            Flatten(),
-            init_(nn.Linear(self.encoder.out_channels[-1], hidden_size)),
-            active_func
-        )
+        # We'll create the post-processing Linear layer dynamically in forward
+        self.post = None
 
     def forward(self, x):
-        x = self.encoder(x)
-        x = self.post(x[-1])
+        features = self.encoder(x)
+        last_feature = features[-1]
+        batch_size = last_feature.size(0)
+        flat_size = last_feature.size(1) * last_feature.size(2) * last_feature.size(3)
+        # Dynamically create the post-processing layer if not already created
+        if self.post is None:
+            self.post = nn.Sequential(
+                Flatten(),
+                self.init_(nn.Linear(flat_size, self.hidden_size)),
+                self.active_func
+            ).to(last_feature.device)
+        x = self.post(last_feature)
         return x
 
 
