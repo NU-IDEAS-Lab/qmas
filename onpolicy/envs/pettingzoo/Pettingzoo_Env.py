@@ -154,10 +154,11 @@ class PettingzooEnv(object):
         return ret_obs, ret_share_obs, rewards, done, info, ret_available_actions
 
     def seed(self, seed=None):
+        print(f"Seeding environment with seed {seed}")
         if seed is None:
-            random.seed(1)
-        else:
-            random.seed(seed)
+            seed = 1
+        random.seed(seed)
+        np.random.seed(seed)
 
     def close(self):
         self.env.close()
