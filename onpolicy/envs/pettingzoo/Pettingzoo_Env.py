@@ -154,7 +154,6 @@ class PettingzooEnv(object):
         return ret_obs, ret_share_obs, rewards, done, info, ret_available_actions
 
     def seed(self, seed=None):
-        print(f"Seeding environment with seed {seed}")
         if seed is None:
             seed = 1
         random.seed(seed)
