@@ -1161,16 +1161,11 @@ class parallel_env_simple_obs(parallel_env):
         ''' Returns the observation space for the given agent. '''
 
         return spaces.Dict({
-            "id": spaces.Box(
-                low=0,
-                high=len(self.possible_agents),
-                dtype=np.int32,
-            ),
             "agents": spaces.Dict({
-                agent: spaces.Dict({
+                a: spaces.Dict({
                     "position": spaces.Box(
-                        low=0,
-                        high=np.max(self.world_dims),
+                        low=-np.inf,
+                        high=np.inf,
                         shape=(2,),
                         dtype=np.float32
                     ),
@@ -1192,13 +1187,13 @@ class parallel_env_simple_obs(parallel_env):
                         shape=(len(self.possible_resources),),
                         dtype=np.float32
                     ),
-                }) for agent in self.possible_agents
+                }) for a in self.possible_agents
             }),
             "depots": spaces.Dict({
                 depot: spaces.Dict({
                     "position": spaces.Box(
-                        low=0,
-                        high=np.max(self.world_dims),
+                        low=-np.inf,
+                        high=np.inf,
                         shape=(2,),
                         dtype=np.float32
                     ),
@@ -1212,8 +1207,8 @@ class parallel_env_simple_obs(parallel_env):
             }),
             "resources": spaces.Dict({
                 r: spaces.Box(
-                    low=0,
-                    high=np.max(self.world_dims),
+                    low=-np.inf,
+                    high=np.inf,
                     shape=(r.quantity_max, len(self.world_dims)),
                     dtype=np.float32
                 ) for r in self.possible_resources
@@ -1224,42 +1219,52 @@ class parallel_env_simple_obs(parallel_env):
     def _observe(self, agent, force_visible=False):
         ''' Fills in the state/observation space for the given agent. '''
 
+        def relative_position(pos):
+            ''' Returns the position relative to the given agent. '''
+            return (pos - agent.position).astype(np.float32)
+
+        def agent_obs(a):
+            return {
+                "position": relative_position(a.position),
+                "velocity": a.velocity,
+                "role": np.array([a.role.value], dtype=np.int32),
+                "cargo": np.array(
+                    [a.cargo.get(r.resource_id, 0.0) for r in self.possible_resources],
+                    dtype=np.float32
+                ) / a.capabilities.get(CAP.CARRY_CAPACITY, 1.0),  # Normalize cargo by capacity
+            }
+
         # Create the observation.
         obs = {
-            "id": self.possible_agents.index(agent),
-            "agents": {
-                a: {
-                    "position": a.position,
-                    "velocity": a.velocity,
-                    "role": np.array([a.role.value], dtype=np.int32),
-                    "cargo": np.array(
-                        [a.cargo.get(r.resource_id, 0.0) for r in self.possible_resources],
-                        dtype=np.float32
-                    ) / a.capabilities.get(CAP.CARRY_CAPACITY, 1.0),  # Normalize cargo by capacity
-                } for a in self.possible_agents
-            },
+            "agents": {},
             "depots": {
                 d: {
-                    "position": d.position,
+                    "position": relative_position(d.position),
                     "stock": np.array([d.stock], dtype=np.float32)
                 } for d in self.possible_depots
             },
             "resources": {}
         }
 
+        # Insert the ego agent first. Python dictionaries preserve insertion order.
+        obs["agents"][agent] = agent_obs(agent)
+        for a in self.possible_agents:
+            if a != agent:
+                obs["agents"][a] = agent_obs(a)
+
         # Add resource positions.
         for r in self.possible_resources:
-            obs["resources"][r] = np.ones((r.quantity_max, len(self.world_dims)), dtype=np.float32) * -1.0
+            obs["resources"][r] = np.ones((r.quantity_max, len(self.world_dims)), dtype=np.float32) * -100.0
             # Get locations with resources that are not in depots.
             locations = np.argwhere(self.map_resources[r] > 0)
             if locations.shape[0] > 0:
                 # Exclude locations that are in depots.
                 depot_mask = self.map_depots[locations[:, 0], locations[:, 1]] == 0
                 locations = locations[depot_mask]
+                locations = relative_position(locations)
             obs["resources"][r][:locations.shape[0], :] = locations.astype(np.float32)
 
         obs_mask = {
-            "id": np.ones_like(obs["id"], dtype=bool),
             "agents": {
                 a: {
                     "position": np.ones_like(obs["agents"][a]["position"], dtype=bool),
