@@ -211,7 +211,6 @@ class parallel_env(ParallelEnv):
 
         # Generate new map (obstacles, resources, etc.) and get available positions.
         if self.generated_map is None or not self.world_no_reset:
-            print(f"Generating new map (reset count {self.reset_count})")
             self.generated_map = self.generate_map()
         
         # Reset the map to match the generated map. Create a copy of the data since these variables will be modified.
