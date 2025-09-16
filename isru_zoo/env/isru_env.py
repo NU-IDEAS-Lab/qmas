@@ -33,6 +33,8 @@ def add_args(parser):
                         help="Whether to increase the number of resources over time up to `num_resources`.")
     parser.add_argument("--world_size", type=int, default=50,
                         help="The size of the world. The world is a square with side length `world_size`.")
+    parser.add_argument("--world_no_reset", action="store_true",
+                        help="Whether to keep the same map between resets.")
     parser.add_argument("--observation_radius", type=int, default=10,
                         help="The radius within which agents can observe each other and resources.")
     parser.add_argument("--observation_mask", action="store_true",
@@ -89,6 +91,7 @@ class parallel_env(ParallelEnv):
             randomize_num_resources: bool = False,
             curriculum_num_resources: bool = False,
             world_size: int = 50,
+            world_no_reset: bool = False,
             observation_radius: int = 10,
             observation_mask: bool = False,
             available_actions_mask: bool = False,
@@ -105,6 +108,7 @@ class parallel_env(ParallelEnv):
         self.max_cycles = max_cycles
         self.episode_max = episode_max
         self.world_dims = np.array([world_size, world_size], dtype=np.int32)
+        self.world_no_reset = world_no_reset
         self.num_obstacles = num_obstacles
         self.randomize_num_resources = randomize_num_resources
         self.curriculum_num_resources = curriculum_num_resources
@@ -155,6 +159,8 @@ class parallel_env(ParallelEnv):
             ) for r in self.possible_resources
         ]
 
+        self.generated_map = None
+
         # Set up spaces.
         self.observation_spaces = spaces.Dict({
             agent: self.observation_space(agent) for agent in self.possible_agents
@@ -197,18 +203,22 @@ class parallel_env(ParallelEnv):
         
         # Reset resources.
         for r in self.possible_resources:
-            if self.randomize_num_resources:
-                r.reset(quantity=np.random.randint(1, r.quantity_max))
-            elif self.curriculum_num_resources:
-                # Scale the number of resources logarithmically with episode number.
-                episode = self.reset_count / 2.0
-                quantity = int(np.ceil((np.log1p(episode) / np.log1p(self.episode_max)) * r.quantity_max))
-                r.reset(quantity=quantity)
-            else:
-                r.reset()
+            r.reset()
+        
+        # Reset depots.
+        for depot in self.possible_depots:
+            depot.reset()
 
         # Generate new map (obstacles, resources, etc.) and get available positions.
-        positions_available = self.generate_map()        
+        if self.generated_map is None or not self.world_no_reset:
+            print(f"Generating new map (reset count {self.reset_count})")
+            self.generated_map = self.generate_map()
+        
+        # Reset the map to match the generated map. Create a copy of the data since these variables will be modified.
+        self.map_obstacles = self.generated_map[0].copy()
+        self.map_depots = self.generated_map[1].copy()
+        self.map_resources = {r: self.generated_map[2][r].copy() for r in self.possible_resources}
+        positions_available = self.generated_map[3].copy()
 
         # Reset the agents.
         self.agents = copy(self.possible_agents)
@@ -217,10 +227,9 @@ class parallel_env(ParallelEnv):
             start_position = positions_available[idx]
             agent.reset(
                 reset_start_position=True,
+                resources=self.possible_resources,
                 position=start_position,
             )
-            if agent.capabilities[CAP.CARRY]:
-                agent.cargo = {r.resource_id: 0.0 for r in self.possible_resources}
 
         # Reset other state.
         self.step_count = 0
@@ -246,23 +255,20 @@ class parallel_env(ParallelEnv):
     def generate_map(self):
         ''' Generates a random map for the environment. '''
 
-        world_indices_x = np.arange(self.world_dims[0])
-        world_indices_y = np.arange(self.world_dims[1])
-
         mask_available = np.ones(self.world_dims, dtype=bool)
 
         # Reset obstacles.
-        self.map_obstacles = np.zeros(self.world_dims, dtype=np.float32)
+        map_obstacles = np.zeros(self.world_dims, dtype=np.float32)
         positions_available = np.argwhere(mask_available)
         indices = np.random.choice(positions_available.shape[0], self.num_obstacles, replace=False)
         for i in indices:
             pos = positions_available[i]
-            self.map_obstacles[pos[0], pos[1]] = 1.0
+            map_obstacles[pos[0], pos[1]] = 1.0
             mask_available[pos[0], pos[1]] = False
 
         # Reset depots.
         # Ensure they are placed in an available location.
-        self.map_depots = np.zeros(self.world_dims, dtype=np.float32)
+        map_depots = np.zeros(self.world_dims, dtype=np.float32)
         positions_available = np.argwhere(mask_available)
         indices = np.random.choice(positions_available.shape[0], len(self.possible_depots), replace=False)
         for i, depot in enumerate(self.possible_depots):
@@ -272,7 +278,7 @@ class parallel_env(ParallelEnv):
                 position=positions_available[idx]
             )
             assert depot.resource_id != 0, "A resource_id of 0 is indistinguishable from empty space!"
-            self.map_depots[depot.position[0], depot.position[1]] = depot.resource_id
+            map_depots[depot.position[0], depot.position[1]] = depot.resource_id
             mask_available[depot.position[0], depot.position[1]] = False
 
         # Build stable resource index mappings for action vector <-> resource objects
@@ -281,23 +287,32 @@ class parallel_env(ParallelEnv):
         self.idx_to_res = {i: r for i, r in enumerate(self.resource_list)}
 
         # Reset resources.
-        self.map_resources = {}
+        map_resources = {}
         for r in self.possible_resources:
-            self.map_resources[r] = np.zeros(self.world_dims, dtype=np.float32)
+            # Reset resource quantity if randomizing or using curriculum.
+            if self.randomize_num_resources:
+                r.reset(quantity=np.random.randint(1, r.quantity_max))
+            elif self.curriculum_num_resources:
+                # Scale the number of resources logarithmically with episode number.
+                episode = self.reset_count / 2.0
+                quantity = int(np.ceil((np.log1p(episode) / np.log1p(self.episode_max)) * r.quantity_max))
+                r.reset(quantity=quantity)
+
+            map_resources[r] = np.zeros(self.world_dims, dtype=np.float32)
             positions_available = np.argwhere(mask_available)
             indices = np.random.choice(positions_available.shape[0], r.quantity, replace=False)
             for i in range(r.quantity):
                 idx = indices[i]
                 pos = positions_available[idx]
-                self.map_resources[r][pos[0], pos[1]] += 1.0
+                map_resources[r][pos[0], pos[1]] += 1.0
                 mask_available[pos[0], pos[1]] = False
 
         # Ensure that the map was correctly generated.
         mask_resources = np.zeros(self.world_dims, dtype=bool)
         for r in self.possible_resources:
-            mask_resources = mask_resources | (self.map_resources[r] > 0)
-        mask_depots = self.map_depots > 0
-        mask_obstacles = self.map_obstacles > 0
+            mask_resources = mask_resources | (map_resources[r] > 0)
+        mask_depots = map_depots > 0
+        mask_obstacles = map_obstacles > 0
         assert np.sum(mask_resources & mask_obstacles) == 0, "Some resources are located inside obstacles!"
         assert np.sum(mask_resources & mask_depots) == 0, "Some resources are located inside depots!"
         assert np.sum(mask_depots & mask_obstacles) == 0, "Some depots are located inside obstacles!"
@@ -305,7 +320,7 @@ class parallel_env(ParallelEnv):
         assert np.sum(mask_depots) == len(self.possible_depots), "Incorrect depot count!"
         assert np.sum(mask_obstacles) == self.num_obstacles, "Incorrect obstacle count!"
 
-        return positions_available
+        return map_obstacles, map_depots, map_resources, positions_available
 
 
     @property
