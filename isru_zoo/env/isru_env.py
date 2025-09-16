@@ -1261,7 +1261,14 @@ class parallel_env_simple_obs(parallel_env):
                 # Exclude locations that are in depots.
                 depot_mask = self.map_depots[locations[:, 0], locations[:, 1]] == 0
                 locations = locations[depot_mask]
+
+                # Convert to relative positions.
                 locations = relative_position(locations)
+
+                # Sort locations by distance to the agent.
+                dists = np.linalg.norm(locations, axis=1)
+                sorted_indices = np.argsort(dists)
+                locations = locations[sorted_indices]
             obs["resources"][r][:locations.shape[0], :] = locations.astype(np.float32)
 
         obs_mask = {
