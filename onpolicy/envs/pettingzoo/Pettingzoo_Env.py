@@ -233,7 +233,7 @@ class PettingzooEnv(object):
                 viz = i["visibility_mask"]
                 if self.flatten_observations:
                     viz = flatten_mask(self.env.observation_space(a), viz)
-                    all_viz.append(viz)
+                all_viz.append(viz)
             else:
                 return info  # If visibility mask is not present, return the info as is.
 
