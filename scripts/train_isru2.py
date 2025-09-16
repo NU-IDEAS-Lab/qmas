@@ -4,21 +4,21 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-    "--experiment_name", "isru-UN-stateHybrid-e1h1p0-e200-r20-h5-5x5-512x4",
+    "--experiment_name", "isru-simple-1superBot-e1000-r80-h80-10x10-1024x3-noReset",
     "--project_name", "qmas",
-    # "--env_class", "isru_zoo.isru_v0.parallel_env",
-    "--env_class", "isru_zoo.isru_v0.parallel_env_map_obs",
+    "--env_class", "isru_zoo.isru_v0.parallel_env_simple_obs",
     "--user_name", "ideas-mas",
 
 	"--num_extractors", "1",
-    "--num_haulers", "1",
+    "--num_haulers", "0",
     "--num_prospectors", "0",
 
-    "--hauler_capacity", "5",
+    "--hauler_capacity", "80",
 
-    "--world_size", "5",
+    "--world_no_reset",
+    "--world_size", "10",
     "--num_obstacles", "0",
-    "--num_resources", "20",
+    "--num_resources", "80",
     # "--randomize_num_resources",
     # "--curriculum_num_resources",
 
@@ -27,11 +27,12 @@ args = [
     "--available_actions_mask",
 
     "--num_env_steps", "5000000",
-    "--episode_length", "200",
-    "--max_cycles", "200",
+    "--episode_length", "1000",
+    "--max_cycles", "1000",
+    "--num_mini_batch", "10",
 
-    # "--algorithm_class", "qmas.variant_two_modules.algorithm.QmasAlgorithm",
-    # "--policy_class", "qmas.variant_two_modules.policy.QmasPolicy",
+    "--algorithm_class", "qmas.variant_two_modules.algorithm.QmasAlgorithm",
+    "--policy_class", "qmas.variant_two_modules.policy.QmasPolicy",
     "--algorithm_name", "mappo",
     "--use_centralized_V",
     "--use_gae",
@@ -40,16 +41,25 @@ args = [
     "--share_policy",
     "--no-share_reward",
     "--use_ReLU",
-    "--hidden_size", "128",
-    "--layer_N", "2",
+    "--hidden_size", "1024",
+    "--layer_N", "3",
+
+    # "--gamma", "0.999",
+    # "--lr", "0.00005",
+    # "--critic_lr", "0.00005",
+    # "--entropy_coef", "0.001",
+    # "--ppo_epoch", "5",
+    # "--no-use_valuenorm",
+    # "--no-use_clipped_value_loss",
 
     "--diffusion_model_type", "dit1d",
+    "--prediction_disable",
 
     "--seed", "0",
 
     "--n_rollout_threads", "50",
     "--cuda",
-    "--cuda_idx", "3",
+    "--cuda_idx", "6",
 
     "--save_interval", "1000",
     "--results_dir", "/data/group/mas/qmas/results",
