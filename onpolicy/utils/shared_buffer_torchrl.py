@@ -342,15 +342,8 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
         rand = torch.randperm(data_chunks).numpy()
         sampler = [rand[i * mini_batch_size:(i + 1) * mini_batch_size] for i in range(num_mini_batch)]
 
-        if len(self.share_obs.shape) > 4:
-            share_obs = self.share_obs[:last_step].permute(1, 2, 0, 3, 4, 5).reshape(-1, *self.share_obs.shape[3:])
-        else:
-            share_obs = _cast(self.share_obs[:last_step], no_agent_dim=True)
-        if len(self.obs.shape) > 4:
-            obs = self.obs[:last_step].permute(1, 2, 0, 3, 4, 5).reshape(-1, *self.obs.shape[3:])
-        else:
-            obs = _cast(self.obs[:last_step])
-
+        share_obs = _cast(self.share_obs[:last_step], no_agent_dim=True)
+        obs = _cast(self.obs[:last_step])
         actions = _cast(self.actions)
         action_log_probs = _cast(self.action_log_probs)
         advantages = _cast(advantages)
