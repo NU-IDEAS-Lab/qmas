@@ -324,7 +324,9 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
             return x.reshape(T * N, *x.shape[2:])
 
 
-        def _cast(x):
+        def _cast(x, no_agent_dim=False):
+            if no_agent_dim:
+                return x.permute(1, 0, *range(2, x.ndim)).reshape(-1, *x.shape[2:])
             return x.permute(1, 2, 0, *range(3, x.ndim)).reshape(-1, *x.shape[3:])
 
 
@@ -343,7 +345,7 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
         if len(self.share_obs.shape) > 4:
             share_obs = self.share_obs[:last_step].permute(1, 2, 0, 3, 4, 5).reshape(-1, *self.share_obs.shape[3:])
         else:
-            share_obs = _cast(self.share_obs[:last_step])
+            share_obs = _cast(self.share_obs[:last_step], no_agent_dim=True)
         if len(self.obs.shape) > 4:
             obs = self.obs[:last_step].permute(1, 2, 0, 3, 4, 5).reshape(-1, *self.obs.shape[3:])
         else:
