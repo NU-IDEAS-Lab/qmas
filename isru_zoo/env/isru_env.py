@@ -1644,3 +1644,48 @@ class parallel_env_map_obs(parallel_env):
         else:
             # return combined_obs, combined_obs_mask
             return combined_obs, combined_obs_mask
+
+class parallel_env_flat_map_obs(parallel_env):
+    ''' A single-layer map-based observation of the ISRU environment. '''
+
+    @functools.cache
+    def observation_space(self, agent):
+        ''' Returns the observation space for the given agent. '''
+
+        return spaces.Box(
+            low=-np.inf,
+            high=np.inf,
+            shape=(self.world_dims,),
+            dtype=np.float32
+        )
+
+
+    def _observe(self, agent, force_visible=False):
+        ''' Fills in the state/observation space for the given agent. '''
+
+        # Create the map.
+        obs = np.zeros(self.world_dims, dtype=np.float32)
+
+        # Add obstacles.
+        obs[self.map_obstacles > 0] = -1.0
+
+        # Add resources.
+        for r in self.possible_resources:
+            obs[self.map_resources[r] > 0] = 1.0
+        
+        # Add depots.
+        obs[self.map_depots > 0] = 2.0
+
+        # Add agents.
+        for a in self.possible_agents:
+            pos = a.grid_position
+            role = a.role.value
+            obs[pos[0], pos[1]] = 3.0 + role
+            if a == agent:
+                # Mark the ego agent specially.
+                obs[pos[0], pos[1]] = 10.0 + role
+        
+        # Set up visibility mask.
+        obs_mask = np.ones_like(obs, dtype=bool) # All visible
+
+        return obs, obs_mask
