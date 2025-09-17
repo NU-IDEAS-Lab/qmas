@@ -64,6 +64,13 @@ class Entity():
         return self._position
 
 
+    @property
+    def grid_position(self):
+        ''' Returns the current grid position. '''
+
+        return np.floor(self._position).astype(np.int32)
+
+
     @position.setter
     def position(self, pos):
         ''' Sets the agent position. '''

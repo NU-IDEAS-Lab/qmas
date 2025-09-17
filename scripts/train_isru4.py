@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-    "--experiment_name", "isru-UN-1superBot-e200-r80-h80-10x10-128x2-alwaysCommunicate",
+    "--experiment_name", "isru-UN-1superBot-e1000-r80-h80-10x10-512x3-noReset",
     "--project_name", "qmas",
     "--env_class", "isru_zoo.isru_v0.parallel_env_map_obs",
     "--user_name", "ideas-mas",
@@ -15,6 +15,7 @@ args = [
 
     "--hauler_capacity", "80",
 
+    "--world_no_reset",
     "--world_size", "10",
     "--num_obstacles", "0",
     "--num_resources", "80",
@@ -25,9 +26,10 @@ args = [
     # "--observation_mask",
     "--available_actions_mask",
 
-    "--num_env_steps", "5000000",
-    "--episode_length", "200",
-    "--max_cycles", "200",
+    "--num_env_steps", "20000000",
+    "--episode_length", "800",
+    "--max_cycles", "800",
+    "--num_mini_batch", "10",
 
     "--algorithm_class", "qmas.variant_two_modules.algorithm.QmasAlgorithm",
     "--policy_class", "qmas.variant_two_modules.policy.QmasPolicy",
@@ -39,8 +41,8 @@ args = [
     "--share_policy",
     "--no-share_reward",
     "--use_ReLU",
-    "--hidden_size", "128",
-    "--layer_N", "2",
+    "--hidden_size", "512",
+    "--layer_N", "3",
 
     # "--gamma", "0.999",
     # "--lr", "0.00005",
@@ -55,7 +57,7 @@ args = [
 
     "--seed", "0",
 
-    "--n_rollout_threads", "100",
+    "--n_rollout_threads", "50",
     "--cuda",
     "--cuda_idx", "4",
 
