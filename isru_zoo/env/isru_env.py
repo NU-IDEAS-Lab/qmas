@@ -623,9 +623,8 @@ class parallel_env(ParallelEnv):
         ''' Returns the action space for the given agent. '''
         
         return spaces.Dict({
-            # Movement is specified in terms of the Moore neighborhood.
-            # The agent can only move one space at a time.
-            "movement": spaces.Box(low=0, high=8, shape=(1,), dtype=np.int32),
+            # Movement is in continuous 2D space.
+            "movement": spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32),
 
             # Communication is a simple boolean flag.
             "communication": spaces.Box(low=0, high=1, shape=(1,), dtype=np.int32),
@@ -822,15 +821,16 @@ class parallel_env(ParallelEnv):
                 action = spaces.unflatten(self.action_space(agent), action_dict[agent])
 
                 # Check for action validity.
-                if not self.action_space(agent).contains(action):
-                    raise ValueError(f"Invalid action for agent {agent}: {action}")
+                # if not self.action_space(agent).contains(action):
+                #     raise ValueError(f"Invalid action for agent {agent}: {action}")
 
                 # Record the action.
                 agent.last_action = action
                 
                 # Set agent velocity.
-                agent.velocity = self._moore_index_to_velocity(action["movement"][0])
-                agent.velocity = np.clip(agent.velocity, -1.0, 1.0)
+                agent.velocity = action["movement"]
+                if np.linalg.norm(agent.velocity) > 1.0:
+                    agent.velocity = agent.velocity / np.linalg.norm(agent.velocity)
 
                 # Move the agent.
                 position_prev = np.copy(agent.position)
