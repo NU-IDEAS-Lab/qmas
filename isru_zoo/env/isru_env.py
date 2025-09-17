@@ -23,6 +23,8 @@ def add_args(parser):
                         help="The number of hauler vehicles to place in the world.")
     parser.add_argument("--num_prospectors", type=int, default=1,
                         help="The number of prospector vehicles to place in the world.")
+    parser.add_argument("--num_superbots", type=int, default=0,
+                        help="The number of superbot vehicles to place in the world.")
     parser.add_argument("--num_obstacles", type=int, default=0,
                         help="The number of obstacles to place in the world.")
     parser.add_argument("--num_resources", type=int, default=20,
@@ -84,6 +86,7 @@ class parallel_env(ParallelEnv):
             num_extractors: int = 2,
             num_haulers: int = 2,
             num_prospectors: int = 1,
+            num_superbots: int = 0,
             max_cycles: int = -1,
             episode_max: int = 1000,
             num_obstacles: int = 10,
@@ -120,31 +123,29 @@ class parallel_env(ParallelEnv):
         self.hauler_pickup_threshold = hauler_pickup_threshold
 
         # Set up entities.
-        # self.possible_agents = \
-        #     [Extractor(
-        #         world_dims=self.world_dims,
-        #         position=self.get_random_position(),
-        #         observation_radius=self.default_observation_radius
-        #     ) for _ in range(num_extractors)] + \
-        #     [Hauler(
-        #         world_dims=self.world_dims,
-        #         position=self.get_random_position(),
-        #         carry_capacity=self.default_hauler_capacity,
-        #         observation_radius=self.default_observation_radius
-        #     ) for _ in range(num_haulers)] + \
-        #     [Prospector(
-        #         world_dims=self.world_dims,
-        #         position=self.get_random_position(),
-        #         observation_radius=self.default_observation_radius
-        #     ) for _ in range(num_prospectors)]
-        self.possible_agents = [
-            SuperBot(
+        self.possible_agents = \
+            [Extractor(
+                world_dims=self.world_dims,
+                position=self.get_random_position(),
+                observation_radius=self.default_observation_radius
+            ) for _ in range(num_extractors)] + \
+            [Hauler(
                 world_dims=self.world_dims,
                 position=self.get_random_position(),
                 carry_capacity=self.default_hauler_capacity,
                 observation_radius=self.default_observation_radius
-            ) for _ in range(num_extractors + num_haulers + num_prospectors)
-        ]
+            ) for _ in range(num_haulers)] + \
+            [Prospector(
+                world_dims=self.world_dims,
+                position=self.get_random_position(),
+                observation_radius=self.default_observation_radius
+            ) for _ in range(num_prospectors)] + \
+            [SuperBot(
+                world_dims=self.world_dims,
+                position=self.get_random_position(),
+                carry_capacity=self.default_hauler_capacity,
+                observation_radius=self.default_observation_radius
+            ) for _ in range(num_superbots)]
 
         # Set up the possible resources.
         self.possible_resources = []
