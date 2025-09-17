@@ -406,32 +406,6 @@ class parallel_env(ParallelEnv):
             plt.close()
             return img_arr
 
-
-    def render_OLD(self, pred=None, figsize=(9, 6), history_length=2):
-        ''' Renders the environment.
-            
-            Args:
-                figsize (tuple, optional): The size of the figure in inches.
-                
-            Returns:
-                None
-        '''
-
-        # Convert the predicted state back into a dictionary (unflatten).
-        pred_unflattened = []
-        pred_steps = pred.shape[0] if pred is not None else 0
-        for i in range(pred_steps):
-            p = spaces.unflatten(self.observation_spaces, pred[i].flatten())
-            pred_unflattened.append(p)
-
-        # Get the true environment state.
-        state = self.state()
-        # Get the observation with respect to agent 0.
-        # state = self.observe(self.agents[0], senders=set())[0]
-
-        return self.render_state(state, figsize=figsize)
-
-
     def render_state(self, state, figsize=(9, 6)):
         ''' Renders the given state.
             
