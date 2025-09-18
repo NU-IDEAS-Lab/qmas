@@ -802,13 +802,13 @@ class parallel_env(ParallelEnv):
         REWARD_COLLISION = -2.0
         REWARD_NO_EXPLORATION = -1.0
         REWARD_EXTRACTOR_ON_RESOURCE = 20.0
-        REWARD_DEPOSIT = 1000000.0
+        REWARD_DEPOSIT = 0.0
         REWARD_EXTRACT = 100000.0
         REWARD_CLOSEST_RESOURCE = 0.2
-        REWARD_DONE = 100000.0
+        REWARD_DONE = 1000000.0
 
         self.step_count += 1
-                
+
         obs_dict = {}
         reward_dict = {agent: 0.0 for agent in self.possible_agents}
         truncated_dict = {agent: False for agent in self.possible_agents}
@@ -824,6 +824,7 @@ class parallel_env(ParallelEnv):
         }
         info_dict.update({agent: {} for agent in self.possible_agents})
         requesters = set()
+        stack_value = {a: True for a in self.possible_agents}
 
         # Pre-movement calculations.
         visible_cells_prev = {}
@@ -865,6 +866,7 @@ class parallel_env(ParallelEnv):
                 if not np.allclose(agent.position - position_prev, agent.velocity):
                     agent.velocity = agent.position - position_prev
                     reward_dict[agent] += REWARD_COLLISION
+                    stack_value[agent] = False
 
                 # Check for how long the agent has been stationary.
                 if np.linalg.norm(agent.velocity) < 1e-5:
@@ -914,7 +916,6 @@ class parallel_env(ParallelEnv):
                                 agent.cargo[r.resource_id] = agent.cargo.get(r.resource_id, 0.0) + take
                                 info_dict["resources/step_picked_up"] += take
                                 reward_dict[agent] += REWARD_EXTRACT
-                                reward_dict[extractor] += REWARD_EXTRACT
                         elif val < 0:
                             r = self.idx_to_res[idx]
                             want_drop = float(-val)
@@ -966,9 +967,10 @@ class parallel_env(ParallelEnv):
             visible_cells = self._get_visible_cell_count(agent)
             if visible_cells <= visible_cells_prev[agent]:
                 reward_dict[agent] += REWARD_NO_EXPLORATION
+                stack_value[agent] = False
             
             # Provide so-called "stacked value" for reward shaping.
-            if reward_dict[agent] >= 0.0:
+            if stack_value[agent]:
                 agent.stacked_value += 1
             else:
                 agent.stacked_value = 0
@@ -1014,6 +1016,9 @@ class parallel_env(ParallelEnv):
 
         # Record last rewards.
         self.last_rewards = copy(reward_dict)
+
+        if np.any(np.isnan(list(reward_dict.values()))):
+            raise ValueError("NaN detected in reward_dict!")
 
         return obs_dict, reward_dict, self.dones, truncated_dict, info_dict
 
