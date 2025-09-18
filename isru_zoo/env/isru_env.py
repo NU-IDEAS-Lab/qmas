@@ -1043,7 +1043,7 @@ class parallel_env(ParallelEnv):
         return (self.nearest_tile - pos).astype(np.float32)
 
 
-    def _get_nearest_resource(self, position):
+    def _get_nearest_resource(self, position, mask=None):
         '''
         Returns the nearest position of the given resource type from the specified position.
         If no such resource exists, returns None.
@@ -1054,7 +1054,10 @@ class parallel_env(ParallelEnv):
         nearest_pos = None
 
         for r in self.possible_resources:
-            locations = np.argwhere(self.map_resources[r] > 0)
+            location_mask = self.map_resources[r] > 0
+            if mask is not None:
+                location_mask &= mask
+            locations = np.argwhere(location_mask)
             for loc in locations:
                 d = np.linalg.norm(pos - loc)
                 if d < dmin:
@@ -1091,7 +1094,7 @@ class parallel_env(ParallelEnv):
         return total
 
 
-    def _nearest_entity_distance(self, position, entity_type=ENTITY_TYPE.AGENT, capability=None):
+    def _nearest_entity_distance(self, position, entity_type=ENTITY_TYPE.AGENT, capability=None, mask=None):
         """
         Return the minimum Euclidean distance from the given position to any agent with specified capability.
         If no such agent exists, return np.inf.
@@ -1107,6 +1110,8 @@ class parallel_env(ParallelEnv):
             raise ValueError(f"Unsupported entity type: {entity_type}")
 
         for e in entities:
+            if mask is not None and not mask[e.grid_position[0], e.grid_position[1]]:
+                continue
             if capability == None or e.capabilities[capability]:
                 d = np.linalg.norm(pos - e.position)
                 if d < dmin:
@@ -1667,13 +1672,13 @@ class parallel_env_flat_map_obs(parallel_env):
         
         # Select the target.
         if np.any(map == VALUE_RESOURCE):
-            target = self._get_nearest_resource(agent.position)
+            target = self._get_nearest_resource(agent.position, mask=agent.mask_resources_observed)
         else:
-            target = self._nearest_entity_distance(agent.position, entity_type=ENTITY_TYPE.DEPOT)
+            target = self._nearest_entity_distance(agent.position, entity_type=ENTITY_TYPE.DEPOT, mask=agent.mask_observed)
 
         # Collect other components. 
         agent_id = agent.role.value * 10.0
-        target_relative = relative_position(target)
+        target_relative = relative_position(target) if target is not None else np.array([0.0, 0.0], dtype=np.float32)
         other_agents_pos = [relative_position(a.position) for a in self.possible_agents if a != agent]
         
         # Build the observation.
