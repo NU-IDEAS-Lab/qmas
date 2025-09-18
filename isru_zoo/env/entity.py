@@ -127,6 +127,7 @@ class Agent(Entity):
         self.steps_stationary = 0
         self.mask_observed = np.zeros(self.world_dims, dtype=bool)
         self.mask_resources_observed = np.zeros(self.world_dims, dtype=bool)
+        self.stacked_value = 0 # used for "stacked value" reward shaping
 
 
 # --- New agent Type subclasses ---
