@@ -1672,24 +1672,49 @@ class parallel_env_flat_map_obs(parallel_env):
         
         # Select the target.
         if np.any(map == VALUE_RESOURCE):
-            target = self._get_nearest_resource(agent.position, mask=agent.mask_resources_observed)
+            target = self._get_nearest_resource(agent.position)
         else:
-            target = self._nearest_entity_distance(agent.position, entity_type=ENTITY_TYPE.DEPOT, mask=agent.mask_observed)
+            target = self._nearest_entity_distance(agent.position, entity_type=ENTITY_TYPE.DEPOT)
 
         # Collect other components. 
-        agent_id = agent.role.value * 10.0
+        agent_id = np.array([agent.role.value * 10.0], dtype=np.float32)
         target_relative = relative_position(target) if target is not None else np.array([0.0, 0.0], dtype=np.float32)
-        other_agents_pos = [relative_position(a.position) for a in self.possible_agents if a != agent]
+        other_agents_pos = np.array([relative_position(a.position) for a in self.possible_agents if a != agent], dtype=np.float32)
         
         # Build the observation.
         obs = np.concatenate((
-            np.array([agent_id], dtype=np.float32),
+            agent_id,
             target_relative.astype(np.float32),
-            np.array(other_agents_pos, dtype=np.float32).flatten(),
+            other_agents_pos.flatten(),
             map.flatten(),
         ), axis=0)
 
         # Set up visibility mask.
-        obs_mask = np.ones_like(obs, dtype=bool)
+        obs_mask_map = np.ones_like(map, dtype=bool)
+        if not force_visible:
+            radius = agent.observation_radius
+            pos = agent.grid_position
+            visible = (np.arange(self.world_dims[0])[:, None] - pos[0]) ** 2 + \
+                (np.arange(self.world_dims[1])[None, :] - pos[1]) ** 2 <= radius ** 2
+            obs_mask_map[~visible] = False
+        obs_mask_agent_id = np.ones_like(agent_id, dtype=bool)
+        obs_mask_target_relative = np.ones_like(target_relative, dtype=bool)
+        obs_mask_other_agents_pos = np.ones_like(other_agents_pos, dtype=bool)
+
+        # Check whether the target is visibile.
+        if target is not None and not obs_mask_map[target[0], target[1]]:
+            obs_mask_target_relative[:] = False
+        # Check whether other agents are visible.
+        for i in range(other_agents_pos.shape[0]):
+            if np.linalg.norm(other_agents_pos[i]) > agent.observation_radius:
+                obs_mask_other_agents_pos[i, :] = False
+        
+        # Build the combined mask.
+        obs_mask = np.concatenate((
+            obs_mask_agent_id,
+            obs_mask_target_relative,
+            obs_mask_other_agents_pos.flatten(),
+            obs_mask_map.flatten(),
+        ), axis=0)
 
         return obs, obs_mask
