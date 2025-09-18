@@ -1540,7 +1540,7 @@ class parallel_env_map_obs(parallel_env):
         obs_mask = np.ones(self.map_shape, dtype=bool)
 
         # Calculate the visible area based on a circular observation radius.
-        if not force_visible or True:
+        if not force_visible:
             radius = agent.observation_radius
             pos = agent.grid_position
             visible = (np.arange(self.world_dims[0])[:, None] - pos[0]) ** 2 + \
