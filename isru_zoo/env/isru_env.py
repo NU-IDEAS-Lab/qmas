@@ -60,7 +60,8 @@ def validate_args(parsed_args):
     parsed_args.num_agents = \
         parsed_args.num_extractors + \
         parsed_args.num_haulers + \
-        parsed_args.num_prospectors
+        parsed_args.num_prospectors + \
+        parsed_args.num_superbots
 
 
 def env(*args, **kwargs):
