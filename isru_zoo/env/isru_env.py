@@ -50,7 +50,6 @@ def add_args(parser):
     parser.add_argument("--render_mode", type=str, default="human",
                         choices=parallel_env.metadata["render_modes"],
                         help="The rendering mode for the environment.")
-    
 
 
 def validate_args(parsed_args):
@@ -1642,7 +1641,7 @@ class parallel_env_flat_map_obs(parallel_env):
         return spaces.Box(
             low=-np.inf,
             high=np.inf,
-            shape=(self.world_dims,),
+            shape=(np.prod(self.world_dims) + 1 + len(self.possible_agents) * len(self.world_dims),),
             dtype=np.float32
         )
 
@@ -1650,29 +1649,42 @@ class parallel_env_flat_map_obs(parallel_env):
     def _observe(self, agent, force_visible=False):
         ''' Fills in the state/observation space for the given agent. '''
 
+        def relative_position(pos):
+            ''' Returns the position relative to the given agent. '''
+            return (pos - agent.position).astype(np.float32)
+
+        VALUE_OBSTACLE = -2.0
+        VALUE_RESOURCE = 2.0
+        VALUE_UNEXPLORED = 0.0
+        VALUE_EXPLORED = -1.0
+
         # Create the map.
-        obs = np.zeros(self.world_dims, dtype=np.float32)
-
-        # Add obstacles.
-        obs[self.map_obstacles > 0] = -1.0
-
-        # Add resources.
+        map = np.ones(self.world_dims, dtype=np.float32) * VALUE_UNEXPLORED
+        map[agent.mask_observed] = VALUE_EXPLORED
+        map[self.map_obstacles > 0] = VALUE_OBSTACLE
         for r in self.possible_resources:
-            obs[self.map_resources[r] > 0] = 1.0
+            map[self.map_resources[r] > 0] = VALUE_RESOURCE
         
-        # Add depots.
-        obs[self.map_depots > 0] = 2.0
+        # Select the target.
+        if np.any(map == VALUE_RESOURCE):
+            target = self._get_nearest_resource(agent.position)
+        else:
+            target = self._nearest_entity_distance(agent.position, entity_type=ENTITY_TYPE.DEPOT)
 
-        # Add agents.
-        for a in self.possible_agents:
-            pos = a.grid_position
-            role = a.role.value
-            obs[pos[0], pos[1]] = 3.0 + role
-            if a == agent:
-                # Mark the ego agent specially.
-                obs[pos[0], pos[1]] = 10.0 + role
+        # Collect other components. 
+        agent_id = agent.role.value * 10.0
+        target_relative = relative_position(target)
+        other_agents_pos = [relative_position(a.position) for a in self.possible_agents if a != agent]
         
+        # Build the observation.
+        obs = np.concatenate((
+            np.array([agent_id], dtype=np.float32),
+            target_relative.astype(np.float32),
+            np.array(other_agents_pos, dtype=np.float32).flatten(),
+            map.flatten(),
+        ), axis=0)
+
         # Set up visibility mask.
-        obs_mask = np.ones_like(obs, dtype=bool) # All visible
+        obs_mask = np.ones_like(obs, dtype=bool)
 
         return obs, obs_mask
