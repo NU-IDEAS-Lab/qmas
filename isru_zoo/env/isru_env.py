@@ -1643,12 +1643,32 @@ class parallel_env_flat_map_obs(parallel_env):
     def observation_space(self, agent):
         ''' Returns the observation space for the given agent. '''
 
-        return spaces.Box(
-            low=-np.inf,
-            high=np.inf,
-            shape=(np.prod(self.world_dims) + 1 + len(self.possible_agents) * len(self.world_dims),),
-            dtype=np.float32
-        )
+        return spaces.Dict({
+            "agent_role": spaces.Box(
+                low=-np.inf,
+                high=np.inf,
+                shape=(1,),
+                dtype=np.float32
+            ),
+            "target_relative": spaces.Box(
+                low=-np.inf,
+                high=np.inf,
+                shape=(2,),
+                dtype=np.float32
+            ),
+            "other_agents_relative": spaces.Box(
+                low=-np.inf,
+                high=np.inf,
+                shape=(len(self.possible_agents) - 1, 2),
+                dtype=np.float32
+            ),
+            "map": spaces.Box(
+                low=-np.inf,
+                high=np.inf,
+                shape=(np.prod(self.world_dims),),
+                dtype=np.float32
+            ),
+        })
 
 
     def _observe(self, agent, force_visible=False):
@@ -1682,12 +1702,12 @@ class parallel_env_flat_map_obs(parallel_env):
         other_agents_pos = np.array([relative_position(a.position) for a in self.possible_agents if a != agent], dtype=np.float32)
         
         # Build the observation.
-        obs = np.concatenate((
-            agent_id,
-            target_relative.astype(np.float32),
-            other_agents_pos.flatten(),
-            map.flatten(),
-        ), axis=0)
+        obs = {
+            "agent_role": agent_id,
+            "target_relative": target_relative,
+            "other_agents_relative": other_agents_pos,
+            "map": map.flatten().astype(np.float32),
+        }
 
         # Set up visibility mask.
         obs_mask_map = np.ones_like(map, dtype=bool)
@@ -1710,11 +1730,30 @@ class parallel_env_flat_map_obs(parallel_env):
                 obs_mask_other_agents_pos[i, :] = False
         
         # Build the combined mask.
-        obs_mask = np.concatenate((
-            obs_mask_agent_id,
-            obs_mask_target_relative,
-            obs_mask_other_agents_pos.flatten(),
-            obs_mask_map.flatten(),
-        ), axis=0)
+        obs_mask = {
+            "agent_role": obs_mask_agent_id,
+            "target_relative": obs_mask_target_relative,
+            "other_agents_relative": obs_mask_other_agents_pos,
+            "map": obs_mask_map.flatten(),
+        }
 
         return obs, obs_mask
+
+
+    def observe(self, agent, senders=set()):
+        ''' Returns the observation for the given agent.'''
+
+        # Collect local data.
+        local_obs, local_obs_mask = self._observe(agent)
+
+        # Set up the matrices.
+        combined_obs = deepcopy(local_obs)
+        combined_obs_mask = deepcopy(local_obs_mask)
+
+
+
+        if self.mask_observations:
+            result = combined_obs * combined_obs_mask
+            return result, combined_obs_mask
+        else:
+            return combined_obs, combined_obs_mask
