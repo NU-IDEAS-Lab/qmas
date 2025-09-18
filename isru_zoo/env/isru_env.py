@@ -875,7 +875,7 @@ class parallel_env(ParallelEnv):
                     agent.steps_stationary = 1
 
                 # Handle communication (request-based): agent requests others' observations.
-                if True: #action["communication"][0] >= 0.5:
+                if action["communication"][0] >= 0.5:
                     requesters.add(agent)
                     info_dict["communication/requests_made"] += 1
 
