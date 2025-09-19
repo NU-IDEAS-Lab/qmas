@@ -456,8 +456,8 @@ class PettingzooRunner(Runner):
 
                         # Only take the first sample (n_samples is 1 anyway).
                         # Strip the action part of the prediction.
-                        prediction[:, agentIdx, :] = pred[0, :, act_size:]
-                        uncertainty[:, agentIdx, :] = variance[0, :, act_size:]
+                        prediction[:, agentIdx, :] = pred[0, :, act_size:].reshape(prediction[:, agentIdx, :].shape)
+                        uncertainty[:, agentIdx, :] = variance[0, :, act_size:].reshape(uncertainty[:, agentIdx, :].shape)
                 else:
                     prediction.zero_()
                     prediction[-1] = torch.from_numpy(obs[0])
