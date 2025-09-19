@@ -1018,26 +1018,6 @@ class parallel_env(ParallelEnv):
         return obs_dict, reward_dict, self.dones, truncated_dict, info_dict
 
 
-    def get_nearest_uncleaned(self, agent):
-        
-        pos = agent.position
-        # Get all indices where there has resources.
-        indices = np.argwhere(self.map_resources == 1)
-        if indices.size == 0:
-            return np.array([0, 0], dtype=np.float32)
-        
-        # Compute differences from pos and squared distances (avoid sqrt for performance)
-        diffs = indices - pos  # shape: (num_uncleaned, 2)
-        squared_distances = np.sum(diffs**2, axis=1)
-        
-        # Find the index of the minimum squared distance
-        min_idx = np.argmin(squared_distances)
-        self.nearest_tile = indices[min_idx]
-        
-        # Return the relative difference as float32.
-        return (self.nearest_tile - pos).astype(np.float32)
-
-
     def _get_nearest_resource(self, position, mask=None):
         '''
         Returns the nearest position of the given resource type from the specified position.
