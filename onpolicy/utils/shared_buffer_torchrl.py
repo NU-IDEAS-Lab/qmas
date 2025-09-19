@@ -102,7 +102,8 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
             batch_size=args.episode_length // args.num_mini_batch,
             storage=LazyTensorStorage(
                 max_size=args.episode_length + 1,
-                ndim=1
+                ndim=1,
+                compilable=True,
             ),
             # sampler=FixedSamplerWithoutReplacement(
             sampler=SamplerWithoutReplacement(
