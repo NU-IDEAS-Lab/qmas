@@ -690,8 +690,6 @@ class parallel_env(ParallelEnv):
 
         result = self.available_actions_space(agent).sample()
 
-        other_agent_pos = [a.position for a in self.agents if a != agent]
-        
         # Prevent movement into obstacles or out of bounds or into another agent.
         for move in range(9):
             velocity = self._moore_index_to_velocity(move)
@@ -702,9 +700,6 @@ class parallel_env(ParallelEnv):
                 result["movement"][move] = 0
             elif self.map_obstacles[new_pos_int[0], new_pos_int[1]] > 0:
                 # Obstacle in the way.
-                result["movement"][move] = 0
-            elif any(np.array_equal(new_pos_int, oap.astype(np.int32)) for oap in other_agent_pos):
-                # Another agent is in the way.
                 result["movement"][move] = 0
             else:
                 result["movement"][move] = 1
