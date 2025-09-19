@@ -690,8 +690,6 @@ class parallel_env(ParallelEnv):
 
         result = self.available_actions_space(agent).sample()
 
-        other_agent_pos = [a.position for a in self.agents if a != agent]
-        
         # Prevent movement into obstacles or out of bounds or into another agent.
         for move in range(9):
             velocity = self._moore_index_to_velocity(move)
@@ -702,9 +700,6 @@ class parallel_env(ParallelEnv):
                 result["movement"][move] = 0
             elif self.map_obstacles[new_pos_int[0], new_pos_int[1]] > 0:
                 # Obstacle in the way.
-                result["movement"][move] = 0
-            elif any(np.array_equal(new_pos_int, oap.astype(np.int32)) for oap in other_agent_pos):
-                # Another agent is in the way.
                 result["movement"][move] = 0
             else:
                 result["movement"][move] = 1
@@ -1023,26 +1018,6 @@ class parallel_env(ParallelEnv):
         return obs_dict, reward_dict, self.dones, truncated_dict, info_dict
 
 
-    def get_nearest_uncleaned(self, agent):
-        
-        pos = agent.position
-        # Get all indices where there has resources.
-        indices = np.argwhere(self.map_resources == 1)
-        if indices.size == 0:
-            return np.array([0, 0], dtype=np.float32)
-        
-        # Compute differences from pos and squared distances (avoid sqrt for performance)
-        diffs = indices - pos  # shape: (num_uncleaned, 2)
-        squared_distances = np.sum(diffs**2, axis=1)
-        
-        # Find the index of the minimum squared distance
-        min_idx = np.argmin(squared_distances)
-        self.nearest_tile = indices[min_idx]
-        
-        # Return the relative difference as float32.
-        return (self.nearest_tile - pos).astype(np.float32)
-
-
     def _get_nearest_resource(self, position, mask=None):
         '''
         Returns the nearest position of the given resource type from the specified position.
@@ -1298,193 +1273,6 @@ class parallel_env_map_obs(parallel_env):
     def map_shape(self):
         ''' Returns the map shape. '''
         return (len(parallel_env_map_obs.MAP_LAYERS), *self.world_dims)
-
-
-    @property
-    @functools.cache
-    def state_space_DISABLE(self):
-        ''' Returns the state space of the environment. '''
-
-        return parallel_env_simple_obs.observation_space(self, self.possible_agents[0])
-
-        agent = self.possible_agents[0]
-
-        def agent_obs_space(agent):
-            ''' Returns the observation space for a single agent. '''
-
-            return spaces.Dict({
-                "position": spaces.Box(
-                    low=0,
-                    high=np.max(self.world_dims),
-                    shape=(2,),
-                    dtype=np.float32
-                ),
-                "velocity": spaces.Box(
-                    low=-1,
-                    high=1,
-                    shape=(2,),
-                    dtype=np.float32
-                ),
-                "role": spaces.Box(
-                    low=0,
-                    high=len(AGENT_ROLE),
-                    shape=(1,),
-                    dtype=np.int32
-                ),
-                "cargo": spaces.Box(
-                    low=0,
-                    high=self.default_hauler_capacity,
-                    shape=(len(self.possible_resources),),
-                    dtype=np.float32
-                ),
-            })
-
-        # Set up agent state spaces. Ensure that each agent's data is first for its own observation.
-        # Python dictionaries maintain insertion order as of Python 3.7.
-        agent_spaces = {}
-        agent_spaces[agent] = agent_obs_space(agent)
-        for other_agent in self.possible_agents:
-            if other_agent != agent:
-                agent_spaces[other_agent] = agent_obs_space(other_agent)
-
-        # Create the state space.
-        # The state space is a complete observation of the environment.
-        # This is not part of the standard PettingZoo API, but is useful for centralized training.
-        return spaces.Dict({
-            "role": spaces.Box(
-                low=0,
-                high=len(AGENT_ROLE),
-                shape=(1,),
-                dtype=np.int32
-            ),
-            "agents": spaces.Dict(agent_spaces),
-            "depots": spaces.Dict({
-                depot: spaces.Dict({
-                    "position": spaces.Box(
-                        low=0,
-                        high=np.max(self.world_dims),
-                        shape=(2,),
-                        dtype=np.float32
-                    ),
-                    "stock": spaces.Box(
-                        low=0,
-                        high=np.inf,
-                        shape=(1,),
-                        dtype=np.float32
-                    ),
-                }) for depot in self.possible_depots
-            }),
-            "resources_extant": spaces.Box(
-                low=0,
-                high=np.inf,
-                shape=(1,),
-                dtype=np.float32
-            ),
-            "resources_deposited": spaces.Box(
-                low=0,
-                high=np.inf,
-                shape=(1,),
-                dtype=np.float32
-            ),
-            "extractors_in_place": spaces.Box(
-                low=0,
-                high=len([a for a in self.possible_agents if a.capabilities[CAP.EXTRACT]]),
-                shape=(1,),
-                dtype=np.int32
-            ),
-        })
-
-        # return spaces.Dict({
-        #     "resources_deposited": spaces.Box(
-        #         low=0,
-        #         high=np.inf,
-        #         shape=(1,),
-        #         dtype=np.float32
-        #     ),
-        #     "extractors_in_place": spaces.Box(
-        #         low=0,
-        #         high=len([a for a in self.possible_agents if a.capabilities[CAP.EXTRACT]]),
-        #         shape=(1,),
-        #         dtype=np.int32
-        #     ),
-        # })
-    
-
-    def _state_DISABLE(self):
-        ''' Returns the global state and mask of the environment.'''
-
-
-        return parallel_env_simple_obs._observe(self, self.possible_agents[0], force_visible=True)[0]
-
-        agent = self.possible_agents[0]
-        force_visible = True
-
-        # Create the observation.
-        obs = {
-            "role": np.array([agent.role.value], dtype=np.int32),
-            "agents": {},
-            "depots": {
-                d: {
-                    "position": d.position.astype(np.float32),
-                    "stock": np.array([d.stock], dtype=np.float32),
-                } for d in self.possible_depots
-            },
-            "resources_extant": np.array([sum(r.quantity for r in self.possible_resources) - sum(depot.stock for depot in self.possible_depots)], dtype=np.float32),
-            "resources_deposited": np.array([sum(depot.stock for depot in self.possible_depots)], dtype=np.float32),
-            "extractors_in_place": np.array([0], dtype=np.int32),
-        }
-
-        extractors_in_place = 0
-        for a in self.agents:
-            if a.capabilities[CAP.EXTRACT]:
-                px, py = a.grid_position
-                if self.map_depots[px, py] == 0 :
-                    for r in self.possible_resources:
-                        if self.map_resources[r][px, py] > 0:
-                            extractors_in_place += 1
-                            break
-        obs["extractors_in_place"] = np.array([extractors_in_place], dtype=np.int32)
-
-        def get_agent_state(a):
-            return {
-                "position": a.position.astype(np.float32),
-                "velocity": a.velocity.astype(np.float32),
-                "role": np.array([a.role.value], dtype=np.int32),
-                "cargo": np.array(
-                    [a.cargo.get(r.resource_id, 0.0) for r in self.possible_resources],
-                    dtype=np.float32
-                ) / a.capabilities.get(CAP.CARRY_CAPACITY, 1.0),  # Normalize cargo by capacity
-            }
-
-        # Insert the ego agent first. Python dictionaries preserve insertion order.
-        obs["agents"][agent] = get_agent_state(agent)
-
-        # Add the rest of the agents.
-        for a in self.possible_agents:
-            if a != agent:
-                obs["agents"][a] = get_agent_state(a)
-
-        return obs
-
-        # def extractors_in_place():
-        #     count = 0
-        #     for a in self.agents:
-        #         if a.capabilities[CAP.EXTRACT]:
-        #             px, py = a.grid_position
-        #             if self.map_depots[px, py] == 0 :
-        #                 for r in self.possible_resources:
-        #                     if self.map_resources[r][px, py] > 0:
-        #                         count += 1
-        #                         break
-        #     return count
-
-
-        # state = {
-        #     "resources_deposited": np.array([sum(depot.stock for depot in self.possible_depots)], dtype=np.float32),
-        #     "extractors_in_place": np.array([extractors_in_place()], dtype=np.int32),
-        # }
-
-        # return state
 
 
     @functools.cache
