@@ -634,7 +634,7 @@ class parallel_env(ParallelEnv):
             # -1 = drop off all resources
             # 0 = do nothing
             # 1 = pick up resources until full or no more available
-            "resources": spaces.Box(low=-1, high=1, shape=(len(self.possible_resources),), dtype=np.int32),
+            # "resources": spaces.Box(low=-1, high=1, shape=(len(self.possible_resources),), dtype=np.int32),
         })
 
 
@@ -707,24 +707,24 @@ class parallel_env(ParallelEnv):
         # Communication is always available.
         result["communication"] = np.ones_like(result["communication"])
 
-        if agent.capabilities[CAP.CARRY]:
-            for i, r in enumerate(self.possible_resources):
-                # Can only drop off resources if at a depot and carrying some.
-                px, py = agent.grid_position
-                at_depot = self.map_depots[px, py] == r.resource_id
-                is_carrying = agent.cargo.get(r.resource_id, 0) > 0
-                result["resources"][0 + i] = at_depot and is_carrying
+        # if agent.capabilities[CAP.CARRY]:
+        #     for i, r in enumerate(self.possible_resources):
+        #         # Can only drop off resources if at a depot and carrying some.
+        #         px, py = agent.grid_position
+        #         at_depot = self.map_depots[px, py] == r.resource_id
+        #         is_carrying = agent.cargo.get(r.resource_id, 0) > 0
+        #         result["resources"][0 + i] = at_depot and is_carrying
                 
-                # Can always do nothing.
-                result["resources"][1 + i] = 1  # Do nothing
+        #         # Can always do nothing.
+        #         result["resources"][1 + i] = 1  # Do nothing
 
-                # Can only pick up resources if near an extractor that is standing on a resource.
-                extractor, ex_pos_int = self._find_extractor_over_resource(agent.position, r)
-                has_capacity = agent.cargo[r.resource_id] < agent.capabilities[CAP.CARRY_CAPACITY]
-                result["resources"][2 + i] = (extractor is not None) and has_capacity
-        else:
-            # Non-hauler agents cannot pick up or drop off resources.
-            result["resources"] = np.zeros_like(result["resources"])
+        #         # Can only pick up resources if near an extractor that is standing on a resource.
+        #         extractor, ex_pos_int = self._find_extractor_over_resource(agent.position, r)
+        #         has_capacity = agent.cargo[r.resource_id] < agent.capabilities[CAP.CARRY_CAPACITY]
+        #         result["resources"][2 + i] = (extractor is not None) and has_capacity
+        # else:
+        #     # Non-hauler agents cannot pick up or drop off resources.
+        #     result["resources"] = np.zeros_like(result["resources"])
         
         result_flattened = spaces.flatten(self.available_actions_space(agent), result)
         return result_flattened
@@ -876,14 +876,16 @@ class parallel_env(ParallelEnv):
 
                 # Corrected resource handling for Hauler agents
                 if agent.capabilities[CAP.CARRY]:
-                    action_vec = action["resources"]
+                    # action_vec = action["resources"]
                     px, py = agent.grid_position
 
                     capacity = agent.capabilities[CAP.CARRY_CAPACITY]
                     current_load = sum(agent.cargo.values())
                     free = max(0.0, capacity - current_load)
 
-                    for idx, val in enumerate(action_vec):
+                    # for idx, val in enumerate(action_vec):
+                    idx = 0
+                    for val in [-1, 1]:
                         # Just pickup/drop all possible.
                         val = val * capacity
 
