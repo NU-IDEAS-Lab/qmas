@@ -30,7 +30,9 @@ class PettingzooRunner(Runner):
 
         # Override the default buffer with our new TorchRL one.
         share_observation_space = self.envs.share_observation_space[0] if self.use_centralized_V else self.envs.observation_space[0]
-        self.buffer = SharedReplayBuffer(self.all_args,
+
+        compiled_buffer_class = torch.compile(SharedReplayBuffer)
+        self.buffer = compiled_buffer_class(self.all_args,
                                         self.num_agents,
                                         self.envs.observation_space[0],
                                         share_observation_space,
