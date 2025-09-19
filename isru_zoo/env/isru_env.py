@@ -1071,13 +1071,14 @@ class parallel_env(ParallelEnv):
         return total
 
 
-    def _nearest_entity_distance(self, position, entity_type=ENTITY_TYPE.AGENT, capability=None, mask=None):
+    def _get_nearest_entity(self, position, entity_type=ENTITY_TYPE.AGENT, capability=None, mask=None):
         """
-        Return the minimum Euclidean distance from the given position to any agent with specified capability.
-        If no such agent exists, return np.inf.
+        Return the nearest entity to any position with the specified characteristics.
+        If no such entity exists, returns None.
         """
         pos = np.asarray(position, dtype=np.float32)
         dmin = np.inf
+        entity = None
 
         if entity_type == ENTITY_TYPE.AGENT:
             entities = self.agents
@@ -1093,7 +1094,8 @@ class parallel_env(ParallelEnv):
                 d = np.linalg.norm(pos - e.position)
                 if d < dmin:
                     dmin = d
-        return dmin
+                    entity = e
+        return entity
 
 
     def _moore_index_to_velocity(self, index):
@@ -1464,7 +1466,8 @@ class parallel_env_flat_map_obs(parallel_env):
         if np.any(map == VALUE_RESOURCE):
             target = self._get_nearest_resource(agent.position, mask=agent.mask_resources_observed)
         else:
-            target = self._nearest_entity_distance(agent.position, entity_type=ENTITY_TYPE.DEPOT, mask=agent.mask_observed)
+            target_entity = self._get_nearest_entity(agent.position, entity_type=ENTITY_TYPE.DEPOT, mask=agent.mask_observed)
+            target = target_entity.position if target_entity is not None else None
 
         # Collect other components. 
         agent_id = agent.role.value * 10.0
