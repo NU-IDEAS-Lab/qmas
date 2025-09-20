@@ -349,6 +349,14 @@ class PettingzooRunner(Runner):
                 rnn_states = rnn_states.detach().cpu().reshape((self.n_eval_rollout_threads, *rnn_states.shape[1:]))
                 actions_env = [actions[idx, :, :].numpy() for idx in range(self.n_eval_rollout_threads)]
 
+                # --- Pass uncertainty to env for next observation ---
+                unc_np = uncertainty[-1].detach().cpu().numpy()
+                # If (num_agents, C, H, W), collapse channels -> (num_agents, H, W)
+                if unc_np.ndim == 4:
+                    unc_np = unc_np.mean(axis=1)
+                eval_env.env_method("set_uncertainty_channel", unc_np)
+               
+
                 # Take a step in the environment.
                 obs, share_obs, eval_rewards, dones, infos, available_actions = eval_env.step(actions_env)
                 viz_mask_obs = np.expand_dims(infos[0]["visibility_mask"], 0) if "visibility_mask" in infos[0] else np.ones_like(obs)
@@ -490,6 +498,14 @@ class PettingzooRunner(Runner):
 
                 if render_env.envs[0].env.step_count == 24:
                     print(f"ready")
+
+                # --- Pass uncertainty to env for next observation (render) ---
+               
+                unc_np = uncertainty[-1].detach().cpu().numpy()
+                if unc_np.ndim == 4:
+                    unc_np = unc_np.mean(axis=1)
+                render_env.env_method("set_uncertainty_channel", unc_np)
+                
 
                 # Take a step in the environment and get the results.
                 obs, share_obs, render_rewards, dones, infos, available_actions = render_env.step(actions_env)
