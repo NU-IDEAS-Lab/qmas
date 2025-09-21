@@ -39,8 +39,6 @@ def add_args(parser):
                         help="Whether to keep the same map between resets.")
     parser.add_argument("--observation_radius", type=int, default=10,
                         help="The radius within which agents can observe each other and resources.")
-    parser.add_argument("--observation_mask", action="store_true",
-                        help="Whether to apply visibility mask to returned observations.")
     parser.add_argument("--available_actions_mask", action="store_true",
                         help="Whether to return an available actions mask for each agent.")
     parser.add_argument("--hauler_capacity", type=float, default=10.0,
@@ -96,7 +94,6 @@ class parallel_env(ParallelEnv):
             world_size: int = 50,
             world_no_reset: bool = False,
             observation_radius: int = 10,
-            observation_mask: bool = False,
             available_actions_mask: bool = False,
             hauler_capacity: float = 10.0,
             hauler_pickup_threshold: float = 1.5,
@@ -116,7 +113,7 @@ class parallel_env(ParallelEnv):
         self.randomize_num_resources = randomize_num_resources
         self.curriculum_num_resources = curriculum_num_resources
         self.render_mode = render_mode
-        self.mask_observations = observation_mask
+        self.mask_observations = False
         self.mask_available_actions = available_actions_mask
         self.default_observation_radius = observation_radius
         self.default_hauler_capacity = hauler_capacity
@@ -936,7 +933,7 @@ class parallel_env(ParallelEnv):
                             if self.map_resources[r][px, py] > 0:
                                 # Extractor is sitting on a resource tile.
                                 info_dict["extractors/num_in_place"] += 1
-                                reward_dict[agent] += REWARD_EXTRACTOR_ON_RESOURCE / agent.steps_stationary
+                                reward_dict[agent] += REWARD_EXTRACTOR_ON_RESOURCE / agent.steps_stationary #TODO: this gets smaller the longer the agent sits
 
         # Calculate the percentage of resources deposited.
         total_resources = sum(r.quantity for r in self.possible_resources)
