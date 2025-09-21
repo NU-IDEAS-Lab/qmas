@@ -55,6 +55,7 @@ class PettingzooRunner(Runner):
                 self.trainer.policy.lr_decay(episode, episodes)
             
             # Reset the environment and perform warmup.
+            self.trainer.prep_rollout()
             self.warmup()
 
             # Set the delta steps to 1.
@@ -146,8 +147,6 @@ class PettingzooRunner(Runner):
 
     @torch.no_grad()
     def collect(self, step):
-        self.trainer.prep_rollout()
-
         share_obs, obs, rnn_states, rnn_states_critic, masks, available_actions = self.buffer.compatibility_get_policy_input(step)
 
         values, action, action_log_prob, rnn_states, rnn_states_critic = self.trainer.policy.get_actions(
@@ -221,7 +220,6 @@ class PettingzooRunner(Runner):
     @torch.no_grad()
     def compute(self):
         """Calculate returns for the collected data."""
-        self.trainer.prep_rollout()
 
         share_obs, obs, rnn_states, rnn_states_critic, masks, available_actions = self.buffer.compatibility_get_policy_input(-1)
 
@@ -267,6 +265,8 @@ class PettingzooRunner(Runner):
 
         eval_env = self.envs
 
+        self.trainer.prep_rollout()
+
         # Get shape of observation and action spaces.
         obs_shape = get_shape_from_obs_space(self.buffer.obs_space)
         act_shape = get_shape_from_act_space(self.buffer.act_space)
@@ -301,7 +301,6 @@ class PettingzooRunner(Runner):
             j = -1
             while not np.all(dones):
                 j += 1
-                self.trainer.prep_rollout()
 
                 aa = np.concatenate(available_actions)
                 if np.any(aa == None):
@@ -391,6 +390,8 @@ class PettingzooRunner(Runner):
             from IPython.display import clear_output
 
         render_env = self.envs
+
+        self.trainer.prep_rollout()
                 
         # Get shape of observation and action spaces.
         obs_shape = get_shape_from_obs_space(self.buffer.obs_space)
@@ -431,8 +432,6 @@ class PettingzooRunner(Runner):
             reward_total = 0.0
             while not np.all(dones):
                 time_start = time.time()
-
-                self.trainer.prep_rollout()
 
                 aa = np.concatenate(available_actions)
                 if np.any(aa == None):
