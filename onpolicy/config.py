@@ -337,6 +337,10 @@ def get_config():
     parser.add_argument("--train_maps", type=str, nargs='+', default=None)
     parser.add_argument("--eval_maps", type=str, nargs='+', default=None)
 
+    # Visibility mask parameters
+    parser.add_argument("--observation_mask", action="store_true",
+                    help="Whether to apply visibility mask to observations during policy training")
+
     # diffuser parameters
     parser.add_argument("--prediction_ensemble_size", type=int, default=1)
     parser.add_argument("--prediction_history_window", type=int, default=8)

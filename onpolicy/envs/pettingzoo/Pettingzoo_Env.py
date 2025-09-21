@@ -240,7 +240,6 @@ class PettingzooEnv(object):
         if all_viz:
             # Combine the visibility masks into a single tensor.
             all_viz = np.array(all_viz, dtype=np.float32)
-            all_viz = np.reshape(all_viz, (self.num_agents, -1))
             info["visibility_mask"] = all_viz
 
         return info

@@ -77,6 +77,7 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
     """
 
     def __init__(self, args, num_agents, obs_space, cent_obs_space, act_space):
+        self.args = args
         self.episode_length = args.episode_length
         self.n_rollout_threads = args.n_rollout_threads
         self.hidden_size = args.hidden_size
@@ -168,12 +169,22 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
                 device='cpu',
                 names=None,
             ))
+        
+        # Create the partial observation.
+        obs = torch.from_numpy(obs).float()
+        visibility_mask = torch.from_numpy(visibility_mask).float()
+        if self.args.observation_mask:
+            obs_full = obs.clone()
+            obs = obs * visibility_mask
+        else:
+            obs_full = obs
 
         # Create a tensordict of all the data.
         data = TensorDict(
             source={
                 'share_obs': share_obs, #+1
                 'obs': obs, #+1
+                'obs_full': obs_full, #+1
                 'rnn_states_actor': rnn_states_actor, #+1
                 'rnn_states_critic': rnn_states_critic, #+1
                 'actions': actions,

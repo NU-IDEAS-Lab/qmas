@@ -122,9 +122,9 @@ class QmasAlgorithm(R_MAPPO):
 
         # Process observations.
         if thread_indices is None:
-            obs_batch = sample["obs"]
+            obs_batch = sample["obs_full"]
         else:
-            obs_batch = sample["obs"][:, :, thread_indices]
+            obs_batch = sample["obs_full"][:, :, thread_indices]
         obs_batch = obs_batch.permute(1, 0, *range(2, obs_batch.ndim))
         obs_batch = obs_batch.flatten(start_dim=1, end_dim=2)
         obs_batch = obs_batch.permute(1, 0, *range(2, obs_batch.ndim))
