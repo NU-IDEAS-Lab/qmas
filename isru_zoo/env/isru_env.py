@@ -121,6 +121,7 @@ class parallel_env(ParallelEnv):
         self.default_observation_radius = observation_radius
         self.default_hauler_capacity = hauler_capacity
         self.hauler_pickup_threshold = hauler_pickup_threshold
+        self._pending_uncertainty = None  # (num_agents, H, W) or (num_agents, 1, H, W)
 
         # Set up entities.
         self.possible_agents = \
@@ -169,11 +170,19 @@ class parallel_env(ParallelEnv):
         self.action_spaces = spaces.Dict({
             agent: self.action_space(agent) for agent in self.possible_agents
         })
+
         self.nearest_tile=None
         
         # Reset the environment.
         self.reset_count = 0
         self.reset()
+    def set_uncertainty_channel(self, unc):
+        """
+        Accepts per-agent uncertainty for the NEXT observation.
+        Shape: (num_agents, H, W) or (num_agents, 1, H, W).
+        Agent order must match self.possible_agents.
+        """
+        self._pending_uncertainty = unc
 
 
     def _find_extractor_over_resource(self, hauler_pos, resource):
@@ -193,7 +202,6 @@ class parallel_env(ParallelEnv):
                         return a, ex_pos_int
         return None, None
 
-        # Removed misplaced environment setup block from class scope.
 
 
     def reset(self, seed=None, options=None):
@@ -201,6 +209,8 @@ class parallel_env(ParallelEnv):
 
         if seed != None:
             np.random.seed(seed)
+
+        self._pending_uncertainty = None
         
         # Reset resources.
         for r in self.possible_resources:
@@ -962,6 +972,19 @@ class parallel_env(ParallelEnv):
             )
             obs_dict[agent] = agent_observation
             info_dict[agent]["visibility_mask"] = obs_mask
+            # Log uncertainty stats (per-agent) into info_dict if map-observation is in use
+            try:
+                # Only for map-based observation variant where UNCERTAINTY layer exists
+                if hasattr(self, 'MAP_LAYERS') and isinstance(agent_observation, np.ndarray):
+                    unc_idx = self.MAP_LAYERS.UNCERTAINTY
+                    if 0 <= unc_idx < agent_observation.shape[0]:
+                        unc_map = agent_observation[unc_idx]
+                        info_dict[agent]["uncertainty/mean"] = float(np.nanmean(unc_map))
+                        info_dict[agent]["uncertainty/max"] = float(np.nanmax(unc_map))
+                        info_dict[agent]["uncertainty/min"] = float(np.nanmin(unc_map))
+            except Exception:
+                # Be robust: if any shape/type mismatch occurs, skip logging
+                pass
 
             # Check whether anything new was explored.
             visible_cells = self._get_visible_cell_count(agent)
@@ -1020,6 +1043,7 @@ class parallel_env(ParallelEnv):
         if np.any(np.isnan(list(reward_dict.values()))):
             raise ValueError("NaN detected in reward_dict!")
 
+        self._pending_uncertainty = None
         return obs_dict, reward_dict, self.dones, truncated_dict, info_dict
 
 
@@ -1288,6 +1312,7 @@ class parallel_env_map_obs(parallel_env):
         RESOURCES_CARGO = 9
         MASK_OBSERVED = 10
         MASK_RESOURCES_OBSERVED = 11
+        UNCERTAINTY = 12
 
     @property
     def map_shape(self):
@@ -1581,6 +1606,27 @@ class parallel_env_map_obs(parallel_env):
         layers[self.MAP_LAYERS.RESOURCES_CARGO] = map_resources_cargo
         layers[self.MAP_LAYERS.MASK_OBSERVED] = agent.mask_observed.astype(np.float32)
         layers[self.MAP_LAYERS.MASK_RESOURCES_OBSERVED] = agent.mask_resources_observed.astype(np.float32)
+
+        # --- Uncertainty layer (per-agent, non-communicated) ---
+        unc_layer = np.zeros(self.world_dims, dtype=np.float32)
+        if self._pending_uncertainty is not None:
+            # Extract this agent's index
+            aidx = self.possible_agents.index(agent)
+            unc = np.asarray(self._pending_uncertainty[aidx], dtype=np.float32)
+            # Remove singleton dimension if present.
+            if unc.ndim == 3 and unc.shape[0] == 1:
+                unc = unc[0]
+            
+            if unc.shape != tuple(self.world_dims):
+                try:
+                    unc = unc.reshape(*self.world_dims)
+                except Exception:
+                    pass  
+            unc_layer = unc
+
+        layers[self.MAP_LAYERS.UNCERTAINTY] = unc_layer
+        # Make uncertainty visible regardless of other masks
+        obs_mask[self.MAP_LAYERS.UNCERTAINTY] = True
 
         # Build the combined map.
         obs = np.stack(layers, axis=0).astype(np.float32)

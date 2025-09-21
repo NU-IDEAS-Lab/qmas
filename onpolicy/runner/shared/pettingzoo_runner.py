@@ -194,6 +194,36 @@ class PettingzooRunner(Runner):
             if type(key) == str:
                 self.env_infos[key] = [i[key] for i in infos]
 
+        # --- Normalize/log per-agent uncertainty maps from infos (if present) ---
+        # We support either a single key 'uncertainty_map' with shape [n_agents, H, W]
+        # or already-fanned-out keys like 'agent{j}/uncertainty_map'.
+        if "uncertainty_map" in infos[0]:
+            # Expecting a list (per env) of np.ndarray with shape [n_agents, H, W]
+            unc_batch = [inf["uncertainty_map"] for inf in infos]
+            if isinstance(unc_batch[0], np.ndarray) and unc_batch[0].ndim >= 2:
+                # Fan out per agent as separate series: agent{j}/uncertainty_map
+                for agent_j in range(self.num_agents):
+                    key_j = f"agent{agent_j}/uncertainty_map"
+                    # Extract agent slice across envs; ensure 2D map per item for logger
+                    vals_j = []
+                    for env_idx in range(len(unc_batch)):
+                        arr = unc_batch[env_idx]
+                        try:
+                            # If arr has shape [n_agents, H, W] or [n_agents, C, H, W]
+                            if arr.ndim == 3:
+                                vals_j.append(arr[agent_j])
+                            elif arr.ndim == 4:
+                                # collapse channel dim
+                                vals_j.append(arr[agent_j].mean(axis=0))
+                            else:
+                                vals_j.append(arr)
+                        except Exception:
+                            vals_j.append(arr)
+                    self.env_infos[key_j] = vals_j
+        else:
+            # If already fanned out keys exist, ensure they are arrays (no change needed here)
+            pass
+
         masks = torch.ones((self.n_rollout_threads, self.num_agents, 1))
         for i in range(self.n_rollout_threads):
             for agent_id in range(self.num_agents):
@@ -241,21 +271,56 @@ class PettingzooRunner(Runner):
 
     def log_env(self, env_infos, total_num_steps):
         for k, v in env_infos.items():
-            # if type(v) == wandb.viz.CustomChart and self.use_wandb:
-            #     wandb.log({k: v}, step=total_num_steps)
-            # elif len(v) > 0:
-            if len(v) > 0:
-                if isinstance(v[0], np.ndarray):
-                    v = np.array(v)
-                
-                    # Don't log large matrices.
-                    if v.ndim > 2:
-                        continue
+            if len(v) == 0:
+                continue
 
+            # Convert list of arrays to numpy array where possible
+            if isinstance(v[0], np.ndarray):
+                try:
+                    v = np.array(v, dtype=object if v[0].ndim > 2 else np.float32)
+                except Exception:
+                    pass
+
+            # Special handling for uncertainty heatmaps: log per-agent images over time
+            if isinstance(k, str) and k.endswith('/uncertainty_map'):
                 if self.use_wandb:
-                    wandb.log({k: np.mean(v)}, step=total_num_steps)
+                    # Log only the most recent map for each call to avoid huge uploads
+                    last_map = v[-1] if isinstance(v, (list, np.ndarray)) else v
+                    try:
+                        # Ensure 2D image
+                        if isinstance(last_map, np.ndarray) and last_map.ndim == 2:
+                            wandb.log({k: wandb.Image(last_map)}, step=total_num_steps)
+                        elif isinstance(last_map, np.ndarray) and last_map.ndim == 3:
+                            # If 3D (e.g., H, W, C), still acceptable as image
+                            wandb.log({k: wandb.Image(last_map)}, step=total_num_steps)
+                        else:
+                            # Fallback: log a histogram if not image-shaped
+                            arr = np.asarray(last_map).ravel()
+                            wandb.log({k.replace('uncertainty_map', 'uncertainty_hist'): wandb.Histogram(arr)}, step=total_num_steps)
+                    except Exception:
+                        # If anything fails, just skip logging this key for this step
+                        pass
                 else:
-                    self.writter.add_scalars(k, {k: np.mean(v)}, total_num_steps)    
+                    # With tensorboard writter, skip image logging to keep behavior simple
+                    continue
+                continue
+
+            # Default scalar-style logging
+            if isinstance(v, np.ndarray):
+                # Skip very large matrices from default scalar pathway
+                if v.ndim > 2:
+                    continue
+                mean_val = np.mean(v)
+            elif isinstance(v, (list, tuple)) and len(v) > 0 and isinstance(v[0], (int, float, np.floating)):
+                mean_val = float(np.mean(v))
+            else:
+                # Not a numeric scalar list/array; skip
+                continue
+
+            if self.use_wandb:
+                wandb.log({k: mean_val}, step=total_num_steps)
+            else:
+                self.writter.add_scalars(k, {k: mean_val}, total_num_steps)
 
     @torch.no_grad()
     def eval(self):
