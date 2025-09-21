@@ -46,6 +46,26 @@ class FixedSamplerWithoutReplacement(SamplerWithoutReplacement):
             return length - 1
         return length
 
+# class TrajectorySampler(RandomSampler):
+#     ''' Samples trajectories of contiguous data from the replay buffer. '''
+
+#     def __init__(self, *args, trajectory_length=1, **kwargs):
+#         super().__init__(*args, **kwargs)
+#         self.trajectory_length = trajectory_length
+    
+#     def sample(self, storage, batch_size):
+#         ''' Samples a batch of trajectories. '''
+
+#         ''' Samples a trajectory of data from the replay buffer. '''
+#         if len(storage) == 0:
+#             return None
+
+#         # Sample a random index.
+#         idx_start = torch.randint(0, len(storage) - self.trajectory_length + 1, (batch_size,))
+#         idx_end = idx_start + self.trajectory_length
+#         return idx, {}
+
+
 class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
     """
     Buffer to store training data.
@@ -85,15 +105,15 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
                 ndim=1,
                 compilable=True,
             ),
+            # sampler=FixedSamplerWithoutReplacement(
             sampler=SamplerWithoutReplacement(
                 shuffle=False,
                 drop_last=True
             )
+            # sampler=TrajectorySampler(
+            #     trajectory_length=5
+            # )
         )
-
-        # The constructor automatically creates an empty Compose() transform.
-        # We don't want this as it slows down the ::add method.
-        self._transform = None
 
         print(f"Buffer initialized with episode length {args.episode_length}")
 
@@ -165,12 +185,11 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
                 'bad_masks': bad_masks, #+1
                 'active_masks': active_masks, #+1
                 'delta_steps': delta_steps,
+                'available_actions': available_actions, #+1
                 'visibility_mask': visibility_mask, #+1
             },
             device='cpu',
         )
-        if available_actions is not None:
-            data['available_actions'] = available_actions #+1
 
         # In legacy mode, some data is added for timestep t, others for timestep t+1.
         if legacy_mode:
@@ -180,14 +199,11 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
                 # Special case for the first insertion.
                 self.add(data)
             else:
-                previous = self.storage[-1]
-                previous.update({
-                    'actions': data['actions'],
-                    'action_log_probs': data['action_log_probs'],
-                    'value_preds': data['value_preds'],
-                    'rewards': data['rewards'],
-                    'delta_steps': data['delta_steps'],
-                })
+                self["actions"][-1] = data["actions"]
+                self["action_log_probs"][-1] = data["action_log_probs"]
+                self["value_preds"][-1] = data["value_preds"]
+                self["rewards"][-1] = data["rewards"]
+                self["delta_steps"][-1] = data["delta_steps"]
 
                 # Insert the data for t+1 into the buffer.
                 # The t+1 step (`data`) will temporarily contain data for the previous (t) step.
@@ -441,7 +457,7 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
         active_masks_batch = sample["active_masks"].reshape(*index_shape, 1)
         old_action_log_probs_batch = sample["action_log_probs"].reshape(*index_shape, sample["action_log_probs"].shape[-1])
         adv_targ = sample["advantages"].reshape(*index_shape, 1)
-        if not "available_actions" in sample or sample["available_actions"] == None or not isinstance(sample["available_actions"], torch.Tensor):
+        if sample["available_actions"] == None or not isinstance(sample["available_actions"], torch.Tensor):
             available_actions_batch = None
         else:
             available_actions_batch = sample["available_actions"].reshape(*index_shape, sample["available_actions"].shape[-1])
@@ -468,7 +484,7 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
         rnn_states_actor = sample["rnn_states_actor"].flatten(0, 1)
         rnn_states_critic = sample["rnn_states_critic"].flatten(0, 1)
         masks = sample["masks"].flatten(0, 1)
-        if not "available_actions" in sample or np.any(sample["available_actions"] == None):
+        if np.any(sample["available_actions"] == None):
             available_actions = None
         else:
             available_actions = sample["available_actions"].flatten(0, 1)
@@ -534,6 +550,4 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
     
     @property
     def available_actions(self):
-        if not "available_actions" in self.storage._storage.keys():
-            return None
         return self["available_actions"]
