@@ -4,31 +4,32 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-    "--experiment_name", "isru-UN-1superBot-e1000-r20-h20-5x5-512x3-noReset",
+    "--experiment_name", "isru-UN-1e1h0p-e1000-r10-h10-10x10-1024x3-obsMask",
     "--project_name", "qmas",
     "--env_class", "isru_zoo.isru_v0.parallel_env_map_obs",
     "--user_name", "ideas-mas",
 
 	"--num_extractors", "1",
-    "--num_haulers", "0",
-    "--num_prospectors", "0",
+    "--num_haulers", "1",
+    "--num_prospectors", "1",
+    "--num_superbots", "0",
 
-    "--hauler_capacity", "20",
+    "--hauler_capacity", "10",
 
     "--world_no_reset",
-    "--world_size", "5",
+    "--world_size", "10",
     "--num_obstacles", "0",
-    "--num_resources", "20",
+    "--num_resources", "10",
     # "--randomize_num_resources",
     # "--curriculum_num_resources",
 
-    "--observation_radius", "999999",
-    # "--observation_mask",
+    "--observation_radius", "3",
+    "--observation_mask",
     "--available_actions_mask",
 
-    "--num_env_steps", "20000000",
-    "--episode_length", "400",
-    "--max_cycles", "400",
+    "--num_env_steps", "15000000",
+    "--episode_length", "1000",
+    "--max_cycles", "1000",
     "--num_mini_batch", "10",
 
     "--algorithm_class", "qmas.variant_two_modules.algorithm.QmasAlgorithm",
@@ -41,7 +42,7 @@ args = [
     "--share_policy",
     "--no-share_reward",
     "--use_ReLU",
-    "--hidden_size", "512",
+    "--hidden_size", "1024",
     "--layer_N", "3",
 
     # "--gamma", "0.999",
@@ -59,7 +60,7 @@ args = [
 
     "--n_rollout_threads", "50",
     "--cuda",
-    "--cuda_idx", "3",
+    "--cuda_idx", "4",
 
     "--save_interval", "1000",
     "--results_dir", "/data/group/mas/qmas/results",
