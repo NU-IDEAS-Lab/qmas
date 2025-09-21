@@ -199,13 +199,16 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
                 # Special case for the first insertion.
                 self.add(data)
             else:
-                self.storage[-1].update({
-                    'actions': data['actions'],
-                    'action_log_probs': data['action_log_probs'],
-                    'value_preds': data['value_preds'],
-                    'rewards': data['rewards'],
-                    'delta_steps': data['delta_steps'],
-                })
+                self.storage[-1].update(
+                    input_dict_or_td = {
+                        'actions': data['actions'],
+                        'action_log_probs': data['action_log_probs'],
+                        'value_preds': data['value_preds'],
+                        'rewards': data['rewards'],
+                        'delta_steps': data['delta_steps'],
+                    },
+                    inplace = True,
+                )
 
                 # Insert the data for t+1 into the buffer.
                 # The t+1 step (`data`) will temporarily contain data for the previous (t) step.
