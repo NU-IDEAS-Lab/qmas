@@ -107,6 +107,7 @@ class parallel_env(ParallelEnv):
         # Configuration.
         self.max_cycles = max_cycles
         self.episode_max = episode_max
+        self.world_size = world_size
         self.world_dims = np.array([world_size, world_size], dtype=np.int32)
         self.world_no_reset = world_no_reset
         self.num_obstacles = num_obstacles
@@ -446,9 +447,9 @@ class parallel_env(ParallelEnv):
         for i in range(num_layers):
             ax = fig.add_subplot(gs[0, i])
             if i == MAP_LAYERS.RELATIVE_POS_X or i == MAP_LAYERS.RELATIVE_POS_Y:
-                ax.imshow(np.abs(state[i, :, :]), cmap="coolwarm", vmin=-self.default_observation_radius, vmax=self.default_observation_radius)
+                ax.imshow(np.abs(state[i, :, :]), cmap="coolwarm", vmin=-self.world_size, vmax=self.world_size)
             else:
-                ax.imshow(state[i, :, :], cmap="plasma")
+                ax.imshow(state[i, :, :], cmap="plasma", vmin=0, vmax=1)
             name = MAP_LAYERS(i).name if i in MAP_LAYERS._value2member_map_ else f"Layer {i}"
             ax.set_title(name, fontsize=8, rotation=30)
             ax.axis("off")
