@@ -404,7 +404,7 @@ class parallel_env(ParallelEnv):
             plt.close()
             return img_arr
 
-    def render_state(self, state, figsize=(9, 6)):
+    def render_state(self, state, figsize=(9, 6), visibility_mask=None):
         ''' Renders the given state.
             
             Args:
@@ -417,6 +417,17 @@ class parallel_env(ParallelEnv):
         from matplotlib.colors import ListedColormap
         import matplotlib
         MAP_LAYERS = parallel_env_map_obs.MAP_LAYERS
+
+        # MARKER_PROSPECTOR = "$🔍$"
+        # MARKER_EXTRACTOR = "$\u26CF$"
+        # MARKER_HAULER = "$🚘$"
+        MARKER_PROSPECTOR = "$P$"
+        MARKER_EXTRACTOR = "$E$"
+        MARKER_HAULER = "$H$"
+        MARKER_DEPOT = "$\u2302$"
+
+        if visibility_mask is None:
+            visibility_mask = np.ones(state.shape[1:], dtype=bool)
 
         # Plot state as a grid using matplotlib.
         plt.figure(figsize=figsize)
@@ -443,9 +454,12 @@ class parallel_env(ParallelEnv):
             ax.axis("off")
 
         # Plot the human-readable version spanning the entire bottom row
-        cmap_visibility = ListedColormap(['gray', 'white'])
         ax_hr = fig.add_subplot(gs[1, :])
-        ax_hr.imshow(state[MAP_LAYERS.MASK_OBSERVED], cmap=cmap_visibility)
+
+        # Display the observed mask as the background. White = observed, gray = invisible, black = unobserved.
+        cmap_visibility = ListedColormap(["black", "lightgray", "white"])
+        background = 0.5 * state[MAP_LAYERS.MASK_OBSERVED] + 0.5 * visibility_mask
+        ax_hr.imshow(background, cmap=cmap_visibility, vmin=0, vmax=1)
         ax_hr.set_title("Human-Readable State")
         ax_hr.axis("on")
 
@@ -455,7 +469,7 @@ class parallel_env(ParallelEnv):
 
         # Plot visible depots.
         positions = np.argwhere(state[MAP_LAYERS.DEPOTS] > 0)
-        ax_hr.scatter(positions[:, 1], positions[:, 0], label="Depot", marker="$\u2302$", color="cyan", s=100)
+        ax_hr.scatter(positions[:, 1], positions[:, 0], label="Depot", marker=MARKER_DEPOT, color="cyan", s=100)
 
         # Plot visible resources.
         positions = np.argwhere(state[MAP_LAYERS.RESOURCES_EXTANT] > 0)
@@ -465,17 +479,17 @@ class parallel_env(ParallelEnv):
         # Plot prospectors.
         positions = np.argwhere(state[MAP_LAYERS.AGENTS_PROSPECTOR] > 0)
         if positions.size > 0:
-            ax_hr.scatter(positions[:, 1], positions[:, 0], label="Prospector", marker="$🔍$", s=100, alpha=0.5, color="green", edgecolor="black")
+            ax_hr.scatter(positions[:, 1], positions[:, 0], label="Prospector", marker=MARKER_PROSPECTOR, s=100, alpha=0.5, color="green", edgecolor="black")
         
         # Plot extractors.
         positions = np.argwhere(state[MAP_LAYERS.AGENTS_EXTRACTOR] > 0)
         if positions.size > 0:
-            ax_hr.scatter(positions[:, 1], positions[:, 0], label="Extractor", marker="$\u26CF$", s=100, alpha=0.5, color="yellow", edgecolor="black")
+            ax_hr.scatter(positions[:, 1], positions[:, 0], label="Extractor", marker=MARKER_EXTRACTOR, s=100, alpha=0.5, color="yellow", edgecolor="black")
 
         # Plot haulers.
         positions = np.argwhere(state[MAP_LAYERS.AGENTS_HAULER] > 0)
         if positions.size > 0:
-            ax_hr.scatter(positions[:, 1], positions[:, 0], label="Hauler", marker="$🚘$", s=100, alpha=0.5, color="red", edgecolor="black")
+            ax_hr.scatter(positions[:, 1], positions[:, 0], label="Hauler", marker=MARKER_HAULER, s=100, alpha=0.5, color="red", edgecolor="black")
 
         # Plot this agent as a square with a black border around the original icon.
         # Position is where MAP_LAYERS.RELATIVE_POS_X and MAP_LAYERS.RELATIVE_POS_Y are both 0.
@@ -504,7 +518,9 @@ class parallel_env(ParallelEnv):
 
         # Display the total reward for this step. Position this text below the subplots. Do not use suptitle.
         reward = sum(self.last_rewards.values())
-        plt.figtext(0.5, 0.01, f"Step: {self.step_count}, Combined Step Reward: {reward:.2f}", ha="center", fontsize=8)
+        resources_deposited = sum(depot.stock for depot in self.possible_depots)
+        resources_held = sum(sum(agent.cargo.values()) for agent in self.agents if agent.capabilities[CAP.CARRY])
+        plt.figtext(0.5, 0.01, f"Step: {self.step_count}, Combined Step Reward: {reward:.2f}, Resources Deposited: {resources_deposited}, Resources Held: {resources_held}", ha="center", fontsize=8)
 
         if self.render_mode == "human":
             # Show the plot.
@@ -521,6 +537,7 @@ class parallel_env(ParallelEnv):
             io_buf.close()
             plt.close()
             return img_arr
+
 
     @property
     @functools.cache
@@ -1424,6 +1441,21 @@ class parallel_env_map_obs(parallel_env):
         else:
             # return combined_obs, combined_obs_mask
             return combined_obs, combined_obs_mask
+
+
+    def render(self, pred=None, figsize=(9, 6), history_length=2, **kwargs):
+        ''' Renders the environment.
+            
+            Args:
+                figsize (tuple, optional): The size of the figure in inches.
+                
+            Returns:
+                None
+        '''
+
+        obs, obs_mask = self._observe(self.agents[0], force_visible=False)
+        return self.render_state(obs, figsize=figsize, visibility_mask=obs_mask[self.MAP_LAYERS.AGENTS_PROSPECTOR])
+
 
 class parallel_env_flat_map_obs(parallel_env):
     ''' A single-layer map-based observation of the ISRU environment. '''
