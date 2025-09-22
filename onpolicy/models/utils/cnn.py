@@ -149,7 +149,7 @@ class EncoderLayer(nn.Module):
         input_channel = obs_shape[0]
 
         self.encoder = smp.encoders.get_encoder(
-            "resnet34",
+            "resnet18",
             in_channels=input_channel,
             depth=2,
             weights=None,
@@ -189,13 +189,13 @@ class UNetLayer(nn.Module):
 
         self.sequence = nn.Sequential(
             smp.Unet(
-                encoder_name="resnet34",        # choose encoder, e.g. mobilenet_v2 or efficientnet-b7
+                encoder_name="resnet18",        # choose encoder, e.g. mobilenet_v2 or efficientnet-b7
                 encoder_weights=None,     # use `imagenet` pre-trained weights for encoder initialization
                 in_channels=input_channel,                  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
                 classes=1,                      # model output channels (number of classes in your dataset)
                 activation="sigmoid",          # activation function
                 encoder_depth=2,
-                decoder_channels=[hidden_size, hidden_size],
+                decoder_channels=[32, 16],
             ),
             Flatten(),
             init_(nn.Linear(input_width * input_height, hidden_size)),
