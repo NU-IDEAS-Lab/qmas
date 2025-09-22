@@ -209,16 +209,15 @@ def main(args):
 
     # cuda
     if all_args.cuda and torch.cuda.is_available():
-        print("choose to use gpu...")
         device = torch.device(f"cuda:{all_args.cuda_idx}")
         torch.set_num_threads(all_args.n_training_threads)
         if all_args.cuda_deterministic:
             torch.backends.cudnn.benchmark = False
             torch.backends.cudnn.deterministic = True
     else:
-        print("choose to use cpu...")
         device = torch.device("cpu")
         torch.set_num_threads(all_args.n_training_threads)
+    print(f"Using device {device}")
 
     # run dir
     base_dir = all_args.results_dir
