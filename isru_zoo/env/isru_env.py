@@ -508,7 +508,7 @@ class parallel_env(ParallelEnv):
             if cargo_percentage > 0:
                 # Draw an arc to indicate the amount of cargo.
                 arc = matplotlib.patches.Arc(
-                    (pos[1], pos[0]), 1.5, 1.5,
+                    (pos[1], pos[0]), 0.75, 0.75,
                     angle=0,
                     theta1=0,
                     theta2=cargo_percentage * 360,
