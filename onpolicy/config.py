@@ -350,5 +350,9 @@ def get_config():
     parser.add_argument("--diffusion_model_type", type=str, default="dit1d",
                         choices=["jannerunet", "dit1d"],
                         help="Type of diffusion model to use")
+
+    # Torch parameters.
+    parser.add_argument("--torch_compile", action="store_true",
+                        help="Whether to use torch.compile to compile the model.")
     
     return parser

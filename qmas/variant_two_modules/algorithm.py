@@ -24,37 +24,6 @@ class QmasAlgorithm(R_MAPPO):
         self.num_predictors = len(self.predictors)
         self.prediction_horizon = self.predictors[0].prediction_horizon  # Assume all predictors have same horizon
 
-    def diffusion_update(self, diffusion_model, optimizer, loss_args, update_model):
-        """
-        Update diffuser network.
-        :param sample: (Tuple) contains data batch with which to update networks.
-
-        :return value_loss: (torch.Tensor) diffusion loss value.
-        :return model_grad_norm: (torch.Tensor) gradient norm from model update.
-        """
-        if update_model:
-            gradient_accumulate_every = 1
-            
-            # Zero the gradients.
-            optimizer.zero_grad()
-            
-            # Accumulate gradients.
-            for _ in range(gradient_accumulate_every):
-                loss = diffusion_model.loss(*loss_args)
-                loss = loss / gradient_accumulate_every
-
-                loss.backward()
-            
-            # Compute gradient norm.
-            model_grad_norm = get_grad_norm(diffusion_model.model.parameters())
-
-            # Take an optimization step.
-            optimizer.step()
-            
-            return loss.item(), model_grad_norm
-        else:
-            return None
-
     def train(self, buffer, update_actor=True, update_critic=True, last_step=-1):
         """
         Perform a training update using minibatch GD.

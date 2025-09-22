@@ -43,7 +43,10 @@ class PettingzooRunner(Runner):
         self.model_dir = config['all_args'].model_dir
         if self.model_dir is not None:
             self.restore(self.model_dir)
-       
+        
+        if self.all_args.torch_compile:
+            self.train_compiled = torch.compile(self.train, fullgraph=False)
+
     def run(self):
         start = time.time()
         episodes = int(self.num_env_steps) // self.episode_length // self.n_rollout_threads
@@ -79,7 +82,10 @@ class PettingzooRunner(Runner):
 
             # compute return and update network
             self.compute()
-            train_infos = self.train()
+            if self.all_args.torch_compile:
+                train_infos = self.train_compiled()
+            else:
+                train_infos = self.train()
 
             end = time.time()
             
@@ -471,12 +477,6 @@ class PettingzooRunner(Runner):
                     available_actions=aa
                 )
 
-                # Perform rendering.
-                if ipython_clear_output:
-                    clear_output(wait = True)
-                spf = prediction if use_prediction else None
-                render_env.envs[0].env.render(spf, history_length=HISTORY_LENGTH, uncertainty=uncertainty)
-
                 # Calculate prediction error.
                 prediction_error = torch.abs(prediction[-1] - torch.from_numpy(obs[0]))
                 print(f"Mean Prediction Error: {prediction_error.mean():.2f}")
@@ -506,6 +506,12 @@ class PettingzooRunner(Runner):
                 reward_total += render_rewards[0].sum()
 
                 time_stop = time.time()
+
+                # Perform rendering.
+                if ipython_clear_output:
+                    clear_output(wait = True)
+                spf = prediction if use_prediction else None
+                render_env.envs[0].env.render(spf, history_length=HISTORY_LENGTH, uncertainty=uncertainty)
 
                 # append frame
                 if self.all_args.save_gifs:        
