@@ -151,34 +151,39 @@ class R_MAPPO():
 
         policy_loss = policy_action_loss
 
-
+        # Calculate overall loss for actor.
         if update_actor:
             self.policy.actor_optimizer.zero_grad()
-            (policy_loss - dist_entropy * self.entropy_coef).backward()
-            # (policy_loss - dist_entropy * self.entropy_coef).backward(create_graph=True, retain_graph=True)
+            actor_loss = policy_loss - dist_entropy * self.entropy_coef
+        else:
+            actor_loss = 0.0
 
+        # Calculate overall loss for critic.
+        value_loss = self.cal_value_loss(values, value_preds_batch, return_batch, active_masks_batch, update_value_normalizer=update_critic)
+        if update_critic:
+            self.policy.critic_optimizer.zero_grad()
+            critic_loss = value_loss * self.value_loss_coef
+        else:
+            critic_loss = 0.0
+        
+        # Combine loss and backpropagate gradients.
+        loss = actor_loss + critic_loss
+        if update_actor or update_critic:
+            loss.backward()
+
+        # Clip gradient norms.
         if self._use_max_grad_norm:
             actor_grad_norm = nn.utils.clip_grad_norm_(self.policy.actor.parameters(), self.max_grad_norm)
         else:
             actor_grad_norm = get_grad_norm(self.policy.actor.parameters())
-
-        if update_actor:
-            self.policy.actor_optimizer.step()
-
-
-        # critic update
-        value_loss = self.cal_value_loss(values, value_preds_batch, return_batch, active_masks_batch, update_value_normalizer=update_critic)
-
-
-        if update_critic:
-            self.policy.critic_optimizer.zero_grad()
-            (value_loss * self.value_loss_coef).backward()
-
         if self._use_max_grad_norm:
             critic_grad_norm = nn.utils.clip_grad_norm_(self.policy.critic.parameters(), self.max_grad_norm)
         else:
             critic_grad_norm = get_grad_norm(self.policy.critic.parameters())
 
+        # Step the optimizers.
+        if update_actor:
+            self.policy.actor_optimizer.step()
         if update_critic:
             self.policy.critic_optimizer.step()
 
