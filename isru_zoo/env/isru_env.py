@@ -986,7 +986,7 @@ class parallel_env(ParallelEnv):
                 agent.stacked_value += 1
             else:
                 agent.stacked_value = 0
-            reward_dict[agent] += 1.5 ** agent.stacked_value
+            reward_dict[agent] += 1.5 * agent.stacked_value
 
             # Provide reward shaping for moving closer to the nearest resource.
             nearest_resource = self._get_nearest_resource(agent.position)
