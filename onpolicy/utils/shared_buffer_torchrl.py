@@ -110,7 +110,8 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
             sampler=SamplerWithoutReplacement(
                 shuffle=False,
                 drop_last=True
-            )
+            ),
+            compilable=True
             # sampler=TrajectorySampler(
             #     trajectory_length=5
             # )
