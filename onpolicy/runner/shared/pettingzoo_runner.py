@@ -43,7 +43,10 @@ class PettingzooRunner(Runner):
         self.model_dir = config['all_args'].model_dir
         if self.model_dir is not None:
             self.restore(self.model_dir)
-       
+        
+        if self.all_args.torch_compile:
+            self.train_compiled = torch.compile(self.train, fullgraph=False)
+
     def run(self):
         start = time.time()
         episodes = int(self.num_env_steps) // self.episode_length // self.n_rollout_threads
@@ -79,7 +82,10 @@ class PettingzooRunner(Runner):
 
             # compute return and update network
             self.compute()
-            train_infos = self.train()
+            if self.all_args.torch_compile:
+                train_infos = self.train_compiled()
+            else:
+                train_infos = self.train()
 
             end = time.time()
             
