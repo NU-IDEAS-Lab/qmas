@@ -203,6 +203,10 @@ def main(args):
     all_args = parse_args(args, parser)
     validateArgs(all_args)
 
+    # Torch configuration.
+    # This is equivalent to torch.backends.cuda.matmul.allow_tf32 = True
+    torch.set_float32_matmul_precision('high')
+
     # cuda
     if all_args.cuda and torch.cuda.is_available():
         print("choose to use gpu...")
