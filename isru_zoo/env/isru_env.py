@@ -885,7 +885,7 @@ class parallel_env(ParallelEnv):
                     agent.steps_stationary = 1
 
                 # Handle communication (request-based): agent requests others' observations.
-                if True: #action["communication"][0] >= 0.5:
+                if action["communication"][0] >= 0.5:
                     requesters.add(agent)
                     info_dict["communication/requests_made"] += 1
 
@@ -1315,7 +1315,10 @@ class parallel_env_map_obs(parallel_env):
         map_agents = np.zeros((*self.world_dims, len(AGENT_ROLE) + 1), dtype=np.int32)
         for i, a in enumerate(self.possible_agents):
             pos = a.grid_position
-            map_agents[pos[0], pos[1], a.role.value] = 1
+            if a == agent:
+                map_agents[pos[0], pos[1], a.role.value] += 255  # Ego agent
+            else:
+                map_agents[pos[0], pos[1], a.role.value] += 1
         
         # Set up the resource, cargo, and deposited resource maps.
         map_resources_extant = np.zeros(self.world_dims, dtype=np.float32)
