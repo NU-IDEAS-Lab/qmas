@@ -1,20 +1,20 @@
 
 import torch
 from isru_zoo.env.entity import *
-from isru_zoo.env.isru_env import parallel_env_map_obs
+from isru_zoo.env.isru_env import parallel_env_map_obs as pe
 
 def get_movement_action_heuristic(observation):
     ''' Uses a simple heuristic to determine the action for the given agent based on the observation. '''
 
     # Just move to the bottom-right corner for now as an example.
-    # return parallel_env_map_obs._velocity_to_moore_index(None, torch.tensor([1, 1]))
+    # return pe._velocity_to_moore_index(None, torch.tensor([1, 1]))
 
     def get_agent_characteristics():
         ''' Gets agent position and capabilities from the observation. '''
 
         # Position is where both relative pos x and y are zero.
-        where_x_zero = observation[parallel_env_map_obs.MAP_LAYERS.RELATIVE_POS_X] == 0
-        where_y_zero = observation[parallel_env_map_obs.MAP_LAYERS.RELATIVE_POS_Y] == 0
+        where_x_zero = observation[pe.MAP_LAYERS.RELATIVE_POS_X] == 0
+        where_y_zero = observation[pe.MAP_LAYERS.RELATIVE_POS_Y] == 0
         agent_pos = torch.argwhere(where_x_zero & where_y_zero).reshape(-1, 2)
         if agent_pos.shape[0] != 1:
             raise ValueError("Could not determine unique agent position from observation.")
@@ -22,15 +22,15 @@ def get_movement_action_heuristic(observation):
 
         # Determine role based on agent layers.
         stacked = False
-        if observation[parallel_env_map_obs.MAP_LAYERS.AGENTS_EXTRACTOR, agent_pos[0], agent_pos[1]] >= 255.0:
+        if observation[pe.MAP_LAYERS.AGENTS_EXTRACTOR, agent_pos[0], agent_pos[1]] >= 255.0:
             capabilities = {CAP.EXTRACT: True, CAP.CARRY: False, CAP.PROSPECT: False}
-            stacked = observation[parallel_env_map_obs.MAP_LAYERS.AGENTS_EXTRACTOR, agent_pos[0], agent_pos[1]] > 255.0
-        elif observation[parallel_env_map_obs.MAP_LAYERS.AGENTS_HAULER, agent_pos[0], agent_pos[1]] >= 255.0:
+            stacked = observation[pe.MAP_LAYERS.AGENTS_EXTRACTOR, agent_pos[0], agent_pos[1]] > 255.0
+        elif observation[pe.MAP_LAYERS.AGENTS_HAULER, agent_pos[0], agent_pos[1]] >= 255.0:
             capabilities = {CAP.EXTRACT: False, CAP.CARRY: True, CAP.PROSPECT: False}
-            stacked = observation[parallel_env_map_obs.MAP_LAYERS.AGENTS_HAULER, agent_pos[0], agent_pos[1]] > 255.0
-        elif observation[parallel_env_map_obs.MAP_LAYERS.AGENTS_PROSPECTOR, agent_pos[0], agent_pos[1]] >= 255.0:
+            stacked = observation[pe.MAP_LAYERS.AGENTS_HAULER, agent_pos[0], agent_pos[1]] > 255.0
+        elif observation[pe.MAP_LAYERS.AGENTS_PROSPECTOR, agent_pos[0], agent_pos[1]] >= 255.0:
             capabilities = {CAP.EXTRACT: False, CAP.CARRY: False, CAP.PROSPECT: True}
-            stacked = observation[parallel_env_map_obs.MAP_LAYERS.AGENTS_PROSPECTOR, agent_pos[0], agent_pos[1]] > 255.0
+            stacked = observation[pe.MAP_LAYERS.AGENTS_PROSPECTOR, agent_pos[0], agent_pos[1]] > 255.0
         else:
             raise ValueError("Could not determine agent capabilities from observation.")
 
@@ -38,7 +38,7 @@ def get_movement_action_heuristic(observation):
 
     def obs_nearest_resource(pos):
         ''' Returns the direction to the nearest resource in the observation. '''
-        layer = observation[parallel_env_map_obs.MAP_LAYERS.RESOURCES_EXTANT]
+        layer = observation[pe.MAP_LAYERS.RESOURCES_EXTANT]
         positions = torch.argwhere(layer > 0).float()
         if positions.shape[0] == 0:
             return None
@@ -49,7 +49,7 @@ def get_movement_action_heuristic(observation):
 
     def obs_nearest_depot(pos):
         ''' Returns the direction to the nearest depot in the observation. '''
-        layer = observation[parallel_env_map_obs.MAP_LAYERS.DEPOTS]
+        layer = observation[pe.MAP_LAYERS.DEPOTS]
         positions = torch.argwhere(layer > 0).float()
         if positions.shape[0] == 0:
             return None
@@ -60,8 +60,8 @@ def get_movement_action_heuristic(observation):
 
     def obs_nearest_extractor_on_resource(pos):
         ''' Returns the direction to the nearest extractor that is on a resource in the observation. '''
-        layer_extractors = observation[parallel_env_map_obs.MAP_LAYERS.AGENTS_EXTRACTOR]
-        layer_resources = observation[parallel_env_map_obs.MAP_LAYERS.RESOURCES_EXTANT]
+        layer_extractors = observation[pe.MAP_LAYERS.AGENTS_EXTRACTOR]
+        layer_resources = observation[pe.MAP_LAYERS.RESOURCES_EXTANT]
         positions_extractors = torch.argwhere(layer_extractors > 0)
         positions_resources = torch.argwhere(layer_resources > 0)
         if positions_extractors.shape[0] == 0 or positions_resources.shape[0] == 0:
@@ -84,7 +84,7 @@ def get_movement_action_heuristic(observation):
 
     if capabilities[CAP.CARRY]:
         # Check whether carrying anything. Get cargo from the observation.
-        agent_cargo = observation[parallel_env_map_obs.MAP_LAYERS.RESOURCES_CARGO, agent_pos[0], agent_pos[1]]
+        agent_cargo = observation[pe.MAP_LAYERS.RESOURCES_CARGO, agent_pos[0], agent_pos[1]]
         if agent_cargo > 0:
             # Find closest depot.
             direction = obs_nearest_depot(agent_pos)
@@ -118,5 +118,5 @@ def get_movement_action_heuristic(observation):
         direction = torch.round(direction).to(torch.int32)
     else:
         direction = torch.tensor([0, 0], dtype=torch.int32)
-    moore_index = parallel_env_map_obs._velocity_to_moore_index(None, direction)
+    moore_index = pe._velocity_to_moore_index(None, direction)
     return moore_index
