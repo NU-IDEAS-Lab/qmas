@@ -642,8 +642,8 @@ class parallel_env(ParallelEnv):
             # The agent can only move one space at a time.
             "movement": spaces.Box(low=0, high=8, shape=(1,), dtype=np.int32),
 
-            # Communication is a request flag (request-based comm).
-            "communication": spaces.Box(low=0, high=1, shape=(1,), dtype=np.int32),
+            # Communication now encodes the desired sender's agent index [0, N-1]
+            "communication": spaces.Box(low=0, high=len(self.possible_agents) - 1, shape=(1,), dtype=np.int32),
 
             # Resource actions are represented as follows:
             # -1 = drop off all resources
@@ -834,6 +834,7 @@ class parallel_env(ParallelEnv):
         }
         info_dict.update({agent: {} for agent in self.possible_agents})
         requesters = set()
+        communication_requests = {}
         stack_value = {a: True for a in self.possible_agents}
 
         # Pre-movement calculations.
@@ -884,10 +885,22 @@ class parallel_env(ParallelEnv):
                 else:
                     agent.steps_stationary = 1
 
-                # Handle communication (request-based): agent requests others' observations.
-                if True: #action["communication"][0] >= 0.5:
-                    requesters.add(agent)
-                    info_dict["communication/requests_made"] += 1
+                # Handle communication (request-based) with sender selection by index.
+                # `communication` carries the target sender's index in [0, len(self.possible_agents)-1].
+                # If a float is provided upstream, it will be rounded by the cast below.
+                try:
+                    comm_val = float(action["communication"][0])
+                    target_idx = int(np.round(comm_val))
+                except Exception:
+                    target_idx = None
+
+                if target_idx is not None:
+                    target_idx = int(np.clip(target_idx, 0, len(self.possible_agents) - 1))
+                    sender = self.possible_agents[target_idx]
+                    if sender is not agent:
+                        communication_requests[agent] = sender
+                        requesters.add(agent)
+                        info_dict["communication/requests_made"] += 1
 
                 # Corrected resource handling for Hauler agents
                 if agent.capabilities[CAP.CARRY]:
@@ -966,11 +979,14 @@ class parallel_env(ParallelEnv):
         # Perform post-step calculations.
         for agent in self.possible_agents:
             # Perform observation.
-            requested = (agent in requesters)
-            senders_set = (set(self.agents) - {agent}) if requested else set()
+            # If this agent requested comms, only receive from the selected sender.
+            if agent in communication_requests:
+                senders_set = {communication_requests[agent]}
+            else:
+                senders_set = set()
             agent_observation, obs_mask = self.observe(
                 agent,
-                senders = senders_set
+                senders=senders_set
             )
             obs_dict[agent] = agent_observation
             info_dict[agent]["visibility_mask"] = obs_mask
