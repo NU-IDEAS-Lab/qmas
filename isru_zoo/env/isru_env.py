@@ -1599,7 +1599,6 @@ class parallel_env_map_obs(parallel_env):
             unc_layer = np.zeros(self.world_dims, dtype=np.float32)
         else:
             unc = np.asarray(self._pending_uncertainty, dtype=np.float32)
-            # Expect strict shape: (num_agents, H, W)
             assert (
                 unc.ndim == 3 and
                 unc.shape[0] == len(self.possible_agents) and
@@ -1721,3 +1720,4 @@ class parallel_env_flat_map_obs(parallel_env):
         obs_mask = np.ones_like(obs, dtype=bool)
 
         return obs, obs_mask
+
