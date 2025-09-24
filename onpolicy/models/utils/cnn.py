@@ -187,45 +187,21 @@ class UNetLayer(nn.Module):
         input_width = obs_shape[1]
         input_height = obs_shape[2]
 
-        # self.addcoords = AddCoords(with_r=False)
-        # input_channel = input_channel + 2
-
         self.sequence = nn.Sequential(
-            # smp.DeepLabV3(
-            #     encoder_name="resnet34",        # choose encoder, e.g. mobilenet_v2 or efficientnet-b7
-            #     encoder_weights="imagenet",     # use `imagenet` pre-trained weights for encoder
-            #     in_channels=input_channel,                  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
-            #     classes=1,                      # model output channels (number of classes in your dataset)
-            #     activation="sigmoid",          # activation function
-            # ),
             smp.Unet(
                 encoder_name="resnet34",        # choose encoder, e.g. mobilenet_v2 or efficientnet-b7
                 encoder_weights=None,     # use `imagenet` pre-trained weights for encoder initialization
                 in_channels=input_channel,                  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
                 classes=1,                      # model output channels (number of classes in your dataset)
-                # decoder_interpolation="bilinear",
-                # decoder_use_norm=False,
-                # decoder_attention_type="scse",
                 activation="sigmoid",          # activation function
             ),
-            # smp.Segformer(
-            #     encoder_name="mit_b0",        # choose encoder, e.g. mobilenet_v2 or efficientnet-b7
-            #     encoder_weights="imagenet",     # use `imagenet` pre-trained weights for encoder initialization
-            #     in_channels=input_channel,                  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
-            #     classes=1,                      # model output channels (number of classes in your dataset)
-            #     activation="sigmoid",          # activation function
-            # ),
-            # active_func,
             Flatten(),
             init_(nn.Linear(input_width * input_height, hidden_size)),
             active_func,
-            # init_(nn.Linear(hidden_size, hidden_size)),
-            # active_func
         )
 
 
     def forward(self, x):
-        # x = self.addcoords(x)
         x = self.sequence(x)
         return x
 
