@@ -342,6 +342,10 @@ def get_config():
                     help="Whether to apply visibility mask to observations during policy training")
 
     # diffuser parameters
+    parser.add_argument("--episode_fraction_start_prediction", type=float, default=0.0,
+                        help="The fraction of episodes at which to start training the prediction model.")
+    parser.add_argument("--episode_fraction_stop_policy", type=float, default=1.0,
+                        help="The fraction of episodes at which to stop training the policy.")
     parser.add_argument("--prediction_ensemble_size", type=int, default=1)
     parser.add_argument("--prediction_history_window", type=int, default=8)
     parser.add_argument("--prediction_disable", action=argparse.BooleanOptionalAction, default=False)

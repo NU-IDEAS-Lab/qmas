@@ -85,7 +85,7 @@ class PettingzooRunner(Runner):
             if self.all_args.torch_compile:
                 train_infos = self.train_compiled()
             else:
-                train_infos = self.train()
+                train_infos = self.train(episode=episode, episodes=episodes)
 
             end = time.time()
             

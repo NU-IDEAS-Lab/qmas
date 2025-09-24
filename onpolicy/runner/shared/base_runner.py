@@ -153,10 +153,10 @@ class Runner(object):
         next_values = np.array(np.split(_t2n(next_values), self.n_rollout_threads))
         self.buffer.compute_returns(next_values, self.trainer.value_normalizer)
     
-    def train(self):
+    def train(self, episode=None, episodes=None):
         """Train policies with data in buffer. """
         self.trainer.prep_training()
-        train_infos = self.trainer.train(self.buffer)      
+        train_infos = self.trainer.train(self.buffer, episode=episode, episodes=episodes)      
         self.buffer.after_update()
         return train_infos
 

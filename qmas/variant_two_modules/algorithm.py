@@ -24,7 +24,7 @@ class QmasAlgorithm(R_MAPPO):
         self.num_predictors = len(self.predictors)
         self.prediction_horizon = self.predictors[0].prediction_horizon  # Assume all predictors have same horizon
 
-    def train(self, buffer, update_actor=True, update_critic=True, last_step=-1):
+    def train(self, buffer, update_actor=True, update_critic=True, last_step=-1, episode=None, episodes=None):
         """
         Perform a training update using minibatch GD.
         :param buffer: (SharedReplayBuffer) buffer containing training data.
@@ -45,9 +45,14 @@ class QmasAlgorithm(R_MAPPO):
         self.train_initialize_info(train_info)
 
         # Determine what to update.
-        # update_actor = np.random.rand() < 0.5
-        # update_critic = True
         update_predictor = not self.args.prediction_disable
+        if episode is not None and episodes is not None:
+            frac = episode / episodes
+            if frac < self.args.episode_fraction_start_prediction:
+                update_predictor = False
+            if frac > self.args.episode_fraction_stop_policy:
+                update_actor = False
+                update_critic = False
 
         # Phase 1: Policy Training
         policy_info = super().train(buffer, update_actor, update_critic, last_step)

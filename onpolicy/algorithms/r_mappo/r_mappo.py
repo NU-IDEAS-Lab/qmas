@@ -190,7 +190,7 @@ class R_MAPPO():
         return value_loss, critic_grad_norm, policy_loss, dist_entropy, actor_grad_norm, imp_weights
 
 
-    def train(self, buffer, update_actor=True, update_critic=True, last_step=-1):
+    def train(self, buffer, update_actor=True, update_critic=True, last_step=-1, episode=None, episodes=None):
         """
         Perform a training update using minibatch GD.
         :param buffer: (SharedReplayBuffer) buffer containing training data.
