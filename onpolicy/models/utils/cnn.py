@@ -160,9 +160,10 @@ class EncoderLayer(nn.Module):
         self.active_func = active_func
 
         self.post = nn.Sequential(
+            nn.AdaptiveAvgPool2d((1, 1)),
             Flatten(),
             init_(nn.Linear(self.encoder.out_channels[-1], hidden_size)),
-            active_func
+            active_func,
         )
 
     def forward(self, x):
