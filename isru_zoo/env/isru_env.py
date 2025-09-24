@@ -972,19 +972,6 @@ class parallel_env(ParallelEnv):
             )
             obs_dict[agent] = agent_observation
             info_dict[agent]["visibility_mask"] = obs_mask
-            # Log uncertainty stats (per-agent) into info_dict if map-observation is in use
-            try:
-                # Only for map-based observation variant where UNCERTAINTY layer exists
-                if hasattr(self, 'MAP_LAYERS') and isinstance(agent_observation, np.ndarray):
-                    unc_idx = self.MAP_LAYERS.UNCERTAINTY
-                    if 0 <= unc_idx < agent_observation.shape[0]:
-                        unc_map = agent_observation[unc_idx]
-                        info_dict[agent]["uncertainty/mean"] = float(np.nanmean(unc_map))
-                        info_dict[agent]["uncertainty/max"] = float(np.nanmax(unc_map))
-                        info_dict[agent]["uncertainty/min"] = float(np.nanmin(unc_map))
-            except Exception:
-                # Be robust: if any shape/type mismatch occurs, skip logging
-                pass
 
             # Check whether anything new was explored.
             visible_cells = self._get_visible_cell_count(agent)
@@ -1608,21 +1595,21 @@ class parallel_env_map_obs(parallel_env):
         layers[self.MAP_LAYERS.MASK_RESOURCES_OBSERVED] = agent.mask_resources_observed.astype(np.float32)
 
         # --- Uncertainty layer (per-agent, non-communicated) ---
-        unc_layer = np.zeros(self.world_dims, dtype=np.float32)
-        if self._pending_uncertainty is not None:
-            # Extract this agent's index
+        if self._pending_uncertainty is None:
+            unc_layer = np.zeros(self.world_dims, dtype=np.float32)
+        else:
+            unc = np.asarray(self._pending_uncertainty, dtype=np.float32)
+            # Expect strict shape: (num_agents, H, W)
+            assert (
+                unc.ndim == 3 and
+                unc.shape[0] == len(self.possible_agents) and
+                tuple(unc.shape[1:]) == tuple(self.world_dims)
+            ), (
+                f"Uncertainty must have shape (num_agents, H, W) == ({len(self.possible_agents)}, {self.world_dims[0]}, {self.world_dims[1]}), "
+                f"got {unc.shape}"
+            )
             aidx = self.possible_agents.index(agent)
-            unc = np.asarray(self._pending_uncertainty[aidx], dtype=np.float32)
-            # Remove singleton dimension if present.
-            if unc.ndim == 3 and unc.shape[0] == 1:
-                unc = unc[0]
-            
-            if unc.shape != tuple(self.world_dims):
-                try:
-                    unc = unc.reshape(*self.world_dims)
-                except Exception:
-                    pass  
-            unc_layer = unc
+            unc_layer = unc[aidx]
 
         layers[self.MAP_LAYERS.UNCERTAINTY] = unc_layer
         # Make uncertainty visible regardless of other masks
