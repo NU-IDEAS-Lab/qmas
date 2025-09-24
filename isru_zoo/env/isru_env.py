@@ -642,8 +642,14 @@ class parallel_env(ParallelEnv):
             # The agent can only move one space at a time.
             "movement": spaces.Box(low=0, high=8, shape=(1,), dtype=np.int32),
 
-            # Communication now encodes the desired sender's agent index [0, N-1]
-            "communication": spaces.Box(low=0, high=len(self.possible_agents) - 1, shape=(1,), dtype=np.int32),
+            # Communication encodes a RELATIVE coordinate (dx, dy) in grid units.
+            # The agent whose current position is closest to (agent.position + [dx, dy]) will respond.
+            "communication": spaces.Box(
+                low=-np.array([self.world_dims[0], self.world_dims[1]], dtype=np.float32),
+                high=np.array([self.world_dims[0], self.world_dims[1]], dtype=np.float32),
+                shape=(2,),
+                dtype=np.float32,
+            ),
 
             # Resource actions are represented as follows:
             # -1 = drop off all resources
@@ -665,9 +671,13 @@ class parallel_env(ParallelEnv):
                 return spaces.MultiBinary(action_space.n)
             elif action_space.__class__.__name__ == "MultiDiscrete":
                 return spaces.MultiBinary(action_space.nvec)
-            elif isinstance(action_space, spaces.Box) and np.issubdtype(action_space.dtype, np.integer):
-                diff = action_space.high - action_space.low + 1
-                return spaces.MultiBinary(diff)
+            elif isinstance(action_space, spaces.Box):
+                if np.issubdtype(action_space.dtype, np.integer):
+                    diff = action_space.high - action_space.low + 1
+                    return spaces.MultiBinary(diff)
+                else:
+                    # Continuous box: return a binary mask with the same shape as the Box.
+                    return spaces.MultiBinary(action_space.shape)
             else:
                 raise NotImplementedError(f"Action space {action_space} not supported for action masking.")
         return get_available_action_space(action_space)
@@ -885,20 +895,26 @@ class parallel_env(ParallelEnv):
                 else:
                     agent.steps_stationary = 1
 
-                # Handle communication (request-based) with sender selection by index.
-                # `communication` carries the target sender's index in [0, len(self.possible_agents)-1].
-                # If a float is provided upstream, it will be rounded by the cast below.
-                try:
-                    comm_val = float(action["communication"][0])
-                    target_idx = int(np.round(comm_val))
-                except Exception:
-                    target_idx = None
+                # Handle communication (request-based) with sender selection by relative coordinate (dx, dy).
+                # The requested absolute target is agent.position + (dx, dy); the nearest OTHER agent responds.
+                
+                dx, dy = float(action["communication"][0]), float(action["communication"][1])
+                target_point = agent.position + np.array([dx, dy], dtype=np.float32)
+              
 
-                if target_idx is not None:
-                    target_idx = int(np.clip(target_idx, 0, len(self.possible_agents) - 1))
-                    sender = self.possible_agents[target_idx]
-                    if sender is not agent:
-                        communication_requests[agent] = sender
+                if target_point is not None and len(self.possible_agents) > 1:
+                    # Choose nearest other agent to the target_point
+                    nearest = None
+                    best_d = np.inf
+                    for other in self.possible_agents:
+                        if other is agent:
+                            continue
+                        d = np.linalg.norm(other.position - target_point)
+                        if d < best_d:
+                            best_d = d
+                            nearest = other
+                    if nearest is not None:
+                        communication_requests[agent] = nearest
                         requesters.add(agent)
                         info_dict["communication/requests_made"] += 1
 
