@@ -1429,7 +1429,8 @@ class parallel_env_map_obs(parallel_env):
         # Apply local observations (overwrite any communicated data).
         map[local_obs_mask == True] = local_obs[local_obs_mask == True]
         map_mask |= local_obs_mask
-
+        map[self.MAP_LAYERS.MASK_OBSERVED]=agent.mask_observed
+        map[self.MAP_LAYERS.MASK_RESOURCES_OBSERVED]=agent.mask_resources_observed
         # Apply the local relative position layers (overwrite any communicated data).
         map[self.MAP_LAYERS.RELATIVE_POS_X] = local_obs[self.MAP_LAYERS.RELATIVE_POS_X]
         map[self.MAP_LAYERS.RELATIVE_POS_Y] = local_obs[self.MAP_LAYERS.RELATIVE_POS_Y]
