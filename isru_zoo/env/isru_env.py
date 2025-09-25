@@ -1,4 +1,4 @@
-from enum import IntEnum
+from enum import IntEnum, auto
 from pettingzoo import ParallelEnv
 from pettingzoo.utils import parallel_to_aec
 
@@ -1276,22 +1276,22 @@ class parallel_env_map_obs(parallel_env):
 
     class MAP_LAYERS(IntEnum):
         OBSTACLES = 0
-        AGENTS_PROSPECTOR = 1
-        AGENTS_EXTRACTOR = 2
-        AGENTS_HAULER = 3
-        RELATIVE_POS_X = 4
-        RELATIVE_POS_Y = 5
-        DEPOTS = 6
-        RESOURCES_EXTANT = 7
-        RESOURCES_DEPOSITED = 8
-        RESOURCES_CARGO = 9
-        MASK_OBSERVED = 10
-        MASK_RESOURCES_OBSERVED = 11
+        AGENTS_PROSPECTOR = auto()
+        AGENTS_EXTRACTOR = auto()
+        AGENTS_HAULER = auto()
+        RELATIVE_POS_X = auto()
+        RELATIVE_POS_Y = auto()
+        DEPOTS = auto()
+        RESOURCES_EXTANT = auto()
+        RESOURCES_DEPOSITED = auto()
+        RESOURCES_CARGO = auto()
+        MASK_OBSERVED = auto()
+        MASK_RESOURCES_OBSERVED = auto()
 
     @property
     def map_shape(self):
         ''' Returns the map shape. '''
-        return (len(parallel_env_map_obs.MAP_LAYERS), *self.world_dims)
+        return (len(self.MAP_LAYERS), *self.world_dims)
 
 
     @functools.cache
@@ -1315,6 +1315,7 @@ class parallel_env_map_obs(parallel_env):
         map_agents = np.zeros((*self.world_dims, len(AGENT_ROLE) + 1), dtype=np.int32)
         for i, a in enumerate(self.possible_agents):
             pos = a.grid_position
+            # map_agents[pos[0], pos[1], a.role.value] = 1
             if a == agent:
                 map_agents[pos[0], pos[1], a.role.value] += 255  # Ego agent
             else:
@@ -1461,8 +1462,123 @@ class parallel_env_map_obs(parallel_env):
         return self.render_state(obs, figsize=figsize, visibility_mask=obs_mask[self.MAP_LAYERS.AGENTS_PROSPECTOR])
 
 
+class parallel_env_map_obs_comms_only(parallel_env_map_obs):
+    ''' A map-based observation version of the ISRU environment. Intended for use with CNNs. '''
+
+    class MAP_LAYERS(IntEnum):
+        AGENT_ROLE = 0
+        AGENT_ID = auto()
+        RESOURCES_EXTANT = auto()
+        RESOURCES_CARGO = auto()
+        MASK_OBSERVED = auto()
+        MASK_RESOURCES_OBSERVED = auto()
+        UNCERTAINTY = auto()
+
+
+    def _observe(self, agent, force_visible=False):
+        ''' Fills in the state/observation space for the given agent. '''
+
+        layers = [None for _ in range(self.map_shape[0])]
+
+        # Set up the agent maps.
+        map_agents = np.zeros((*self.world_dims, len(AGENT_ROLE) + 1), dtype=np.int32)
+        for i, a in enumerate(self.possible_agents):
+            pos = a.grid_position
+            if a == agent:
+                map_agents[pos[0], pos[1], a.role.value] += 255  # Ego agent
+            else:
+                map_agents[pos[0], pos[1], a.role.value] += 1
+        
+        # Set up the resource, cargo, and deposited resource maps.
+        map_resources_extant = np.zeros(self.world_dims, dtype=np.float32)
+        map_resources_deposited = np.zeros(self.world_dims, dtype=np.float32)
+        map_resources_cargo = np.zeros(self.world_dims, dtype=np.float32)
+        for r_idx, r in enumerate(self.possible_resources):
+            map_resources_extant += (self.map_resources[r] > 0).astype(np.float32)
+            for d in self.possible_depots:
+                if d.resource == r:
+                    pos = d.grid_position
+                    map_resources_deposited[pos[0], pos[1]] = d.stock #/ r.quantity
+        for a in self.agents:
+            if a.capabilities[CAP.CARRY]:
+                cargo_amount = sum(a.cargo.values())
+                pos = a.grid_position
+                map_resources_cargo[pos[0], pos[1]] += cargo_amount / a.capabilities[CAP.CARRY_CAPACITY]
+
+        # Temporarily use a single boolean map for depots.
+        map_depots = self.map_depots > 0
+        assert len(self.possible_resources) == 1, "Currently only supports one resource type."
+        
+        # Set up relative position maps. They should be 0 at the agent position and increase by 1 for each cell away.
+        map_rel_pos_x = np.zeros(self.world_dims, dtype=np.float32)
+        map_rel_pos_x[:, :] = np.arange(self.world_dims[0], dtype=np.float32)[:, None] - agent.position[0]
+        map_rel_pos_y = np.zeros(self.world_dims, dtype=np.float32)
+        map_rel_pos_y[:, :] = np.arange(self.world_dims[1], dtype=np.float32)[None, :] - agent.position[1]
+        
+        # Set up the visibility mask.
+        obs_mask = np.ones(self.map_shape, dtype=bool)
+
+        # Calculate the visible area based on a circular observation radius.
+        if not force_visible:
+            radius = agent.observation_radius
+            pos = agent.grid_position
+            visible = (np.arange(self.world_dims[0])[:, None] - pos[0]) ** 2 + \
+                (np.arange(self.world_dims[1])[None, :] - pos[1]) ** 2 <= radius ** 2
+            obs_mask[:, ~visible] = False
+
+        # Update visibility information.
+        if not force_visible:
+            # Update the agent's observed resources mask.
+            if agent.capabilities[CAP.PROSPECT]:
+                agent.mask_resources_observed[visible] = True
+            else:
+                # Resources can only be observed for the first time by a prospector.
+                obs_mask[self.MAP_LAYERS.RESOURCES_EXTANT, ~agent.mask_resources_observed] = False
+            
+            # Update the agent's observed area mask.
+            agent.mask_observed[visible] = True
+
+        # The relative position layers are always visible.
+        obs_mask[self.MAP_LAYERS.RELATIVE_POS_X] = True
+        obs_mask[self.MAP_LAYERS.RELATIVE_POS_Y] = True
+
+        # Obstacles are always visible once seen.
+        obs_mask[self.MAP_LAYERS.OBSTACLES, agent.mask_observed] = True
+
+        # Depots are always visible.
+        obs_mask[self.MAP_LAYERS.DEPOTS] = True
+
+        # The masks themselves are always visible.
+        obs_mask[self.MAP_LAYERS.MASK_OBSERVED] = True
+        obs_mask[self.MAP_LAYERS.MASK_RESOURCES_OBSERVED] = True
+
+        # Load most map layers.
+        layers[self.MAP_LAYERS.OBSTACLES] = self.map_obstacles
+        layers[self.MAP_LAYERS.AGENTS_PROSPECTOR] = map_agents[:, :, AGENT_ROLE.PROSPECTOR.value]
+        layers[self.MAP_LAYERS.AGENTS_EXTRACTOR] = map_agents[:, :, AGENT_ROLE.EXTRACTOR.value]
+        layers[self.MAP_LAYERS.AGENTS_HAULER] = map_agents[:, :, AGENT_ROLE.HAULER.value]
+        layers[self.MAP_LAYERS.RELATIVE_POS_X] = map_rel_pos_x
+        layers[self.MAP_LAYERS.RELATIVE_POS_Y] = map_rel_pos_y
+        layers[self.MAP_LAYERS.DEPOTS] = map_depots
+        layers[self.MAP_LAYERS.RESOURCES_EXTANT] = map_resources_extant
+        layers[self.MAP_LAYERS.RESOURCES_DEPOSITED] = map_resources_deposited
+        layers[self.MAP_LAYERS.RESOURCES_CARGO] = map_resources_cargo
+        layers[self.MAP_LAYERS.MASK_OBSERVED] = agent.mask_observed.astype(np.float32)
+        layers[self.MAP_LAYERS.MASK_RESOURCES_OBSERVED] = agent.mask_resources_observed.astype(np.float32)
+
+        # Build the combined map.
+        obs = np.stack(layers, axis=0).astype(np.float32)
+        
+        return obs, obs_mask
+
+
 class parallel_env_flat_map_obs(parallel_env):
     ''' A single-layer map-based observation of the ISRU environment. '''
+
+    MAP_VALUE_OBSTACLE = -2.0
+    MAP_VALUE_RESOURCE = 2.0
+    MAP_VALUE_UNEXPLORED = 0.0
+    MAP_VALUE_EXPLORED = -1.0
 
     @functools.cache
     def observation_space(self, agent):
@@ -1493,6 +1609,12 @@ class parallel_env_flat_map_obs(parallel_env):
                 shape=(np.prod(self.world_dims),),
                 dtype=np.float32
             ),
+            "uncertainty_map": spaces.Box(
+                low=0.0,
+                high=np.inf,
+                shape=(np.prod(self.world_dims),),
+                dtype=np.float32
+            ),
         })
 
 
@@ -1503,24 +1625,15 @@ class parallel_env_flat_map_obs(parallel_env):
             ''' Returns the position relative to the given agent. '''
             return (pos - agent.position).astype(np.float32)
 
-        VALUE_OBSTACLE = -2.0
-        VALUE_RESOURCE = 2.0
-        VALUE_UNEXPLORED = 0.0
-        VALUE_EXPLORED = -1.0
-
         # Create the map.
-        map = np.ones(self.world_dims, dtype=np.float32) * VALUE_UNEXPLORED
-        map[agent.mask_observed] = VALUE_EXPLORED
-        map[self.map_obstacles > 0] = VALUE_OBSTACLE
+        map = np.ones(self.world_dims, dtype=np.float32) * self.MAP_VALUE_UNEXPLORED
+        map[agent.mask_observed] = self.MAP_VALUE_EXPLORED
+        map[self.map_obstacles > 0] = self.MAP_VALUE_OBSTACLE
         for r in self.possible_resources:
-            map[self.map_resources[r] > 0] = VALUE_RESOURCE
+            map[self.map_resources[r] > 0] = self.MAP_VALUE_RESOURCE
         
         # Select the target.
-        if np.any(map == VALUE_RESOURCE):
-            target = self._get_nearest_resource(agent.position)
-        else:
-            target_entity = self._get_nearest_entity(agent.position, entity_type=ENTITY_TYPE.DEPOT, mask=agent.mask_observed)
-            target = target_entity.position if target_entity is not None else None
+        target = self._get_target(agent, map)
 
         # Collect other components. 
         agent_id = np.array([agent.role.value * 10.0], dtype=np.float32)
@@ -1533,6 +1646,7 @@ class parallel_env_flat_map_obs(parallel_env):
             "target_relative": target_relative,
             "other_agents_relative": other_agents_pos,
             "map": map.flatten().astype(np.float32),
+            "uncertainty_map": np.zeros(np.prod(self.world_dims), dtype=np.float32),  # Placeholder for uncertainty map
         }
 
         # Set up visibility mask.
@@ -1561,9 +1675,23 @@ class parallel_env_flat_map_obs(parallel_env):
             "target_relative": obs_mask_target_relative,
             "other_agents_relative": obs_mask_other_agents_pos,
             "map": obs_mask_map.flatten(),
+            "uncertainty_map": np.ones(np.prod(self.world_dims), dtype=bool),  # Placeholder for uncertainty map
         }
 
         return obs, obs_mask
+
+
+    def _get_target(self, agent, map):
+        ''' Returns the best target for the given agent based on its role. '''
+
+        # Select the target.
+        if np.any(map == self.MAP_VALUE_RESOURCE):
+            target = self._get_nearest_resource(agent.position)
+        else:
+            target_entity = self._get_nearest_entity(agent.position, entity_type=ENTITY_TYPE.DEPOT, mask=agent.mask_observed)
+            target = target_entity.position if target_entity is not None else None
+        
+        return target
 
 
     def observe(self, agent, senders=set()):
@@ -1573,10 +1701,43 @@ class parallel_env_flat_map_obs(parallel_env):
         local_obs, local_obs_mask = self._observe(agent)
 
         # Set up the matrices.
-        combined_obs = deepcopy(local_obs)
-        combined_obs_mask = deepcopy(local_obs_mask)
+        combined_obs = {}
+        combined_obs_mask = {}
+        # combined_obs = deepcopy(local_obs)
+        # combined_obs_mask = deepcopy(local_obs_mask)
+        combined_obs = local_obs
+        combined_obs_mask = local_obs_mask
 
+        for sender in senders:
+            sender_obs, sender_obs_mask = self._observe(sender)
 
+            # Agent role and ID - do not change.
+            combined_obs["agent_role"] = local_obs["agent_role"]
+            combined_obs_mask["agent_role"] = local_obs_mask["agent_role"]
+
+            # Map - combine.
+            sender_visible = sender_obs_mask["map"] == True
+            combined_obs["map"][sender_visible] = sender_obs["map"][sender_visible]
+            combined_obs_mask["map"][sender_visible] = True
+
+            # Uncertainty map - do not change (placeholder).
+            combined_obs["uncertainty_map"] = local_obs["uncertainty_map"]
+            combined_obs_mask["uncertainty_map"] = local_obs_mask["uncertainty_map"]
+
+            # Target - recalculate based on combined map.
+            target = self._get_target(agent, combined_obs["map"].reshape(self.world_dims))
+            combined_obs["target_relative"] = (target - agent.position).astype(np.float32) if target is not None else np.array([0.0, 0.0], dtype=np.float32)
+            if target is not None and not combined_obs_mask["map"][target[0] * self.world_dims[1] + target[1]]:
+                combined_obs_mask["target_relative"][:] = False
+            else:
+                combined_obs_mask["target_relative"][:] = True
+            
+            # Other agents - combine.
+            combined_obs["other_agents_relative"] = local_obs["other_agents_relative"]
+            combined_obs_mask["other_agents_relative"] = local_obs_mask["other_agents_relative"]
+            sender_visible = sender_obs_mask["other_agents_relative"] == True
+            combined_obs["other_agents_relative"][sender_visible] = sender_obs["other_agents_relative"][sender_visible]
+            combined_obs_mask["other_agents_relative"][sender_visible] = True
 
         if self.mask_observations:
             result = combined_obs * combined_obs_mask
