@@ -102,7 +102,24 @@ class QmasAlgorithm(R_MAPPO):
         obs_batch = obs_batch.permute(1, 0, *range(2, obs_batch.ndim))
         obs_batch = obs_batch.flatten(start_dim=1, end_dim=2)
         obs_batch = obs_batch.permute(1, 0, *range(2, obs_batch.ndim))
-        obs_batch = obs_batch.reshape(*obs_batch.shape[:3], -1)
+        # obs_batch = obs_batch.reshape(*obs_batch.shape[:3], -1)
+        # obs_batch = obs_batch.reshape(obs_batch.shape[0], obs_batch.shape[1], obs_batch.shape[2] * obs_batch.shape[3], *obs_batch.shape[4:])
+
+        # Choose a fixed crop size compatible with your U-Net (e.g., 16, 32, etc.)
+        crop_size = 16  # or another value divisible by 2^num_downsamples
+
+        # Randomly select crop location (same for all agents in this batch)
+        max_x = obs_batch.shape[-1] - crop_size
+        max_y = obs_batch.shape[-2] - crop_size
+        if max_x < 0 or max_y < 0:
+            raise ValueError(f"Crop size {crop_size} is too large for input of shape {obs_batch.shape}")
+
+        idx_start_x = torch.randint(0, max_x + 1, (1,)).item()
+        idx_start_y = torch.randint(0, max_y + 1, (1,)).item()
+        idx_end_x = idx_start_x + crop_size
+        idx_end_y = idx_start_y + crop_size
+
+        # print(f"Crop to size {obs_batch.shape[-2]}x{obs_batch.shape[-1]} from original size {sample['obs_full'].shape[-2]}x{sample['obs_full'].shape[-1]}.")
 
         # Process actions.
         if thread_indices is None:
@@ -112,7 +129,7 @@ class QmasAlgorithm(R_MAPPO):
         actions_batch = actions_batch.permute(1, 0, *range(2, actions_batch.ndim))
         actions_batch = actions_batch.flatten(start_dim=1, end_dim=2)
         actions_batch = actions_batch.permute(1, 0, *range(2, actions_batch.ndim))
-        actions_batch = actions_batch.reshape(*actions_batch.shape[:3], -1)
+        # actions_batch = actions_batch.reshape(*actions_batch.shape[:3], -1)
 
         # Process rewards.
         if thread_indices is None:
@@ -132,14 +149,21 @@ class QmasAlgorithm(R_MAPPO):
         visibility_mask_batch = visibility_mask_batch.permute(1, 0, *range(2, visibility_mask_batch.ndim))
         visibility_mask_batch = visibility_mask_batch.flatten(start_dim=1, end_dim=2)
         visibility_mask_batch = visibility_mask_batch.permute(1, 0, *range(2, visibility_mask_batch.ndim))
-        visibility_mask_batch = visibility_mask_batch.reshape(*visibility_mask_batch.shape[:3], -1)
+        # visibility_mask_batch = visibility_mask_batch.reshape(*visibility_mask_batch.shape[:3], -1)
+        # visibility_mask_batch = visibility_mask_batch.reshape(visibility_mask_batch.shape[0], visibility_mask_batch.shape[1], visibility_mask_batch.shape[2] * visibility_mask_batch.shape[3], *visibility_mask_batch.shape[4:])
+
+        # visibility_mask_batch = visibility_mask_batch[:, :, :, idx_start_x:idx_end_x, idx_start_y:idx_end_y]
         
         action_visibility = torch.ones_like(actions_batch)
-        fix_mask_batch = torch.cat([action_visibility, visibility_mask_batch.float()], dim=-1)
+        # fix_mask_batch = torch.cat([action_visibility, visibility_mask_batch.float()], dim=-1)
+        fix_mask_batch = visibility_mask_batch.float()
         
         # Perform optimization step for all agents.
         for i in range(actions_batch.shape[2]):
             agent_obs_batch = obs_batch[:, :, i]
+            agent_obs_batch = agent_obs_batch.reshape(agent_obs_batch.shape[0], agent_obs_batch.shape[1] * agent_obs_batch.shape[2], *agent_obs_batch.shape[3:])
+            agent_obs_batch = agent_obs_batch[:, :, idx_start_x:idx_end_x, idx_start_y:idx_end_y]
+
             agent_actions_batch = actions_batch[:, :, i]
             agent_rewards_batch = rewards_batch[:, :, i]
 
@@ -149,10 +173,13 @@ class QmasAlgorithm(R_MAPPO):
             agent_returns_batch = torch.sum(agent_rewards_batch * discounts, dim=1).reshape((-1, 1))
 
             # Build trajectories.
-            trajectories = torch.cat([agent_actions_batch, agent_obs_batch], dim=-1)
+            # trajectories = torch.cat([agent_actions_batch, agent_obs_batch], dim=-1)
+            trajectories = agent_obs_batch
 
             # Get the visibility mask for the current agent.
             agent_fix_mask = fix_mask_batch[:, :, i]
+            agent_fix_mask = agent_fix_mask.reshape(agent_fix_mask.shape[0], agent_fix_mask.shape[1] * agent_fix_mask.shape[2], *agent_fix_mask.shape[3:])
+            agent_fix_mask = agent_fix_mask[:, :, idx_start_x:idx_end_x, idx_start_y:idx_end_y]
 
             # Transfer tensors to the device.
             trajectories = trajectories.to(self.device)
@@ -163,19 +190,23 @@ class QmasAlgorithm(R_MAPPO):
             # This applies to both update_diffusion and update_classifier.
             predictor.diffuser.fix_mask = torch.nn.Parameter(agent_fix_mask, requires_grad=False)
 
+            # Update the loss weight.
+            loss_weight = torch.ones_like(trajectories)
+            predictor.diffuser.loss_weight = torch.nn.Parameter(loss_weight, requires_grad=False)
+
             # Update diffuser model.
             diffuser_loss = predictor.diffuser.update_diffusion(
                 x0=trajectories,
             )['diffusion_loss']
 
             # Update guide model.
-            guide_loss = predictor.diffuser.update_classifier(
-                x0=trajectories,
-                condition_cg=agent_returns_batch
-            )['classifier_loss']
+            # guide_loss = predictor.diffuser.update_classifier(
+            #     x0=trajectories.reshape(trajectories.shape[:1], -1),
+            #     condition_cg=agent_returns_batch
+            # )['classifier_loss']
 
             train_info['diffuser_loss'] += diffuser_loss
-            train_info['guide_loss'] += guide_loss
+            # train_info['guide_loss'] += guide_loss
 
     def prep_training(self):
         super().prep_training()

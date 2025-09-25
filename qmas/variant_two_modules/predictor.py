@@ -3,24 +3,23 @@ import torch
 from cleandiffuser.diffusion import DiscreteDiffusionSDE
 from cleandiffuser.classifier import OptimalityClassifier
 from cleandiffuser.nn_classifier import HalfDiT1d, HalfJannerUNet1d
-from cleandiffuser.nn_diffusion import DiT1d, JannerUNet1d
+from cleandiffuser.nn_diffusion import DiT1d, JannerUNet1d, UNet2d
 
 
 class Predictor(torch.nn.Module):
-    def __init__(self, obs_dim, action_dim, args, device=None):
+    def __init__(self, obs_dim, action_dim, args, device=None, obs_shape=None):
         super(Predictor, self).__init__()
         self.args = args
         self.device = device
 
         transition_dim = obs_dim + action_dim
-
         self.prediction_horizon = args.prediction_history_window
 
+        # Set up initial fixed mask and loss weight.
         fix_mask = torch.zeros((self.prediction_horizon, transition_dim))
-
         # Weight actions more heavily in the loss.
         loss_weight = torch.ones((self.prediction_horizon, transition_dim))
-        loss_weight[:, :action_dim] = 1.0
+        # loss_weight[:, :action_dim] = 1.0
         
         # Create Diffuser model.
         print(f"QmasPolicy: Using diffusion model type {args.diffusion_model_type} with prediction horizon {self.prediction_horizon} and transition dimension {transition_dim}.")
@@ -61,9 +60,28 @@ class Predictor(torch.nn.Module):
                 timestep_emb_type="untrainable_fourier",
                 timestep_emb_params={"scale": 0.02},
             )
+        elif args.diffusion_model_type == "unet2d":
+            # Update transition dim. Don't use actions.
+            transition_dim = obs_dim
+            loss_weight = torch.ones((self.prediction_horizon * obs_shape[0], obs_shape[1], obs_shape[2]))
+
+            diffuser_base = UNet2d(
+                n_channels = obs_shape[0] * self.prediction_horizon,
+            )
+            guide_base = HalfDiT1d(
+                x_dim=transition_dim,
+                out_dim=1,
+                x_seq_len=self.prediction_horizon,
+                emb_dim=128,
+                d_model=256,
+                n_heads=8,
+                depth=4,
+                timestep_emb_type="untrainable_fourier",
+                timestep_emb_params={"scale": 0.02},
+            )
         else:
             raise ValueError(f"Unknown diffusion model type: {args.diffusion_model_type}")
-        
+
         # Create the guide and diffuser.
         self.guide = OptimalityClassifier(guide_base).to(device)
         self.diffuser = DiscreteDiffusionSDE(
@@ -71,6 +89,7 @@ class Predictor(torch.nn.Module):
             None,
             fix_mask,
             loss_weight,
+            diffusion_steps=self.prediction_horizon,
             classifier=self.guide,
             predict_noise=False
         ).to(device)
