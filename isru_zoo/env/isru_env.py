@@ -1347,7 +1347,10 @@ class parallel_env_map_obs(parallel_env):
         map_agents = np.zeros((*self.world_dims, len(AGENT_ROLE) + 1), dtype=np.int32)
         for i, a in enumerate(self.possible_agents):
             pos = a.grid_position
-            map_agents[pos[0], pos[1], a.role.value] = 1
+            if a == agent:
+                map_agents[pos[0], pos[1], a.role.value] += 255  # Ego agent
+            else:
+                map_agents[pos[0], pos[1], a.role.value] += 1
         
         # Set up the resource, cargo, and deposited resource maps.
         map_resources_extant = np.zeros(self.world_dims, dtype=np.float32)
@@ -1457,7 +1460,8 @@ class parallel_env_map_obs(parallel_env):
         # Apply local observations (overwrite any communicated data).
         map[local_obs_mask == True] = local_obs[local_obs_mask == True]
         map_mask |= local_obs_mask
-
+        map[self.MAP_LAYERS.MASK_OBSERVED]=agent.mask_observed
+        map[self.MAP_LAYERS.MASK_RESOURCES_OBSERVED]=agent.mask_resources_observed
         # Apply the local relative position layers (overwrite any communicated data).
         map[self.MAP_LAYERS.RELATIVE_POS_X] = local_obs[self.MAP_LAYERS.RELATIVE_POS_X]
         map[self.MAP_LAYERS.RELATIVE_POS_Y] = local_obs[self.MAP_LAYERS.RELATIVE_POS_Y]
@@ -1497,12 +1501,32 @@ class parallel_env_flat_map_obs(parallel_env):
     def observation_space(self, agent):
         ''' Returns the observation space for the given agent. '''
 
-        return spaces.Box(
-            low=-np.inf,
-            high=np.inf,
-            shape=(np.prod(self.world_dims) + 1 + len(self.possible_agents) * len(self.world_dims),),
-            dtype=np.float32
-        )
+        return spaces.Dict({
+            "agent_role": spaces.Box(
+                low=-np.inf,
+                high=np.inf,
+                shape=(1,),
+                dtype=np.float32
+            ),
+            "target_relative": spaces.Box(
+                low=-np.inf,
+                high=np.inf,
+                shape=(2,),
+                dtype=np.float32
+            ),
+            "other_agents_relative": spaces.Box(
+                low=-np.inf,
+                high=np.inf,
+                shape=(len(self.possible_agents) - 1, 2),
+                dtype=np.float32
+            ),
+            "map": spaces.Box(
+                low=-np.inf,
+                high=np.inf,
+                shape=(np.prod(self.world_dims),),
+                dtype=np.float32
+            ),
+        })
 
 
     def _observe(self, agent, force_visible=False):
@@ -1526,25 +1550,69 @@ class parallel_env_flat_map_obs(parallel_env):
         
         # Select the target.
         if np.any(map == VALUE_RESOURCE):
-            target = self._get_nearest_resource(agent.position, mask=agent.mask_resources_observed)
+            target = self._get_nearest_resource(agent.position)
         else:
             target_entity = self._get_nearest_entity(agent.position, entity_type=ENTITY_TYPE.DEPOT, mask=agent.mask_observed)
             target = target_entity.position if target_entity is not None else None
 
         # Collect other components. 
-        agent_id = agent.role.value * 10.0
+        agent_id = np.array([agent.role.value * 10.0], dtype=np.float32)
         target_relative = relative_position(target) if target is not None else np.array([0.0, 0.0], dtype=np.float32)
-        other_agents_pos = [relative_position(a.position) for a in self.possible_agents if a != agent]
+        other_agents_pos = np.array([relative_position(a.position) for a in self.possible_agents if a != agent], dtype=np.float32)
         
         # Build the observation.
-        obs = np.concatenate((
-            np.array([agent_id], dtype=np.float32),
-            target_relative.astype(np.float32),
-            np.array(other_agents_pos, dtype=np.float32).flatten(),
-            map.flatten(),
-        ), axis=0)
+        obs = {
+            "agent_role": agent_id,
+            "target_relative": target_relative,
+            "other_agents_relative": other_agents_pos,
+            "map": map.flatten().astype(np.float32),
+        }
 
         # Set up visibility mask.
-        obs_mask = np.ones_like(obs, dtype=bool)
+        obs_mask_map = np.ones_like(map, dtype=bool)
+        if not force_visible:
+            radius = agent.observation_radius
+            pos = agent.grid_position
+            visible = (np.arange(self.world_dims[0])[:, None] - pos[0]) ** 2 + \
+                (np.arange(self.world_dims[1])[None, :] - pos[1]) ** 2 <= radius ** 2
+            obs_mask_map[~visible] = False
+        obs_mask_agent_id = np.ones_like(agent_id, dtype=bool)
+        obs_mask_target_relative = np.ones_like(target_relative, dtype=bool)
+        obs_mask_other_agents_pos = np.ones_like(other_agents_pos, dtype=bool)
+
+        # Check whether the target is visibile.
+        if target is not None and not obs_mask_map[target[0], target[1]]:
+            obs_mask_target_relative[:] = False
+        # Check whether other agents are visible.
+        for i in range(other_agents_pos.shape[0]):
+            if np.linalg.norm(other_agents_pos[i]) > agent.observation_radius:
+                obs_mask_other_agents_pos[i, :] = False
+        
+        # Build the combined mask.
+        obs_mask = {
+            "agent_role": obs_mask_agent_id,
+            "target_relative": obs_mask_target_relative,
+            "other_agents_relative": obs_mask_other_agents_pos,
+            "map": obs_mask_map.flatten(),
+        }
 
         return obs, obs_mask
+
+
+    def observe(self, agent, senders=set()):
+        ''' Returns the observation for the given agent.'''
+
+        # Collect local data.
+        local_obs, local_obs_mask = self._observe(agent)
+
+        # Set up the matrices.
+        combined_obs = deepcopy(local_obs)
+        combined_obs_mask = deepcopy(local_obs_mask)
+
+
+
+        if self.mask_observations:
+            result = combined_obs * combined_obs_mask
+            return result, combined_obs_mask
+        else:
+            return combined_obs, combined_obs_mask

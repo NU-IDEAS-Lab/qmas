@@ -129,9 +129,9 @@ def parse_args(args, parser):
     parser.add_argument("--eval_deterministic", action=argparse.BooleanOptionalAction, 
                         default=True, 
                         help="by default True. If False, sample action according to probability")
-    parser.add_argument("--share_reward", action=argparse.BooleanOptionalAction, 
-                        default=True, 
-                        help="by default true. If false, use different reward for each agent.")
+    parser.add_argument("--share_reward", action="store_true", 
+                        default=False, 
+                        help="by default false. If true, use same reward for each agent.")
     parser.add_argument("--save_videos", action=argparse.BooleanOptionalAction, default=False, 
                         help="by default, do not save render video. If set, save video.")
     parser.add_argument("--video_dir", type=str, default="", 
