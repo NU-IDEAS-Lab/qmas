@@ -12,7 +12,8 @@ class Predictor(torch.nn.Module):
         self.args = args
         self.device = device
 
-        transition_dim = obs_dim + action_dim
+        # transition_dim = obs_dim + action_dim
+        transition_dim = obs_dim
 
         self.prediction_horizon = args.prediction_history_window
 
@@ -20,7 +21,7 @@ class Predictor(torch.nn.Module):
 
         # Weight actions more heavily in the loss.
         loss_weight = torch.ones((self.prediction_horizon, transition_dim))
-        loss_weight[:, :action_dim] = 1.0
+        # loss_weight[:, :action_dim] = 1.0
         
         # Create Diffuser model.
         print(f"QmasPolicy: Using diffusion model type {args.diffusion_model_type} with prediction horizon {self.prediction_horizon} and transition dimension {transition_dim}.")

@@ -105,14 +105,14 @@ class QmasAlgorithm(R_MAPPO):
         obs_batch = obs_batch.reshape(*obs_batch.shape[:3], -1)
 
         # Process actions.
-        if thread_indices is None:
-            actions_batch = sample["actions"]
-        else:
-            actions_batch = sample["actions"][:, :, thread_indices]
-        actions_batch = actions_batch.permute(1, 0, *range(2, actions_batch.ndim))
-        actions_batch = actions_batch.flatten(start_dim=1, end_dim=2)
-        actions_batch = actions_batch.permute(1, 0, *range(2, actions_batch.ndim))
-        actions_batch = actions_batch.reshape(*actions_batch.shape[:3], -1)
+        # if thread_indices is None:
+        #     actions_batch = sample["actions"]
+        # else:
+        #     actions_batch = sample["actions"][:, :, thread_indices]
+        # actions_batch = actions_batch.permute(1, 0, *range(2, actions_batch.ndim))
+        # actions_batch = actions_batch.flatten(start_dim=1, end_dim=2)
+        # actions_batch = actions_batch.permute(1, 0, *range(2, actions_batch.ndim))
+        # actions_batch = actions_batch.reshape(*actions_batch.shape[:3], -1)
 
         # Process rewards.
         if thread_indices is None:
@@ -134,13 +134,14 @@ class QmasAlgorithm(R_MAPPO):
         visibility_mask_batch = visibility_mask_batch.permute(1, 0, *range(2, visibility_mask_batch.ndim))
         visibility_mask_batch = visibility_mask_batch.reshape(*visibility_mask_batch.shape[:3], -1)
         
-        action_visibility = torch.ones_like(actions_batch)
-        fix_mask_batch = torch.cat([action_visibility, visibility_mask_batch.float()], dim=-1)
+        # action_visibility = torch.ones_like(actions_batch)
+        # fix_mask_batch = torch.cat([action_visibility, visibility_mask_batch.float()], dim=-1)
+        fix_mask_batch = visibility_mask_batch.float()
         
         # Perform optimization step for all agents.
-        for i in range(actions_batch.shape[2]):
+        for i in range(obs_batch.shape[2]):
             agent_obs_batch = obs_batch[:, :, i]
-            agent_actions_batch = actions_batch[:, :, i]
+            # agent_actions_batch = actions_batch[:, :, i]
             agent_rewards_batch = rewards_batch[:, :, i]
 
             # Calculate trajectory returns.
@@ -149,7 +150,8 @@ class QmasAlgorithm(R_MAPPO):
             agent_returns_batch = torch.sum(agent_rewards_batch * discounts, dim=1).reshape((-1, 1))
 
             # Build trajectories.
-            trajectories = torch.cat([agent_actions_batch, agent_obs_batch], dim=-1)
+            # trajectories = torch.cat([agent_actions_batch, agent_obs_batch], dim=-1)
+            trajectories = agent_obs_batch
 
             # Get the visibility mask for the current agent.
             agent_fix_mask = fix_mask_batch[:, :, i]
