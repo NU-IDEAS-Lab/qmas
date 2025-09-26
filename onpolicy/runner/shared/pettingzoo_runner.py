@@ -51,6 +51,8 @@ class PettingzooRunner(Runner):
         start = time.time()
         episodes = int(self.num_env_steps) // self.episode_length // self.n_rollout_threads
 
+        last_save_step = 0
+
         for episode in (progress_bar := tqdm(range(episodes), dynamic_ncols=True)):
             start_episode = time.time()
 
@@ -92,9 +94,10 @@ class PettingzooRunner(Runner):
             # post process
             total_num_steps = (episode + 1) * self.episode_length * self.n_rollout_threads
             
-            # save model
-            if (total_num_steps % self.save_interval == 0 or episode == episodes - 1):
-                self.save()
+            # save model at every interval
+            if episode == episodes - 1 or total_num_steps - last_save_step >= self.save_interval:
+                self.save(episode)
+                last_save_step = total_num_steps
 
             # log information
             if total_num_steps % self.log_interval == 0:

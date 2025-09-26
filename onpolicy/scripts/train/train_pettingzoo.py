@@ -310,7 +310,7 @@ def main(args):
         eval_envs.close()
 
     # Save the models.
-    runner.save()
+    runner.save(final=True)
 
     if all_args.use_wandb:
         run.finish()

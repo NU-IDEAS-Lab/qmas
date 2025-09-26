@@ -304,6 +304,8 @@ def get_config():
                         default=False, help='use a linear schedule on the learning rate')
     # save parameters
     parser.add_argument("--save_interval", type=int, default=1, help="time duration between contiunous twice models saving.")
+    parser.add_argument("--save_checkpoints", default=False, action="store_true",
+                        help="Whether to store a checkpoint at each save interval.")
     parser.add_argument("--results_dir", type=str, default="", help="file path at which to store results")
 
     # log parameters
