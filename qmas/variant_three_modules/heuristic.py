@@ -1,9 +1,21 @@
 
 import torch
 from isru_zoo.env.entity import *
-from isru_zoo.env.isru_env import parallel_env_map_obs as pe
+from isru_zoo.env.isru_env import parallel_env_map_obs as pemo
+from isru_zoo.env.isru_env import parallel_env_flat_map_obs as pefmo
 
-def get_movement_action_heuristic(observation):
+def get_movement_action_heuristic(observation, env_name):
+    '''
+    Wrapper function to select appropriate heuristic based on environment name.
+    '''
+    if env_name == "isru_zoo.isru_v0.parallel_env_map_obs":
+        return _get_movement_action_heuristic_pemo(observation)
+    elif env_name == "isru_zoo.isru_v0.parallel_env_flat_map_obs":
+        return _get_movement_action_heuristic_pefmo(observation)
+    else:
+        raise ValueError(f"Unknown environment name: {env_name}")
+
+def _get_movement_action_heuristic_pemo(observation):
     '''
     Uses a simple heuristic to determine the movement action based on agent type:
     - Prospectors: Move toward nearest unexplored area
@@ -17,7 +29,7 @@ def get_movement_action_heuristic(observation):
         int: Movement action (0-8) corresponding to Moore neighborhood
     '''
     # Extract important layers from observation
-    MAP_LAYERS = pe.MAP_LAYERS
+    MAP_LAYERS = pemo.MAP_LAYERS
     
     # Find self position (where relative position X and Y are both 0)
     rel_pos_x = observation[MAP_LAYERS.RELATIVE_POS_X]
@@ -107,3 +119,57 @@ def get_movement_action_heuristic(observation):
     moore_idx = (dx + 1) * 3 + (dy + 1)
     
     return moore_idx
+
+def _get_movement_action_heuristic_pefmo(observation):
+    '''
+    Simple movement heuristic for parallel_env_flat_map_obs environment.
+    Uses agent role and target_relative to select a movement action.
+    Args:
+        observation: dict with keys 'agent_role', 'agent_position', 'target_relative', etc.
+    Returns:
+        int: Movement action (0-8) corresponding to Moore neighborhood
+    '''
+    import numpy as np
+    # The observation is a flattened array. We need to extract the correct slices.
+    # The structure is (see _observe):
+    #   agent_role: 1
+    #   agent_position: 2
+    #   target_relative: 2
+    #   other_agents_relative: N*2 (N = num other agents, unknown here)
+    #   map: prod(world_dims)
+    #   uncertainty_map: prod(world_dims)
+    # We'll use only the first 5 elements (agent_role, agent_position, target_relative)
+    agent_role = observation[0]
+    agent_position = observation[1:3]
+    # target_relative = observation[3:5]
+    # If target is not visible (all zeros), do not move
+    # if np.allclose(target_relative, 0):
+    #     return 4  # Center (no movement)
+
+    if agent_role == AGENT_ROLE.PROSPECTOR:
+        # Move randomly for prospectors
+        target_relative = np.random.randint(-1, 2, size=2)
+    elif agent_role == AGENT_ROLE.EXTRACTOR:
+        # Move toward nearest resource (assumed to be at target_relative)
+        target_relative = observation[3:5]
+        if np.allclose(target_relative, 0):
+            return 4  # No movement if no target
+    elif agent_role == AGENT_ROLE.HAULER:
+        # Move toward nearest extractor (assumed to be at target_relative)
+        target_relative = observation[3:5]
+        if np.allclose(target_relative, 0):
+            return 4  # No movement if no target
+    else:
+        # Unknown role, do not move
+        return 4  # Center (no movement)
+
+    # Compute direction to target
+    dx = int(np.sign(target_relative[0]))
+    dy = int(np.sign(target_relative[1]))
+    # Convert to Moore neighborhood index (0-8)
+    # [0 1 2]
+    # [3 4 5]
+    # [6 7 8]
+    moore_idx = (dx + 1) * 3 + (dy + 1)
+    return moore_idx
+

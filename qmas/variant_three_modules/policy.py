@@ -15,6 +15,8 @@ class QmasPolicy(QmasPolicyBase):
         super().__init__(args, obs_space, cent_obs_space, comm_act_space, device)
         self.full_act_space = act_space
 
+        self.env_class = args.env_class
+
         # Use the flatten function to determine which indices of actions correspond to communication vs movement.
         action = self.full_act_space.sample()
         action["communication"] = 123456789.0 # Unique value to identify communication part.
@@ -37,7 +39,7 @@ class QmasPolicy(QmasPolicyBase):
         # Get movement actions from heuristic
         movement_actions = torch.zeros(comm_actions.shape, dtype=comm_actions.dtype)
         for i in range(obs.shape[0]):
-            action = get_movement_action_heuristic(obs[i])
+            action = get_movement_action_heuristic(obs[i], self.env_class)
             movement_actions[i] = action
 
         # Combine into full action dict
@@ -83,7 +85,7 @@ class QmasPolicy(QmasPolicyBase):
         # Get movement actions from heuristic
         movement_actions = torch.zeros(comm_actions.shape, dtype=comm_actions.dtype)
         for i in range(obs.shape[0]):
-            action = get_movement_action_heuristic(obs[i])
+            action = get_movement_action_heuristic(obs[i], self.env_class)
             movement_actions[i] = action
 
         # Combine into full action dict
