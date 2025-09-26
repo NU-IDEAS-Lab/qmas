@@ -1315,6 +1315,7 @@ class parallel_env_map_obs(parallel_env):
         RESOURCES_CARGO = 9
         MASK_OBSERVED = 10
         MASK_RESOURCES_OBSERVED = 11
+        UNCERTAINTY = 12
 
     @property
     def map_shape(self):
@@ -1410,6 +1411,7 @@ class parallel_env_map_obs(parallel_env):
         # The masks themselves are always visible.
         obs_mask[self.MAP_LAYERS.MASK_OBSERVED] = True
         obs_mask[self.MAP_LAYERS.MASK_RESOURCES_OBSERVED] = True
+        obs_mask[self.MAP_LAYERS.UNCERTAINTY] = True
 
         # Load most map layers.
         layers[self.MAP_LAYERS.OBSTACLES] = self.map_obstacles
@@ -1424,6 +1426,7 @@ class parallel_env_map_obs(parallel_env):
         layers[self.MAP_LAYERS.RESOURCES_CARGO] = map_resources_cargo
         layers[self.MAP_LAYERS.MASK_OBSERVED] = agent.mask_observed.astype(np.float32)
         layers[self.MAP_LAYERS.MASK_RESOURCES_OBSERVED] = agent.mask_resources_observed.astype(np.float32)
+        layers[self.MAP_LAYERS.UNCERTAINTY] = agent.uncertainty
 
         # Build the combined map.
         obs = np.stack(layers, axis=0).astype(np.float32)
@@ -1456,24 +1459,38 @@ class parallel_env_map_obs(parallel_env):
         # Apply local observations (overwrite any communicated data).
         map[local_obs_mask == True] = local_obs[local_obs_mask == True]
         map_mask |= local_obs_mask
-        map[self.MAP_LAYERS.MASK_OBSERVED]=agent.mask_observed
-        map[self.MAP_LAYERS.MASK_RESOURCES_OBSERVED]=agent.mask_resources_observed
+
+        # Update the observed masks.
+        map[self.MAP_LAYERS.MASK_OBSERVED] = agent.mask_observed
+        map[self.MAP_LAYERS.MASK_RESOURCES_OBSERVED] = agent.mask_resources_observed
+        
         # Apply the local relative position layers (overwrite any communicated data).
         map[self.MAP_LAYERS.RELATIVE_POS_X] = local_obs[self.MAP_LAYERS.RELATIVE_POS_X]
         map[self.MAP_LAYERS.RELATIVE_POS_Y] = local_obs[self.MAP_LAYERS.RELATIVE_POS_Y]
         map_mask[self.MAP_LAYERS.RELATIVE_POS_X] = True
         map_mask[self.MAP_LAYERS.RELATIVE_POS_Y] = True
 
+        # Update the agent's persistent uncertainty map. First increase uncertainty everywhere by a small amount.
+        agent.uncertainty += np.random.uniform(0.03, 1.0, size=agent.uncertainty.shape).astype(np.float32)
+        visible = map_mask[self.MAP_LAYERS.AGENTS_PROSPECTOR] # This layer should always represent visibility.
+        agent.uncertainty[visible] = 0.0  
+
+        # Build the normalized uncertainty layer.
+        map_uncertainty = agent.uncertainty.copy()
+        u_min = map_uncertainty.min()
+        u_max = map_uncertainty.max()
+        if u_max > u_min:
+            map_uncertainty = (map_uncertainty - u_min) / (u_max - u_min)
+        map[self.MAP_LAYERS.UNCERTAINTY] = map_uncertainty
+        
         # Update the local observation.
         combined_obs = map
         combined_obs_mask = map_mask
 
+        # Apply visibility mask if required.
         if self.mask_observations:
-            result = combined_obs * combined_obs_mask
-            return result, combined_obs_mask
-        else:
-            # return combined_obs, combined_obs_mask
-            return combined_obs, combined_obs_mask
+            combined_obs *= combined_obs_mask
+        return combined_obs, combined_obs_mask
 
 
     def render(self, pred=None, figsize=(9, 6), history_length=2, **kwargs):
