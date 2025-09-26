@@ -1644,6 +1644,7 @@ class parallel_env_flat_map_obs(parallel_env):
         # Build the observation.
         obs = {
             "agent_role": agent_id,
+            "agent_position": agent.grid_position.astype(np.float32),
             "target_relative": target_relative,
             "other_agents_relative": other_agents_pos,
             "map": map.flatten().astype(np.float32),
@@ -1673,6 +1674,7 @@ class parallel_env_flat_map_obs(parallel_env):
         # Build the combined mask.
         obs_mask = {
             "agent_role": obs_mask_agent_id,
+            "agent_position": np.ones_like(obs["agent_position"], dtype=bool),
             "target_relative": obs_mask_target_relative,
             "other_agents_relative": obs_mask_other_agents_pos,
             "map": obs_mask_map.flatten(),
@@ -1715,6 +1717,8 @@ class parallel_env_flat_map_obs(parallel_env):
             # Agent role and ID - do not change.
             combined_obs["agent_role"] = local_obs["agent_role"]
             combined_obs_mask["agent_role"] = local_obs_mask["agent_role"]
+            combined_obs["agent_position"] = local_obs["agent_position"]
+            combined_obs_mask["agent_position"] = local_obs_mask["agent_position"]
 
             # Map - combine.
             sender_visible = sender_obs_mask["map"] == True
