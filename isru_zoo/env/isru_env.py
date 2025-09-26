@@ -229,6 +229,10 @@ class parallel_env(ParallelEnv):
                 position=start_position,
             )
 
+        # Initialize per-agent uncertainty map (float32) on reset.
+        for agent in self.agents:
+            agent.uncertainty = np.zeros(self.world_dims, dtype=np.float32)
+
         # Reset other state.
         self.step_count = 0
         self.last_rewards = {agent: 0.0 for agent in self.possible_agents}
@@ -1315,6 +1319,7 @@ class parallel_env_map_obs(parallel_env):
         RESOURCES_CARGO = 9
         MASK_OBSERVED = 10
         MASK_RESOURCES_OBSERVED = 11
+        UNCERTAINTY = 12
 
     @property
     def map_shape(self):
@@ -1410,6 +1415,7 @@ class parallel_env_map_obs(parallel_env):
         # The masks themselves are always visible.
         obs_mask[self.MAP_LAYERS.MASK_OBSERVED] = True
         obs_mask[self.MAP_LAYERS.MASK_RESOURCES_OBSERVED] = True
+        obs_mask[self.MAP_LAYERS.UNCERTAINTY] = True
 
         # Load most map layers.
         layers[self.MAP_LAYERS.OBSTACLES] = self.map_obstacles
@@ -1424,6 +1430,7 @@ class parallel_env_map_obs(parallel_env):
         layers[self.MAP_LAYERS.RESOURCES_CARGO] = map_resources_cargo
         layers[self.MAP_LAYERS.MASK_OBSERVED] = agent.mask_observed.astype(np.float32)
         layers[self.MAP_LAYERS.MASK_RESOURCES_OBSERVED] = agent.mask_resources_observed.astype(np.float32)
+        layers[self.MAP_LAYERS.UNCERTAINTY] = getattr(agent, "uncertainty", np.zeros(self.world_dims, dtype=np.float32))
 
         # Build the combined map.
         obs = np.stack(layers, axis=0).astype(np.float32)
@@ -1458,6 +1465,8 @@ class parallel_env_map_obs(parallel_env):
         map_mask |= local_obs_mask
         map[self.MAP_LAYERS.MASK_OBSERVED]=agent.mask_observed
         map[self.MAP_LAYERS.MASK_RESOURCES_OBSERVED]=agent.mask_resources_observed
+        map[self.MAP_LAYERS.UNCERTAINTY] = 1.0 - agent.mask_observed.astype(np.float32)
+        map_mask[self.MAP_LAYERS.UNCERTAINTY] = True
         # Apply the local relative position layers (overwrite any communicated data).
         map[self.MAP_LAYERS.RELATIVE_POS_X] = local_obs[self.MAP_LAYERS.RELATIVE_POS_X]
         map[self.MAP_LAYERS.RELATIVE_POS_Y] = local_obs[self.MAP_LAYERS.RELATIVE_POS_Y]
@@ -1468,6 +1477,30 @@ class parallel_env_map_obs(parallel_env):
         combined_obs = map
         combined_obs_mask = map_mask
 
+        # --- Artificial Uncertainty Injection ---
+        agent.uncertainty = np.zeros(self.world_dims, dtype=np.float32)
+
+        
+        agent.uncertainty = agent.uncertainty + 1.0
+
+        
+        combined_obs[self.MAP_LAYERS.UNCERTAINTY] = agent.uncertainty.astype(np.float32)
+
+        # Celar uncertainty at currently visible cells 
+        visible = combined_obs_mask[self.MAP_LAYERS.AGENTS_PROSPECTOR]
+        combined_obs[self.MAP_LAYERS.UNCERTAINTY, visible] = 0.0
+        agent.uncertainty[visible] = 0.0  
+        # Normalize the entire uncertainty layer to [0, 1]
+        u = combined_obs[self.MAP_LAYERS.UNCERTAINTY]
+        u_min = float(u.min())
+        u_max = float(u.max())
+        if u_max > u_min:
+            combined_obs[self.MAP_LAYERS.UNCERTAINTY] = (u - u_min) / (u_max - u_min)
+        else:
+            combined_obs[self.MAP_LAYERS.UNCERTAINTY] = np.zeros_like(u, dtype=np.float32)
+       
+        combined_obs_mask[self.MAP_LAYERS.UNCERTAINTY] = True
+      
         if self.mask_observations:
             result = combined_obs * combined_obs_mask
             return result, combined_obs_mask
