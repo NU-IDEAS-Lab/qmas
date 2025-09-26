@@ -671,13 +671,9 @@ class parallel_env(ParallelEnv):
                 return spaces.MultiBinary(action_space.n)
             elif action_space.__class__.__name__ == "MultiDiscrete":
                 return spaces.MultiBinary(action_space.nvec)
-            elif isinstance(action_space, spaces.Box):
-                if np.issubdtype(action_space.dtype, np.integer):
-                    diff = action_space.high - action_space.low + 1
-                    return spaces.MultiBinary(diff)
-                else:
-                    # Continuous box: return a binary mask with the same shape as the Box.
-                    return spaces.MultiBinary(action_space.shape)
+            elif isinstance(action_space, spaces.Box) and np.issubdtype(action_space.dtype, np.integer):
+                diff = action_space.high - action_space.low + 1
+                return spaces.MultiBinary(diff)
             else:
                 raise NotImplementedError(f"Action space {action_space} not supported for action masking.")
         return get_available_action_space(action_space)
