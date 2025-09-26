@@ -642,8 +642,14 @@ class parallel_env(ParallelEnv):
             # The agent can only move one space at a time.
             "movement": spaces.Box(low=0, high=8, shape=(1,), dtype=np.int32),
 
-            # Communication is a request flag (request-based comm).
-            "communication": spaces.Box(low=0, high=1, shape=(1,), dtype=np.int32),
+            # Communication encodes a RELATIVE coordinate (dx, dy) in grid units.
+            # The agent whose current position is closest to (agent.position + [dx, dy]) will respond.
+            "communication": spaces.Box(
+                low=-np.array([self.world_dims[0], self.world_dims[1]], dtype=np.float32),
+                high=np.array([self.world_dims[0], self.world_dims[1]], dtype=np.float32),
+                shape=(2,),
+                dtype=np.float32,
+            ),
 
             # Resource actions are represented as follows:
             # -1 = drop off all resources
@@ -834,6 +840,7 @@ class parallel_env(ParallelEnv):
         }
         info_dict.update({agent: {} for agent in self.possible_agents})
         requesters = set()
+        communication_requests = {}
         stack_value = {a: True for a in self.possible_agents}
 
         # Pre-movement calculations.
@@ -884,10 +891,28 @@ class parallel_env(ParallelEnv):
                 else:
                     agent.steps_stationary = 1
 
-                # Handle communication (request-based): agent requests others' observations.
-                if action["communication"][0] >= 0.5:
-                    requesters.add(agent)
-                    info_dict["communication/requests_made"] += 1
+                # Handle communication (request-based) with sender selection by relative coordinate (dx, dy).
+                # The requested absolute target is agent.position + (dx, dy); the nearest OTHER agent responds.
+                
+                dx, dy = float(action["communication"][0]), float(action["communication"][1])
+                target_point = agent.position + np.array([dx, dy], dtype=np.float32)
+              
+
+                if target_point is not None and len(self.possible_agents) > 1:
+                    # Choose nearest other agent to the target_point
+                    nearest = None
+                    best_d = np.inf
+                    for other in self.possible_agents:
+                        if other is agent:
+                            continue
+                        d = np.linalg.norm(other.position - target_point)
+                        if d < best_d:
+                            best_d = d
+                            nearest = other
+                    if nearest is not None:
+                        communication_requests[agent] = nearest
+                        requesters.add(agent)
+                        info_dict["communication/requests_made"] += 1
 
                 # Corrected resource handling for Hauler agents
                 if agent.capabilities[CAP.CARRY]:
@@ -966,11 +991,14 @@ class parallel_env(ParallelEnv):
         # Perform post-step calculations.
         for agent in self.possible_agents:
             # Perform observation.
-            requested = (agent in requesters)
-            senders_set = (set(self.agents) - {agent}) if requested else set()
+            # If this agent requested comms, only receive from the selected sender.
+            if agent in communication_requests:
+                senders_set = {communication_requests[agent]}
+            else:
+                senders_set = set()
             agent_observation, obs_mask = self.observe(
                 agent,
-                senders = senders_set
+                senders=senders_set
             )
             obs_dict[agent] = agent_observation
             info_dict[agent]["visibility_mask"] = obs_mask
@@ -1287,6 +1315,7 @@ class parallel_env_map_obs(parallel_env):
         RESOURCES_CARGO = auto()
         MASK_OBSERVED = auto()
         MASK_RESOURCES_OBSERVED = auto()
+        UNCERTAINTY = auto()
 
     @property
     def map_shape(self):
@@ -1383,6 +1412,7 @@ class parallel_env_map_obs(parallel_env):
         # The masks themselves are always visible.
         obs_mask[self.MAP_LAYERS.MASK_OBSERVED] = True
         obs_mask[self.MAP_LAYERS.MASK_RESOURCES_OBSERVED] = True
+        obs_mask[self.MAP_LAYERS.UNCERTAINTY] = True
 
         # Load most map layers.
         layers[self.MAP_LAYERS.OBSTACLES] = self.map_obstacles
@@ -1397,6 +1427,7 @@ class parallel_env_map_obs(parallel_env):
         layers[self.MAP_LAYERS.RESOURCES_CARGO] = map_resources_cargo
         layers[self.MAP_LAYERS.MASK_OBSERVED] = agent.mask_observed.astype(np.float32)
         layers[self.MAP_LAYERS.MASK_RESOURCES_OBSERVED] = agent.mask_resources_observed.astype(np.float32)
+        layers[self.MAP_LAYERS.UNCERTAINTY] = agent.uncertainty
 
         # Build the combined map.
         obs = np.stack(layers, axis=0).astype(np.float32)
@@ -1429,24 +1460,38 @@ class parallel_env_map_obs(parallel_env):
         # Apply local observations (overwrite any communicated data).
         map[local_obs_mask == True] = local_obs[local_obs_mask == True]
         map_mask |= local_obs_mask
-        map[self.MAP_LAYERS.MASK_OBSERVED]=agent.mask_observed
-        map[self.MAP_LAYERS.MASK_RESOURCES_OBSERVED]=agent.mask_resources_observed
+
+        # Update the observed masks.
+        map[self.MAP_LAYERS.MASK_OBSERVED] = agent.mask_observed
+        map[self.MAP_LAYERS.MASK_RESOURCES_OBSERVED] = agent.mask_resources_observed
+        
         # Apply the local relative position layers (overwrite any communicated data).
         map[self.MAP_LAYERS.RELATIVE_POS_X] = local_obs[self.MAP_LAYERS.RELATIVE_POS_X]
         map[self.MAP_LAYERS.RELATIVE_POS_Y] = local_obs[self.MAP_LAYERS.RELATIVE_POS_Y]
         map_mask[self.MAP_LAYERS.RELATIVE_POS_X] = True
         map_mask[self.MAP_LAYERS.RELATIVE_POS_Y] = True
 
+        # Update the agent's persistent uncertainty map. First increase uncertainty everywhere by a small amount.
+        agent.uncertainty += np.random.uniform(0.03, 1.0, size=agent.uncertainty.shape).astype(np.float32)
+        visible = map_mask[self.MAP_LAYERS.AGENTS_PROSPECTOR] # This layer should always represent visibility.
+        agent.uncertainty[visible] = 0.0  
+
+        # Build the normalized uncertainty layer.
+        map_uncertainty = agent.uncertainty.copy()
+        u_min = map_uncertainty.min()
+        u_max = map_uncertainty.max()
+        if u_max > u_min:
+            map_uncertainty = (map_uncertainty - u_min) / (u_max - u_min)
+        map[self.MAP_LAYERS.UNCERTAINTY] = map_uncertainty
+        
         # Update the local observation.
         combined_obs = map
         combined_obs_mask = map_mask
 
+        # Apply visibility mask if required.
         if self.mask_observations:
-            result = combined_obs * combined_obs_mask
-            return result, combined_obs_mask
-        else:
-            # return combined_obs, combined_obs_mask
-            return combined_obs, combined_obs_mask
+            combined_obs *= combined_obs_mask
+        return combined_obs, combined_obs_mask
 
 
     def render(self, pred=None, figsize=(9, 6), history_length=2, **kwargs):
