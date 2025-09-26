@@ -66,15 +66,16 @@ class QmasAlgorithm(R_MAPPO):
             thread_indices = torch.arange(self.args.n_rollout_threads)
             thread_splits = torch.split(thread_indices, split_size)
 
-            # Split threads among predictors
-            data_generator = buffer.sample_trajectories(self.num_mini_batch, self.prediction_horizon)
+            for e in range(self.args.diffusion_epoch):
+                # Split threads among predictors
+                data_generator = buffer.sample_trajectories(self.num_mini_batch, self.prediction_horizon)
 
-            for sample in data_generator:
-                for i, predictor in enumerate(self.predictors):
-                    if len(thread_splits[i]) == 0:
-                        raise ValueError("Thread split is empty. Check prediction_ensemble_size and n_rollout_threads.")
-                    self.train_sample_diffuser(sample, train_info, predictor, thread_indices=thread_splits[i])
-                    num_diffusion_updates[i] += 1
+                for sample in data_generator:
+                    for i, predictor in enumerate(self.predictors):
+                        if len(thread_splits[i]) == 0:
+                            raise ValueError("Thread split is empty. Check prediction_ensemble_size and n_rollout_threads.")
+                        self.train_sample_diffuser(sample, train_info, predictor, thread_indices=thread_splits[i])
+                        num_diffusion_updates[i] += 1
 
             # Average the diffusion losses for each predictor
             total_updates = sum(num_diffusion_updates)

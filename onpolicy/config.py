@@ -354,6 +354,8 @@ def get_config():
     parser.add_argument("--diffusion_model_type", type=str, default="dit1d",
                         choices=["jannerunet", "dit1d"],
                         help="Type of diffusion model to use")
+    parser.add_argument("--diffusion_epoch", type=int, default=5,
+                        help="Number of epochs to train the diffusion model for at each training step")
 
     # Torch parameters.
     parser.add_argument("--torch_compile", action="store_true",
