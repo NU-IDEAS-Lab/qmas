@@ -193,7 +193,7 @@ class UNetLayer(nn.Module):
                 encoder_weights=None,     # use `imagenet` pre-trained weights for encoder initialization
                 in_channels=input_channel,                  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
                 classes=1,                      # model output channels (number of classes in your dataset)
-                activation="sigmoid",          # activation function
+                activation=None,          # activation function
                 encoder_depth=2,
                 decoder_channels=[32, 16],
             ),
