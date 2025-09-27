@@ -137,7 +137,9 @@ def parse_args(args, parser):
     parser.add_argument("--video_dir", type=str, default="", 
                         help="directory to save videos.")
     parser.add_argument("--cuda_idx", type=int, default=0, 
-                        help="Index of the GPU to use")
+                        help="Index of the GPU to use for policy and critic networks.")
+    parser.add_argument("--cuda_idx_predictor", type=int, default=-1, 
+                        help="Index of the GPU to use for world model predictor network.")
     
     # Parse once to get the environment name.
     parsed_args, unknown_args = parser.parse_known_args(args)

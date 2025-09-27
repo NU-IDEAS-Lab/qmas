@@ -13,6 +13,7 @@ class QmasPolicy(R_MAPPOPolicy):
 
     def __init__(self, args, obs_space, cent_obs_space, act_space, device=torch.device("cpu")):
         self.device = device
+        self.device_predictor = device if args.cuda_idx_predictor == -1 else torch.device(f"cuda:{args.cuda_idx_predictor}")
         self.lr = args.lr
         self.critic_lr = args.critic_lr
         self.opti_eps = args.opti_eps
@@ -46,7 +47,7 @@ class QmasPolicy(R_MAPPOPolicy):
                 obs_dim,
                 action_dim,
                 args,
-                device=self.device
+                device=self.device_predictor
             ) for _ in range(args.prediction_ensemble_size)
         ]
 
