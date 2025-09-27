@@ -645,8 +645,8 @@ class parallel_env(ParallelEnv):
             # Communication encodes a RELATIVE coordinate (dx, dy) in grid units.
             # The agent whose current position is closest to (agent.position + [dx, dy]) will respond.
             "communication": spaces.Box(
-                low=-np.array([self.world_dims[0], self.world_dims[1]], dtype=np.float32),
-                high=np.array([self.world_dims[0], self.world_dims[1]], dtype=np.float32),
+                low=-np.inf,
+                high=np.inf,
                 shape=(2,),
                 dtype=np.float32,
             ),
