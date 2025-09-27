@@ -644,12 +644,20 @@ class parallel_env(ParallelEnv):
 
             # Communication encodes a flag and a RELATIVE coordinate (dx, dy) in grid units.
             # The agent whose current position is closest to (agent.position + [dx, dy]) will respond if comm_flag == 1.
-            "communication": spaces.Box(
-                low=np.array([0, -self.world_dims[0], -self.world_dims[1]], dtype=np.int32),
-                high=np.array([1,  self.world_dims[0],  self.world_dims[1]], dtype=np.int32),
-                shape=(3,),
-                dtype=np.int32,
-            ),
+            "communication": spaces.Dict({
+                "request": spaces.Box(
+                    low=0,
+                    high=1,
+                    shape=(1,),
+                    dtype=np.int32
+                ),
+                "relative_position": spaces.Box(
+                    low=-np.inf,
+                    high=np.inf,
+                    shape=(2,),
+                    dtype=np.float32
+                ),
+            }),
 
             # Resource actions are represented as follows:
             # -1 = drop off all resources
@@ -726,7 +734,7 @@ class parallel_env(ParallelEnv):
                 result["movement"][move] = 1
 
         # Communication is always available.
-        result["communication"] = np.ones_like(result["communication"])
+        result["communication"]["request"] = np.ones_like(result["communication"]["request"])
 
         # if agent.capabilities[CAP.CARRY]:
         #     for i, r in enumerate(self.possible_resources):
@@ -840,8 +848,7 @@ class parallel_env(ParallelEnv):
             "communication/requests_made": 0,
         }
         info_dict.update({agent: {} for agent in self.possible_agents})
-        requesters = set()
-        communication_requests = {}
+        comms_requests_relative = {}
         stack_value = {a: True for a in self.possible_agents}
 
         # Pre-movement calculations.
@@ -892,25 +899,13 @@ class parallel_env(ParallelEnv):
                 else:
                     agent.steps_stationary = 1
 
-                # Handle communication (request-based) with sender selection by flag and relative coordinate (dx, dy).
-                comm_flag = int(action["communication"][0])
-                dx, dy = int(action["communication"][1]), int(action["communication"][2])
-                if comm_flag == 1 and len(self.possible_agents) > 1:
-                    target_point = agent.position + np.array([dx, dy], dtype=np.float32)
-                    nearest = None
-                    best_d = np.inf
-                    for other in self.possible_agents:
-                        if other is agent:
-                            continue
-                        d = np.linalg.norm(other.position - target_point)
-                        if d < best_d:
-                            best_d = d
-                            nearest = other
-                    if nearest is not None:
-                        communication_requests[agent] = nearest
-                        requesters.add(agent)
-                        info_dict["communication/requests_made"] += 1
-                        reward_dict[agent] += REWARD_COMMUNICATION
+                # Handle communication (request-based).
+                comms_request = bool(action["communication"]["request"][0] == 1)
+                if comms_request:
+                    comms_position_relative = action["communication"]["relative_position"]
+                    comms_requests_relative[agent] = comms_position_relative
+                    info_dict["communication/requests_made"] += 1
+                    reward_dict[agent] += REWARD_COMMUNICATION
 
                 # Corrected resource handling for Hauler agents
                 if agent.capabilities[CAP.CARRY]:
@@ -988,12 +983,19 @@ class parallel_env(ParallelEnv):
 
         # Perform post-step calculations.
         for agent in self.possible_agents:
+            # Determine which agents will respond to communication requests.
+            senders_set = set()
+            if agent in comms_requests_relative:
+                absolute_request_position = agent.position + comms_requests_relative[agent]
+                sender = self._get_nearest_entity(
+                    absolute_request_position,
+                    entity_type=ENTITY_TYPE.AGENT,
+                    exclude={agent}
+                )
+                if sender is not None:
+                    senders_set.add(sender)
+
             # Perform observation.
-            # If this agent requested comms, only receive from the selected sender.
-            if agent in communication_requests:
-                senders_set = {communication_requests[agent]}
-            else:
-                senders_set = set()
             agent_observation, obs_mask = self.observe(
                 agent,
                 senders=senders_set
@@ -1112,7 +1114,7 @@ class parallel_env(ParallelEnv):
         return total
 
 
-    def _get_nearest_entity(self, position, entity_type=ENTITY_TYPE.AGENT, capability=None, mask=None):
+    def _get_nearest_entity(self, position, entity_type=ENTITY_TYPE.AGENT, capability=None, mask=None, exclude=set()):
         """
         Return the nearest entity to any position with the specified characteristics.
         If no such entity exists, returns None.
@@ -1130,6 +1132,8 @@ class parallel_env(ParallelEnv):
 
         for e in entities:
             if mask is not None and not mask[e.grid_position[0], e.grid_position[1]]:
+                continue
+            if e in exclude:
                 continue
             if capability == None or e.capabilities[capability]:
                 d = np.linalg.norm(pos - e.position)

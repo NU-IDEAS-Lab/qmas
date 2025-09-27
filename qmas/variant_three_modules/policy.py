@@ -20,7 +20,8 @@ class QmasPolicy(QmasPolicyBase):
         # Use the flatten function to determine which indices of actions correspond to communication vs movement.
         action = self.full_act_space.sample()
         DUMMY_VALUE = 123456789.0 # Unique value to identify communication part.
-        action["communication"] = torch.tensor([DUMMY_VALUE, DUMMY_VALUE]) 
+        action["communication"]["request"] = torch.tensor([DUMMY_VALUE])
+        action["communication"]["relative_position"] = torch.tensor([DUMMY_VALUE, DUMMY_VALUE]) 
         action_flat = torch.from_numpy(spaces.flatten(self.full_act_space, action)).float()
         self.action_comm_mask = torch.isclose(action_flat, torch.tensor(DUMMY_VALUE, dtype=torch.float32))
         self.action_comm_indices = torch.argwhere(self.action_comm_mask).squeeze(-1)
