@@ -642,13 +642,13 @@ class parallel_env(ParallelEnv):
             # The agent can only move one space at a time.
             "movement": spaces.Box(low=0, high=8, shape=(1,), dtype=np.int32),
 
-            # Communication encodes a RELATIVE coordinate (dx, dy) in grid units.
-            # The agent whose current position is closest to (agent.position + [dx, dy]) will respond.
+            # Communication encodes a flag and a RELATIVE coordinate (dx, dy) in grid units.
+            # The agent whose current position is closest to (agent.position + [dx, dy]) will respond if comm_flag == 1.
             "communication": spaces.Box(
-                low=-np.array([self.world_dims[0], self.world_dims[1]], dtype=np.float32),
-                high=np.array([self.world_dims[0], self.world_dims[1]], dtype=np.float32),
-                shape=(2,),
-                dtype=np.float32,
+                low=np.array([0, -self.world_dims[0], -self.world_dims[1]], dtype=np.int32),
+                high=np.array([1,  self.world_dims[0],  self.world_dims[1]], dtype=np.int32),
+                shape=(3,),
+                dtype=np.int32,
             ),
 
             # Resource actions are represented as follows:
@@ -892,15 +892,11 @@ class parallel_env(ParallelEnv):
                 else:
                     agent.steps_stationary = 1
 
-                # Handle communication (request-based) with sender selection by relative coordinate (dx, dy).
-                # The requested absolute target is agent.position + (dx, dy); the nearest OTHER agent responds.
-                
-                dx, dy = float(action["communication"][0]), float(action["communication"][1])
-                target_point = agent.position + np.array([dx, dy], dtype=np.float32)
-              
-
-                if target_point is not None and len(self.possible_agents) > 1:
-                    # Choose nearest other agent to the target_point
+                # Handle communication (request-based) with sender selection by flag and relative coordinate (dx, dy).
+                comm_flag = int(action["communication"][0])
+                dx, dy = int(action["communication"][1]), int(action["communication"][2])
+                if comm_flag == 1 and len(self.possible_agents) > 1:
+                    target_point = agent.position + np.array([dx, dy], dtype=np.float32)
                     nearest = None
                     best_d = np.inf
                     for other in self.possible_agents:
