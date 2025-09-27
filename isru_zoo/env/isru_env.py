@@ -817,6 +817,7 @@ class parallel_env(ParallelEnv):
         # Reward constants.
         REWARD_COLLISION = -2.0
         REWARD_NO_EXPLORATION = -1.0
+        REWARD_COMMUNICATION = -5.0  
         REWARD_EXTRACTOR_ON_RESOURCE = 20.0
         REWARD_DEPOSIT = 0.0
         REWARD_EXTRACT = 100000.0
@@ -913,6 +914,7 @@ class parallel_env(ParallelEnv):
                         communication_requests[agent] = nearest
                         requesters.add(agent)
                         info_dict["communication/requests_made"] += 1
+                        reward_dict[agent] += REWARD_COMMUNICATION
 
                 # Corrected resource handling for Hauler agents
                 if agent.capabilities[CAP.CARRY]:
