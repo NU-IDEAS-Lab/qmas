@@ -1034,7 +1034,7 @@ class parallel_env(ParallelEnv):
             r_cargo = resources_held / total_resources
             r_deposited = resources_deposited / total_resources
 
-            r_intrinsic = 10.0 * r_deposited + 1.0 * r_cargo + 1.0 * r_exploration
+            r_intrinsic = 100.0 * r_deposited + 1.0 * r_cargo + 1.0 * r_exploration
             reward_dict[agent] += r_intrinsic
             
             # Provide a completion reward.
