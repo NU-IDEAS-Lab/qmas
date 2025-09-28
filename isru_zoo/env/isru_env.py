@@ -890,7 +890,7 @@ class parallel_env(ParallelEnv):
                 # Correct agent velocity to reflect actual movement (in case of collisions).
                 if not np.allclose(agent.position - position_prev, agent.velocity):
                     agent.velocity = agent.position - position_prev
-                    reward_dict[agent] += REWARD_COLLISION
+                    # reward_dict[agent] += REWARD_COLLISION
                     stack_value[agent] = False
 
                 # Check for how long the agent has been stationary.
@@ -945,7 +945,7 @@ class parallel_env(ParallelEnv):
                                 # Add to the hauler's cargo
                                 agent.cargo[r.resource_id] = agent.cargo.get(r.resource_id, 0.0) + take
                                 info_dict["resources/step_picked_up"] += take
-                                reward_dict[agent] += REWARD_EXTRACT
+                                # reward_dict[agent] += REWARD_EXTRACT
                         elif val < 0:
                             r = self.idx_to_res[idx]
                             want_drop = float(-val)
@@ -957,7 +957,7 @@ class parallel_env(ParallelEnv):
                                 depot.stock += drop
                                 agent.cargo[r.resource_id] -= drop
                                 info_dict["resources/step_dropped_off"] += drop
-                                reward_dict[agent] += REWARD_DEPOSIT
+                                # reward_dict[agent] += REWARD_DEPOSIT
 
                 if agent.capabilities[CAP.EXTRACT]:
                     # Provide reward for Extractors that are sitting on a resource tile.
@@ -969,7 +969,7 @@ class parallel_env(ParallelEnv):
                             if self.map_resources[r][px, py] > 0:
                                 # Extractor is sitting on a resource tile.
                                 info_dict["extractors/num_in_place"] += 1
-                                reward_dict[agent] += REWARD_EXTRACTOR_ON_RESOURCE / agent.steps_stationary #TODO: this gets smaller the longer the agent sits
+                                # reward_dict[agent] += REWARD_EXTRACTOR_ON_RESOURCE / agent.steps_stationary #TODO: this gets smaller the longer the agent sits
 
         # Calculate the percentage of resources deposited.
         total_resources = sum(r.quantity for r in self.possible_resources)
@@ -1004,26 +1004,38 @@ class parallel_env(ParallelEnv):
             info_dict[agent]["visibility_mask"] = obs_mask
 
             # Check whether anything new was explored.
-            visible_cells = self._get_visible_cell_count(agent)
-            if visible_cells <= visible_cells_prev[agent]:
-                reward_dict[agent] += REWARD_NO_EXPLORATION
-                stack_value[agent] = False
+            # visible_cells = self._get_visible_cell_count(agent)
+            # if visible_cells <= visible_cells_prev[agent]:
+                # reward_dict[agent] += REWARD_NO_EXPLORATION
+                # stack_value[agent] = False
             
             # Provide so-called "stacked value" for reward shaping.
-            if stack_value[agent]:
-                agent.stacked_value += 1
-            else:
-                agent.stacked_value = 0
-            reward_dict[agent] += 1.5 * agent.stacked_value
+            # if stack_value[agent]:
+            #     agent.stacked_value += 1
+            # else:
+            #     agent.stacked_value = 0
+            # reward_dict[agent] += 1.5 ** agent.stacked_value
 
             # Provide reward shaping for moving closer to the nearest resource.
-            nearest_resource = self._get_nearest_resource(agent.position)
-            if nearest_resource is not None and agent in nearest_resource_dist_prev:
-                nearest_resource_dist = np.linalg.norm(agent.position - nearest_resource)
-                if nearest_resource_dist_prev[agent] > nearest_resource_dist:
-                    reward_dict[agent] -= REWARD_CLOSEST_RESOURCE
-                else:
-                    reward_dict[agent] += REWARD_CLOSEST_RESOURCE
+            # nearest_resource = self._get_nearest_resource(agent.position)
+            # if nearest_resource is not None and agent in nearest_resource_dist_prev:
+            #     nearest_resource_dist = np.linalg.norm(agent.position - nearest_resource)
+            #     if nearest_resource_dist_prev[agent] > nearest_resource_dist:
+            #         reward_dict[agent] -= REWARD_CLOSEST_RESOURCE
+            #     else:
+            #         reward_dict[agent] += REWARD_CLOSEST_RESOURCE
+
+            # Provide intrinsic reward.
+            total_cells = np.prod(self.world_dims)
+            visible_resource_cells = self._get_visible_cell_count(agent, use_resource_mask=True)
+            resources_held = sum(sum(agent.cargo.values()) for agent in self.agents)
+            resources_deposited = sum(depot.stock for depot in self.possible_depots)
+            r_exploration = visible_resource_cells / total_cells
+            r_cargo = resources_held / total_resources
+            r_deposited = resources_deposited / total_resources
+
+            r_intrinsic = 10.0 * r_deposited + 1.0 * r_cargo + 1.0 * r_exploration
+            reward_dict[agent] += r_intrinsic
             
             # Provide a completion reward.
             if end_done:
