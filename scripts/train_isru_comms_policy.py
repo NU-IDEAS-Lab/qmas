@@ -41,15 +41,15 @@ args = [
     "--diffusion_model_type", "jannerunet",
     "--prediction_ensemble_size", "1",
     "--prediction_history_window", "64",
-    # "--prediction_disable",
+    "--prediction_disable",
 
     "--seed", "0",
 
-    "--n_rollout_threads", "50",
+    "--n_rollout_threads", "100",
     "--n_training_threads", "32",
     "--cuda",
-    "--cuda_idx", "6",
-    "--cuda_idx_predictor", "7",
+    "--cuda_idx", "4",
+    # "--cuda_idx_predictor", "7",
 
     "--save_interval", "100000",
     "--save_checkpoints",
