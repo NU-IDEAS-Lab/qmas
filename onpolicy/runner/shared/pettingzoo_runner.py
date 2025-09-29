@@ -330,12 +330,12 @@ class PettingzooRunner(Runner):
                         )
 
                         # Store as the previous prediction.
-                        prediction_prev = pred.detach()
+                        prediction_prev = pred.detach().clone()
 
                         # Only take the first sample (n_samples is 1 anyway).
                         # Strip the action part of the prediction.
-                        prediction[:, agentIdx, :] = pred[0, :, act_size:]
-                        uncertainty[:, agentIdx, :] = variance[0, :, act_size:]
+                        prediction[:, agentIdx, :] = pred[0].reshape(prediction[:, agentIdx, :].shape)
+                        uncertainty[:, agentIdx, :] = variance[0].reshape(uncertainty[:, agentIdx, :].shape)
                 else:
                     prediction.zero_()
                     prediction[-1] = torch.from_numpy(obs[0])
@@ -360,11 +360,8 @@ class PettingzooRunner(Runner):
                 # Take a step in the environment.
                 obs, share_obs, eval_rewards, dones, infos, available_actions = eval_env.step(actions_env)
                 viz_mask_obs = np.expand_dims(infos[0]["visibility_mask"], 0) if "visibility_mask" in infos[0] else np.ones_like(obs)
-                # viz_mask_actions = np.ones(actions.shape, dtype=np.float32)  # Assuming actions are fully visible.
-                # viz_mask = np.concatenate([viz_mask_actions, viz_mask_obs.reshape(self.n_eval_rollout_threads, self.num_agents, -1)], axis=-1)
                 viz_mask = viz_mask_obs.reshape(self.n_eval_rollout_threads, self.num_agents, -1)
                 for i in range(self.num_agents):
-                    # transition = np.concatenate((actions[0][i].float(), obs[0][i].flatten()), axis=0)
                     transition = obs[0][i].flatten()
                     agent_viz_mask = viz_mask[0, i]
                     buffer[i].append({
