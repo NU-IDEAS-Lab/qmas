@@ -62,6 +62,9 @@ class QmasAlgorithm(R_MAPPO):
 
         # Phase 2: Predictor Training (ensemble)
         if update_predictor:
+            train_info['diffuser_loss'] = 0
+            train_info['guide_loss'] = 0
+
             num_diffusion_updates = [0 for _ in range(self.num_predictors)]
             assert self.args.n_rollout_threads % self.args.prediction_ensemble_size == 0, "n_rollout_threads must be divisible by prediction_ensemble_size."
             split_size = self.args.n_rollout_threads // self.args.prediction_ensemble_size
@@ -86,11 +89,6 @@ class QmasAlgorithm(R_MAPPO):
                 train_info['guide_loss'] /= total_updates
 
         return train_info
-
-    def train_initialize_info(self, train_info):
-        super().train_initialize_info(train_info)
-        train_info['diffuser_loss'] = 0
-        train_info['guide_loss'] = 0
 
     def train_sample_diffuser(self, sample, train_info, predictor, thread_indices=None):
         ''' Performs update for a single sample for a given predictor. '''
