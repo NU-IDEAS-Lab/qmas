@@ -208,6 +208,9 @@ def main(args):
     # Torch configuration.
     # This is equivalent to torch.backends.cuda.matmul.allow_tf32 = True
     torch.set_float32_matmul_precision('high')
+    torch._dynamo.config.compiled_autograd = True
+    torch.backends.cudnn.benchmark = True
+
 
     # cuda
     if all_args.cuda and torch.cuda.is_available():
