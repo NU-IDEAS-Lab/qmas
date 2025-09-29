@@ -153,7 +153,7 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
         if visibility_mask is None:
             visibility_mask = np.ones_like(obs)
         if state_visibility_mask is None:
-            state_visibility_mask = np.ones_like(share_obs)
+            state_visibility_mask = np.zeros_like(share_obs)
         
         # Convert any np.object arrays to tensors of NonTensorData.
         if isinstance(obs, np.ndarray) and obs.dtype == object:
