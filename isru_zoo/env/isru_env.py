@@ -691,7 +691,7 @@ class parallel_env(ParallelEnv):
         ''' Returns the global state of the environment.
             This is useful for centralized training, decentralized execution. '''
         
-        state = self._state()
+        state, _ = self._state()
 
         return state
 
@@ -699,7 +699,7 @@ class parallel_env(ParallelEnv):
     def _state(self):
         ''' Returns the global state and mask of the environment.'''
 
-        return self._observe(self.possible_agents[0], force_visible=True)[0]
+        return self._observe(self.possible_agents[0], force_visible=True)
 
 
     def observe(self, agent, senders=set()):
@@ -1040,6 +1040,10 @@ class parallel_env(ParallelEnv):
             # Provide a completion reward.
             if end_done:
                 reward_dict[agent] += REWARD_DONE / self.step_count
+
+        # Provide a state and state_visibility_mask in the info dict for convenience.
+        state, state_visibility_mask = self._state()
+        info_dict["state_visibility_mask"] = state_visibility_mask
 
         # Update information dictionary.
         info_dict["resources/discovered"] = self._get_num_extant_resources_discovered() + deposited_resources + held_resources

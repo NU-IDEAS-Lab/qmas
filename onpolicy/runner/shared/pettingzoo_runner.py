@@ -195,6 +195,11 @@ class PettingzooRunner(Runner):
         visibility_mask = None
         if "visibility_mask" in infos[0]:
             visibility_mask = np.array([info["visibility_mask"] for info in infos])
+        
+        # Get extra state information from infos.
+        state_visibility_mask = None
+        if "state_visibility_mask" in infos[0]:
+            state_visibility_mask = np.array([info["state_visibility_mask"] for info in infos])
 
         # Add information to the logger.
         keys = infos[0].keys()
@@ -222,7 +227,8 @@ class PettingzooRunner(Runner):
             masks=masks,
             delta_steps=delta_steps,
             available_actions=available_actions,
-            visibility_mask=visibility_mask
+            visibility_mask=visibility_mask,
+            state_visibility_mask=state_visibility_mask
         )
 
 
