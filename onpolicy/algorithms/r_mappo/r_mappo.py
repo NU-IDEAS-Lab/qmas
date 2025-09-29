@@ -230,6 +230,7 @@ class R_MAPPO():
                 num_updates += 1
 
         for k in train_info.keys():
+            train_info[k] = train_info[k].item()
             train_info[k] /= num_updates
  
         return train_info
@@ -242,9 +243,9 @@ class R_MAPPO():
         value_loss, critic_grad_norm, policy_loss, dist_entropy, actor_grad_norm, imp_weights \
                     = self.ppo_update(sample, update_actor, update_critic)
 
-        train_info['value_loss'] += value_loss.item()
-        train_info['policy_loss'] += policy_loss.item()
-        train_info['dist_entropy'] += dist_entropy.item()
+        train_info['value_loss'] += value_loss
+        train_info['policy_loss'] += policy_loss
+        train_info['dist_entropy'] += dist_entropy
         train_info['actor_grad_norm'] += actor_grad_norm
         train_info['critic_grad_norm'] += critic_grad_norm
         train_info['ratio'] += imp_weights.mean()
