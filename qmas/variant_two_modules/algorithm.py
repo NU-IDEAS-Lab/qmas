@@ -72,14 +72,38 @@ class QmasAlgorithm(R_MAPPO):
             thread_splits = torch.split(thread_indices, split_size)
 
             for e in range(self.args.diffusion_epoch):
-                # Split threads among predictors
                 data_generator = buffer.sample_trajectories(self.num_mini_batch, self.prediction_horizon)
                 for sample in data_generator:
+                    # For each sample, run each predictor's update in its own thread
+                    pred_threads = []
+                    pred_losses = [None] * self.num_predictors
+                    pred_guides = [None] * self.num_predictors
+
+                    def make_pred_thread(i, predictor):
+                        def run():
+                            # Use a local dict to accumulate losses for this predictor
+                            local_info = {'diffuser_loss': 0, 'guide_loss': 0}
+                            if len(thread_splits[i]) == 0:
+                                raise ValueError("Thread split is empty. Check prediction_ensemble_size and n_rollout_threads.")
+                            self.train_sample_diffuser(sample, local_info, predictor, thread_indices=thread_splits[i])
+                            pred_losses[i] = local_info['diffuser_loss']
+                            pred_guides[i] = local_info['guide_loss']
+                        return run
+
                     for i, predictor in enumerate(self.predictors):
-                        if len(thread_splits[i]) == 0:
-                            raise ValueError("Thread split is empty. Check prediction_ensemble_size and n_rollout_threads.")
-                        self.train_sample_diffuser(sample, predictor_info, predictor, thread_indices=thread_splits[i])
-                        num_diffusion_updates[i] += 1
+                        t = threading.Thread(target=make_pred_thread(i, predictor))
+                        pred_threads.append(t)
+                        t.start()
+
+                    for t in pred_threads:
+                        t.join()
+
+                    for i in range(self.num_predictors):
+                        if pred_losses[i] is not None:
+                            predictor_info['diffuser_loss'] += pred_losses[i]
+                            predictor_info['guide_loss'] += pred_guides[i]
+                            num_diffusion_updates[i] += 1
+
             total_updates = sum(num_diffusion_updates)
             if total_updates > 0:
                 predictor_info['diffuser_loss'] /= total_updates
