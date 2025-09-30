@@ -20,8 +20,6 @@ class QmasAlgorithm(R_MAPPO):
 
         super().__init__(args, policy, env, device)
 
-        self.device_predictor = device if args.cuda_idx_predictor == -1 else torch.device(f"cuda:{args.cuda_idx_predictor}")
-
         # Assume policy.predictors is a list of predictor modules (ensemble)
         self.predictors = policy.predictors
         self.num_predictors = len(self.predictors)
@@ -162,9 +160,9 @@ class QmasAlgorithm(R_MAPPO):
         # Get the visibility mask for the current agent.
 
         # Transfer tensors to the device.
-        trajectories = trajectories.to(self.device_predictor)
-        returns_batch = returns_batch.to(self.device_predictor)
-        fix_mask_batch = fix_mask_batch.to(self.device_predictor)
+        trajectories = trajectories.to(predictor.device)
+        returns_batch = returns_batch.to(predictor.device)
+        fix_mask_batch = fix_mask_batch.to(predictor.device)
 
         # Update the fix_mask. This determines which parts of the trajectory are fixed and which are predicted.
         # This applies to both update_diffusion and update_classifier.

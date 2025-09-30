@@ -13,7 +13,6 @@ class QmasPolicy(R_MAPPOPolicy):
 
     def __init__(self, args, obs_space, cent_obs_space, act_space, device=torch.device("cpu")):
         self.device = device
-        self.device_predictor = device if args.cuda_idx_predictor == -1 else torch.device(f"cuda:{args.cuda_idx_predictor}")
         self.lr = args.lr
         self.critic_lr = args.critic_lr
         self.opti_eps = args.opti_eps
@@ -42,14 +41,21 @@ class QmasPolicy(R_MAPPOPolicy):
 
         if args.prediction_ensemble_size > 1:
             print(f"Creating ensemble of {args.prediction_ensemble_size} predictors.")
-        self.predictors = [
-            Predictor(
+        
+        self.predictors = []
+        for i in range(args.prediction_ensemble_size):
+            if len(args.cuda_idx_predictor) > 0 and args.cuda and torch.cuda.is_available():
+                device_predictor = torch.device(f"cuda:{args.cuda_idx_predictor[i]}")
+            else:
+                device_predictor = self.device
+
+            predictor = Predictor(
                 obs_dim,
                 action_dim,
                 args,
-                device=self.device_predictor
-            ) for _ in range(args.prediction_ensemble_size)
-        ]
+                device=device_predictor
+            ).to(device_predictor)
+            self.predictors.append(predictor)
 
 
     def get_prediction(self, trajectory, visibility_mask=None, prediction_prev=None):
