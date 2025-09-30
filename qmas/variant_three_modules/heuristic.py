@@ -95,21 +95,12 @@ def _get_movement_action_heuristic_pemo(observation):
         ''' Returns the direction to the nearest extractor that is on a resource in the observation. '''
         layer_extractors = observation[pemo.MAP_LAYERS.AGENTS_EXTRACTOR]
         layer_resources = observation[pemo.MAP_LAYERS.RESOURCES_EXTANT]
-        positions_extractors = torch.argwhere(layer_extractors > 0.5)
-        positions_resources = torch.argwhere(layer_resources > 0.5)
-        if positions_extractors.shape[0] == 0 or positions_resources.shape[0] == 0:
+        mask = (layer_extractors > 0.5) & (layer_resources > 0.5)
+        positions = torch.argwhere(mask).float()
+        if positions.shape[0] == 0:
             return None
-        dmin = torch.inf
-        nearest_pos = None
-        for pos_e in positions_extractors:
-            for pos_r in positions_resources:
-                if torch.all(pos_e == pos_r):
-                    d = torch.linalg.norm(pos_e.float() - pos.float())
-                    if d < dmin:
-                        dmin = d
-                        nearest_pos = pos_e.float()
-        if nearest_pos is None:
-            return None
+        dists = torch.linalg.norm(positions - pos.float(), axis=1)
+        nearest_pos = positions[torch.argmin(dists)]
         direction = nearest_pos - pos
         return direction
 
