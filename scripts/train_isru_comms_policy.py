@@ -6,7 +6,7 @@ os.environ["WANDB__SERVICE_WAIT"] = "300"
 args = [
     "--experiment_name", "isru-comms-e500-20x20",
     "--project_name", "qmas",
-    "--env_class", "isru_zoo.isru_v0.parallel_env_map_obs",
+    "--env_class", "isru_zoo.isru_v0.parallel_env_flat_map_obs",
     "--user_name", "ideas-mas",
 
 	"--num_extractors", "2",
@@ -17,7 +17,7 @@ args = [
     "--hauler_capacity", "5",
 
     "--world_no_reset",
-    "--world_size", "20",
+    "--world_size", "50",
     "--num_obstacles", "0",
     "--num_resources", "20",
 
@@ -25,7 +25,7 @@ args = [
     "--observation_mask",
     # "--available_actions_mask",
 
-    "--num_env_steps", "30000000",
+    "--num_env_steps", "30",
     "--episode_length", "500",
     "--max_cycles", "500",
     "--num_mini_batch", "10",

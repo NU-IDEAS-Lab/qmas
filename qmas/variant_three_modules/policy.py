@@ -85,10 +85,7 @@ class QmasPolicy(QmasPolicyBase):
             obs, rnn_states_actor, masks, available_actions, deterministic)
 
         # Get movement actions from heuristic
-        movement_actions = torch.zeros((obs.shape[0], self.action_move_indices.shape[0]), dtype=comm_actions.dtype)
-        for i in range(obs.shape[0]):
-            action = get_movement_action_heuristic(obs[i], self.env_class)
-            movement_actions[i] = action
+        obs[obs]
 
         # Combine into full action dict
         actions = torch.zeros((comm_actions.shape[0], spaces.flatdim(self.full_act_space)), dtype=comm_actions.dtype, device=comm_actions.device)
