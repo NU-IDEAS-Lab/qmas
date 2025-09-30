@@ -20,6 +20,7 @@ args = [
     "--world_size", "20",
     "--num_obstacles", "0",
     "--num_resources", "20",
+    "--noisy_memory",
 
     "--observation_radius", "2",
     "--observation_mask",
@@ -40,7 +41,7 @@ args = [
 
     "--diffusion_model_type", "jannerunet",
     "--prediction_ensemble_size", "1",
-    "--prediction_history_window", "64",
+    "--prediction_history_window", "16",
     "--prediction_disable",
 
     "--seed", "0",
@@ -48,7 +49,7 @@ args = [
     "--n_rollout_threads", "100",
     "--n_training_threads", "32",
     "--cuda",
-    "--cuda_idx", "4",
+    "--cuda_idx", "7",
     # "--cuda_idx_predictor", "7",
 
     "--save_interval", "100000",
