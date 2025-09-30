@@ -45,6 +45,8 @@ def add_args(parser):
                         help="The maximum amount of resources a hauler can carry.")
     parser.add_argument("--hauler_pickup_threshold", type=float, default=1.5,
                         help="Max Euclidean distance (in grid units) a Hauler must be within of any Extractor to pick up resources.")
+    parser.add_argument("--noisy_memory", action="store_true",
+                        help="Whether to allow the agent to see areas which are explored but not currently visible, with added noise.")
     parser.add_argument("--render_mode", type=str, default="human",
                         choices=parallel_env.metadata["render_modes"],
                         help="The rendering mode for the environment.")
@@ -97,6 +99,7 @@ class parallel_env(ParallelEnv):
             available_actions_mask: bool = False,
             hauler_capacity: float = 10.0,
             hauler_pickup_threshold: float = 1.5,
+            noisy_memory: bool = False,
             render_mode: str = "human",
         ):
         """
@@ -119,6 +122,7 @@ class parallel_env(ParallelEnv):
         self.default_observation_radius = observation_radius
         self.default_hauler_capacity = hauler_capacity
         self.hauler_pickup_threshold = hauler_pickup_threshold
+        self.noisy_memory = noisy_memory
 
         # Set up entities.
         self.possible_agents = \
@@ -465,30 +469,31 @@ class parallel_env(ParallelEnv):
         ax_hr.axis("on")
 
         # Plot obstacles.
-        positions = np.argwhere(state[MAP_LAYERS.OBSTACLES] > 0)
+        positions = np.argwhere(state[MAP_LAYERS.OBSTACLES] > 0.5)
         ax_hr.scatter(positions[:, 1], positions[:, 0], label="Obstacle", marker="X", color="black", s=100)
 
         # Plot visible depots.
-        positions = np.argwhere(state[MAP_LAYERS.DEPOTS] > 0)
+        positions = np.argwhere(state[MAP_LAYERS.DEPOTS] > 0.5)
         ax_hr.scatter(positions[:, 1], positions[:, 0], label="Depot", marker=MARKER_DEPOT, color="cyan", s=100)
 
         # Plot visible resources.
-        positions = np.argwhere(state[MAP_LAYERS.RESOURCES_EXTANT] > 0)
+        positions = np.argwhere(state[MAP_LAYERS.RESOURCES_EXTANT] > 0.5)
         if positions.size > 0:
             ax_hr.scatter(positions[:, 1], positions[:, 0], marker="o", label=f"Resource", alpha=0.5)
         
         # Plot prospectors.
-        positions = np.argwhere(state[MAP_LAYERS.AGENTS_PROSPECTOR] > 0)
+        positions = np.argwhere(state[MAP_LAYERS.AGENTS_PROSPECTOR] > 0.5)
         if positions.size > 0:
             ax_hr.scatter(positions[:, 1], positions[:, 0], label="Prospector", marker=MARKER_PROSPECTOR, s=100, alpha=0.5, color="green", edgecolor="black")
         
         # Plot extractors.
-        positions = np.argwhere(state[MAP_LAYERS.AGENTS_EXTRACTOR] > 0)
+        positions = np.argwhere(state[MAP_LAYERS.AGENTS_EXTRACTOR] > 0.5)
         if positions.size > 0:
             ax_hr.scatter(positions[:, 1], positions[:, 0], label="Extractor", marker=MARKER_EXTRACTOR, s=100, alpha=0.5, color="yellow", edgecolor="black")
 
         # Plot haulers.
-        positions = np.argwhere(state[MAP_LAYERS.AGENTS_HAULER] > 0)
+        hauler_mask = state[MAP_LAYERS.AGENTS_HAULER] > 0.5
+        positions = np.argwhere(hauler_mask)
         if positions.size > 0:
             ax_hr.scatter(positions[:, 1], positions[:, 0], label="Hauler", marker=MARKER_HAULER, s=100, alpha=0.5, color="red", edgecolor="black")
 
@@ -502,7 +507,8 @@ class parallel_env(ParallelEnv):
 
         # Plot a partially-completed ring around the haulers to indicate their cargo.
         cargo_layer = MAP_LAYERS.RESOURCES_CARGO
-        positions = np.argwhere(state[cargo_layer] > 0)
+        cargo_mask = state[cargo_layer] > 0
+        positions = np.argwhere(cargo_mask & hauler_mask)
         for pos in positions:
             cargo_percentage = state[cargo_layer][pos[0], pos[1]]
             if cargo_percentage > 0:
@@ -1334,6 +1340,17 @@ class parallel_env_map_obs(parallel_env):
         MASK_OBSERVED = auto()
         MASK_RESOURCES_OBSERVED = auto()
         UNCERTAINTY = auto()
+    
+    # Layers of the map which are always fixed/visible.
+    MAP_LAYERS_FIXED = [
+        MAP_LAYERS.RELATIVE_POS_X,
+        MAP_LAYERS.RELATIVE_POS_Y,
+        MAP_LAYERS.DEPOTS,
+        MAP_LAYERS.MASK_OBSERVED,
+        MAP_LAYERS.MASK_RESOURCES_OBSERVED,
+        MAP_LAYERS.UNCERTAINTY,
+    ]
+
 
     @property
     def map_shape(self):
@@ -1397,16 +1414,14 @@ class parallel_env_map_obs(parallel_env):
         # Set up the visibility mask.
         obs_mask = np.ones(self.map_shape, dtype=bool)
 
-        # Calculate the visible area based on a circular observation radius.
+        # Update visibility information.
         if not force_visible:
+            # Calculate the visible area based on a circular observation radius.
             radius = agent.observation_radius
             pos = agent.grid_position
             visible = (np.arange(self.world_dims[0])[:, None] - pos[0]) ** 2 + \
                 (np.arange(self.world_dims[1])[None, :] - pos[1]) ** 2 <= radius ** 2
-            obs_mask[:, ~visible] = False
 
-        # Update visibility information.
-        if not force_visible:
             # Update the agent's observed resources mask.
             if agent.capabilities[CAP.PROSPECT]:
                 agent.mask_resources_observed[visible] = True
@@ -1417,20 +1432,15 @@ class parallel_env_map_obs(parallel_env):
             # Update the agent's observed area mask.
             agent.mask_observed[visible] = True
 
-        # The relative position layers are always visible.
-        obs_mask[self.MAP_LAYERS.RELATIVE_POS_X] = True
-        obs_mask[self.MAP_LAYERS.RELATIVE_POS_Y] = True
+            # Apply the visibility mask to the observation mask.
+            obs_mask[:, ~visible] = False
+
+        # Certain layers are always fixed/visible.
+        for layer in self.MAP_LAYERS_FIXED:
+            obs_mask[layer] = True
 
         # Obstacles are always visible once seen.
         obs_mask[self.MAP_LAYERS.OBSTACLES, agent.mask_observed] = True
-
-        # Depots are always visible.
-        obs_mask[self.MAP_LAYERS.DEPOTS] = True
-
-        # The masks themselves are always visible.
-        obs_mask[self.MAP_LAYERS.MASK_OBSERVED] = True
-        obs_mask[self.MAP_LAYERS.MASK_RESOURCES_OBSERVED] = True
-        obs_mask[self.MAP_LAYERS.UNCERTAINTY] = True
 
         # Load most map layers.
         layers[self.MAP_LAYERS.OBSTACLES] = self.map_obstacles
@@ -1490,9 +1500,22 @@ class parallel_env_map_obs(parallel_env):
         map_mask[self.MAP_LAYERS.RELATIVE_POS_Y] = True
 
         # Update the agent's persistent uncertainty map. First increase uncertainty everywhere by a small amount.
-        agent.uncertainty += np.random.uniform(0.03, 1.0, size=agent.uncertainty.shape).astype(np.float32)
+        agent.uncertainty += np.random.uniform(0.0001, 0.001, size=agent.uncertainty.shape).astype(np.float32)
         visible = map_mask[self.MAP_LAYERS.AGENTS_PROSPECTOR] # This layer should always represent visibility.
         agent.uncertainty[visible] = 0.0  
+
+        # If using noisy memory (for training), set all explored areas to
+        # visible and add noise to the explored but not directly visible areas.
+        if self.noisy_memory:
+            explored_not_visible = agent.mask_observed & ~visible
+            u = agent.uncertainty[explored_not_visible]
+            mean = np.zeros_like(u, dtype=np.float32)
+            std = u ** 0.5
+            for layer in self.MAP_LAYERS:
+                if layer not in self.MAP_LAYERS_FIXED:
+                    noise = np.random.normal(mean, std).astype(np.float32)
+                    map[layer, explored_not_visible] += noise
+                    map_mask[layer, explored_not_visible] = True
 
         # Build the normalized uncertainty layer.
         map_uncertainty = agent.uncertainty.copy()
