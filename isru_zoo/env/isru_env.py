@@ -245,9 +245,9 @@ class parallel_env(ParallelEnv):
         # Return the initial observation.
         observation = {}
         for agent in self.agents:
-            obs, obs_mask = self.observe(agent)
+            obs, fixed_mask = self.observe(agent)
             observation[agent] = obs
-            info[agent]["visibility_mask"] = obs_mask
+            info[agent]["visibility_mask"] = fixed_mask
         
         self.reset_count += 1
 
@@ -469,30 +469,30 @@ class parallel_env(ParallelEnv):
         ax_hr.axis("on")
 
         # Plot obstacles.
-        positions = np.argwhere(state[MAP_LAYERS.OBSTACLES] > 0.5)
+        positions = np.argwhere(state[MAP_LAYERS.OBSTACLES] > 0.9)
         ax_hr.scatter(positions[:, 1], positions[:, 0], label="Obstacle", marker="X", color="black", s=100)
 
         # Plot visible depots.
-        positions = np.argwhere(state[MAP_LAYERS.DEPOTS] > 0.5)
+        positions = np.argwhere(state[MAP_LAYERS.DEPOTS] > 0.9)
         ax_hr.scatter(positions[:, 1], positions[:, 0], label="Depot", marker=MARKER_DEPOT, color="cyan", s=100)
 
         # Plot visible resources.
-        positions = np.argwhere(state[MAP_LAYERS.RESOURCES_EXTANT] > 0.5)
+        positions = np.argwhere(state[MAP_LAYERS.RESOURCES_EXTANT] > 0.9)
         if positions.size > 0:
             ax_hr.scatter(positions[:, 1], positions[:, 0], marker="o", label=f"Resource", alpha=0.5)
         
         # Plot prospectors.
-        positions = np.argwhere(state[MAP_LAYERS.AGENTS_PROSPECTOR] > 0.5)
+        positions = np.argwhere(state[MAP_LAYERS.AGENTS_PROSPECTOR] > 0.9)
         if positions.size > 0:
             ax_hr.scatter(positions[:, 1], positions[:, 0], label="Prospector", marker=MARKER_PROSPECTOR, s=100, alpha=0.5, color="green", edgecolor="black")
         
         # Plot extractors.
-        positions = np.argwhere(state[MAP_LAYERS.AGENTS_EXTRACTOR] > 0.5)
+        positions = np.argwhere(state[MAP_LAYERS.AGENTS_EXTRACTOR] > 0.9)
         if positions.size > 0:
             ax_hr.scatter(positions[:, 1], positions[:, 0], label="Extractor", marker=MARKER_EXTRACTOR, s=100, alpha=0.5, color="yellow", edgecolor="black")
 
         # Plot haulers.
-        hauler_mask = state[MAP_LAYERS.AGENTS_HAULER] > 0.5
+        hauler_mask = state[MAP_LAYERS.AGENTS_HAULER] > 0.9
         positions = np.argwhere(hauler_mask)
         if positions.size > 0:
             ax_hr.scatter(positions[:, 1], positions[:, 0], label="Hauler", marker=MARKER_HAULER, s=100, alpha=0.5, color="red", edgecolor="black")
@@ -705,16 +705,16 @@ class parallel_env(ParallelEnv):
     def _state(self):
         ''' Returns the global state and mask of the environment.'''
 
-        return self._observe(self.possible_agents[0], force_visible=True)
+        return self._observe(self.possible_agents[0], global_state=True)
 
 
     def observe(self, agent, senders=set()):
         ''' Returns the observation for the given agent.'''
 
         # Collect local data.
-        local_obs, local_obs_mask = self._observe(agent)
+        local_obs, local_fixed_mask = self._observe(agent)
 
-        return local_obs, local_obs_mask
+        return local_obs, local_fixed_mask
 
 
     def available_actions(self, agent):
@@ -765,7 +765,7 @@ class parallel_env(ParallelEnv):
         return result_flattened
 
 
-    def _observe(self, agent, force_visible=False):
+    def _observe(self, agent, global_state=False):
         ''' Returns a populated state/observation space.'''
 
         # Build the combined map.
@@ -804,14 +804,14 @@ class parallel_env(ParallelEnv):
             if a != agent:
                 obs["agents"][a] = get_agent_state(a)
 
-        obs_mask = {
+        fixed_mask = {
             "role": np.ones_like(obs["role"], dtype=bool),
             "agents": {a: {k: np.ones_like(v, dtype=bool) for k, v in adict.items()} for a, adict in obs["agents"].items()},
             "depots": {d: {k: np.ones_like(v, dtype=bool) for k, v in ddict.items()} for d, ddict in obs["depots"].items()},
             "map": np.ones_like(obs["map"], dtype=bool),
         }
         
-        return obs, obs_mask
+        return obs, fixed_mask
 
 
     def step(self, action_dict={}, lastStep=False):
@@ -1002,12 +1002,12 @@ class parallel_env(ParallelEnv):
                     senders_set.add(sender)
 
             # Perform observation.
-            agent_observation, obs_mask = self.observe(
+            agent_observation, fixed_mask = self.observe(
                 agent,
                 senders=senders_set
             )
             obs_dict[agent] = agent_observation
-            info_dict[agent]["visibility_mask"] = obs_mask
+            info_dict[agent]["visibility_mask"] = fixed_mask
 
             # Check whether anything new was explored.
             # visible_cells = self._get_visible_cell_count(agent)
@@ -1245,7 +1245,7 @@ class parallel_env_simple_obs(parallel_env):
         })
 
 
-    def _observe(self, agent, force_visible=False):
+    def _observe(self, agent, global_state=False):
         ''' Fills in the state/observation space for the given agent. '''
 
         def relative_position(pos):
@@ -1300,7 +1300,7 @@ class parallel_env_simple_obs(parallel_env):
                 locations = locations[sorted_indices]
             obs["resources"][r][:locations.shape[0], :] = locations.astype(np.float32)
 
-        obs_mask = {
+        fixed_mask = {
             "agents": {
                 a: {
                     "position": np.ones_like(obs["agents"][a]["position"], dtype=bool),
@@ -1320,7 +1320,7 @@ class parallel_env_simple_obs(parallel_env):
             }
         }
 
-        return obs, obs_mask
+        return obs, fixed_mask
 
 
 class parallel_env_map_obs(parallel_env):
@@ -1370,7 +1370,7 @@ class parallel_env_map_obs(parallel_env):
         )
 
 
-    def _observe(self, agent, force_visible=False):
+    def _observe(self, agent, global_state=False):
         ''' Fills in the state/observation space for the given agent. '''
 
         layers = [None for _ in range(self.map_shape[0])]
@@ -1412,10 +1412,11 @@ class parallel_env_map_obs(parallel_env):
         map_rel_pos_y[:, :] = np.arange(self.world_dims[1], dtype=np.float32)[None, :] - agent.position[1]
         
         # Set up the visibility mask.
-        obs_mask = np.ones(self.map_shape, dtype=bool)
+        if global_state:
+            fixed_mask = np.zeros(self.map_shape, dtype=bool)
+        else:
+            fixed_mask = np.ones(self.map_shape, dtype=bool)
 
-        # Update visibility information.
-        if not force_visible:
             # Calculate the visible area based on a circular observation radius.
             radius = agent.observation_radius
             pos = agent.grid_position
@@ -1427,20 +1428,20 @@ class parallel_env_map_obs(parallel_env):
                 agent.mask_resources_observed[visible] = True
             else:
                 # Resources can only be observed for the first time by a prospector.
-                obs_mask[self.MAP_LAYERS.RESOURCES_EXTANT, ~agent.mask_resources_observed] = False
+                fixed_mask[self.MAP_LAYERS.RESOURCES_EXTANT, ~agent.mask_resources_observed] = False
             
             # Update the agent's observed area mask.
             agent.mask_observed[visible] = True
 
             # Apply the visibility mask to the observation mask.
-            obs_mask[:, ~visible] = False
+            fixed_mask[:, ~visible] = False
 
         # Certain layers are always fixed/visible.
         for layer in self.MAP_LAYERS_FIXED:
-            obs_mask[layer] = True
+            fixed_mask[layer] = True
 
         # Obstacles are always visible once seen.
-        obs_mask[self.MAP_LAYERS.OBSTACLES, agent.mask_observed] = True
+        fixed_mask[self.MAP_LAYERS.OBSTACLES, agent.mask_observed] = True
 
         # Load most map layers.
         layers[self.MAP_LAYERS.OBSTACLES] = self.map_obstacles
@@ -1460,24 +1461,24 @@ class parallel_env_map_obs(parallel_env):
         # Build the combined map.
         obs = np.stack(layers, axis=0).astype(np.float32)
         
-        return obs, obs_mask
+        return obs, fixed_mask
 
 
     def observe(self, agent, senders=set()):
         ''' Returns the observation for the given agent.'''
 
         # Collect local data.
-        local_obs, local_obs_mask = self._observe(agent)
+        local_obs, local_fixed_mask = self._observe(agent)
 
         # Set up the matrices.
         map = np.copy(local_obs)
-        map_mask = np.zeros_like(local_obs_mask, dtype=bool)
+        map_mask = np.zeros_like(local_fixed_mask, dtype=bool)
 
         # Handle communicated data.
         for sender in senders:
-            sender_obs, sender_obs_mask = self._observe(sender)
+            sender_obs, sender_fixed_mask = self._observe(sender)
 
-            sender_visible = sender_obs_mask == True
+            sender_visible = sender_fixed_mask == True
             map[sender_visible] = sender_obs[sender_visible]
             map_mask[sender_visible] = True
 
@@ -1486,8 +1487,8 @@ class parallel_env_map_obs(parallel_env):
             agent.mask_resources_observed |= sender.mask_resources_observed
         
         # Apply local observations (overwrite any communicated data).
-        map[local_obs_mask == True] = local_obs[local_obs_mask == True]
-        map_mask |= local_obs_mask
+        map[local_fixed_mask == True] = local_obs[local_fixed_mask == True]
+        map_mask |= local_fixed_mask
 
         # Update the observed masks.
         map[self.MAP_LAYERS.MASK_OBSERVED] = agent.mask_observed
@@ -1527,12 +1528,12 @@ class parallel_env_map_obs(parallel_env):
         
         # Update the local observation.
         combined_obs = map
-        combined_obs_mask = map_mask
+        combined_fixed_mask = map_mask
 
         # Apply visibility mask if required.
         if self.mask_observations:
-            combined_obs *= combined_obs_mask
-        return combined_obs, combined_obs_mask
+            combined_obs *= combined_fixed_mask
+        return combined_obs, combined_fixed_mask
 
 
     def render(self, pred=None, figsize=(9, 6), history_length=2, **kwargs):
@@ -1545,8 +1546,11 @@ class parallel_env_map_obs(parallel_env):
                 None
         '''
 
-        obs, obs_mask = self._observe(self.agents[0], force_visible=False)
-        return self.render_state(obs, figsize=figsize, visibility_mask=obs_mask[self.MAP_LAYERS.AGENTS_PROSPECTOR])
+        if pred is not None:
+            self.render_state(pred[-1, 0].numpy(), figsize=figsize)
+
+        obs, fixed_mask = self._observe(self.agents[0], global_state=False)
+        return self.render_state(obs, figsize=figsize, visibility_mask=fixed_mask[self.MAP_LAYERS.AGENTS_PROSPECTOR])
 
 
 class parallel_env_map_obs_comms_only(parallel_env_map_obs):
@@ -1562,7 +1566,7 @@ class parallel_env_map_obs_comms_only(parallel_env_map_obs):
         UNCERTAINTY = auto()
 
 
-    def _observe(self, agent, force_visible=False):
+    def _observe(self, agent, global_state=False):
         ''' Fills in the state/observation space for the given agent. '''
 
         layers = [None for _ in range(self.map_shape[0])]
@@ -1603,41 +1607,41 @@ class parallel_env_map_obs_comms_only(parallel_env_map_obs):
         map_rel_pos_y[:, :] = np.arange(self.world_dims[1], dtype=np.float32)[None, :] - agent.position[1]
         
         # Set up the visibility mask.
-        obs_mask = np.ones(self.map_shape, dtype=bool)
+        fixed_mask = np.ones(self.map_shape, dtype=bool)
 
         # Calculate the visible area based on a circular observation radius.
-        if not force_visible:
+        if not global_state:
             radius = agent.observation_radius
             pos = agent.grid_position
             visible = (np.arange(self.world_dims[0])[:, None] - pos[0]) ** 2 + \
                 (np.arange(self.world_dims[1])[None, :] - pos[1]) ** 2 <= radius ** 2
-            obs_mask[:, ~visible] = False
+            fixed_mask[:, ~visible] = False
 
         # Update visibility information.
-        if not force_visible:
+        if not global_state:
             # Update the agent's observed resources mask.
             if agent.capabilities[CAP.PROSPECT]:
                 agent.mask_resources_observed[visible] = True
             else:
                 # Resources can only be observed for the first time by a prospector.
-                obs_mask[self.MAP_LAYERS.RESOURCES_EXTANT, ~agent.mask_resources_observed] = False
+                fixed_mask[self.MAP_LAYERS.RESOURCES_EXTANT, ~agent.mask_resources_observed] = False
             
             # Update the agent's observed area mask.
             agent.mask_observed[visible] = True
 
         # The relative position layers are always visible.
-        obs_mask[self.MAP_LAYERS.RELATIVE_POS_X] = True
-        obs_mask[self.MAP_LAYERS.RELATIVE_POS_Y] = True
+        fixed_mask[self.MAP_LAYERS.RELATIVE_POS_X] = True
+        fixed_mask[self.MAP_LAYERS.RELATIVE_POS_Y] = True
 
         # Obstacles are always visible once seen.
-        obs_mask[self.MAP_LAYERS.OBSTACLES, agent.mask_observed] = True
+        fixed_mask[self.MAP_LAYERS.OBSTACLES, agent.mask_observed] = True
 
         # Depots are always visible.
-        obs_mask[self.MAP_LAYERS.DEPOTS] = True
+        fixed_mask[self.MAP_LAYERS.DEPOTS] = True
 
         # The masks themselves are always visible.
-        obs_mask[self.MAP_LAYERS.MASK_OBSERVED] = True
-        obs_mask[self.MAP_LAYERS.MASK_RESOURCES_OBSERVED] = True
+        fixed_mask[self.MAP_LAYERS.MASK_OBSERVED] = True
+        fixed_mask[self.MAP_LAYERS.MASK_RESOURCES_OBSERVED] = True
 
         # Load most map layers.
         layers[self.MAP_LAYERS.OBSTACLES] = self.map_obstacles
@@ -1656,7 +1660,7 @@ class parallel_env_map_obs_comms_only(parallel_env_map_obs):
         # Build the combined map.
         obs = np.stack(layers, axis=0).astype(np.float32)
         
-        return obs, obs_mask
+        return obs, fixed_mask
 
 
 class parallel_env_flat_map_obs(parallel_env):
@@ -1705,7 +1709,7 @@ class parallel_env_flat_map_obs(parallel_env):
         })
 
 
-    def _observe(self, agent, force_visible=False):
+    def _observe(self, agent, global_state=False):
         ''' Fills in the state/observation space for the given agent. '''
 
         def relative_position(pos):
@@ -1738,36 +1742,36 @@ class parallel_env_flat_map_obs(parallel_env):
         }
 
         # Set up visibility mask.
-        obs_mask_map = np.ones_like(map, dtype=bool)
-        if not force_visible:
+        fixed_mask_map = np.ones_like(map, dtype=bool)
+        if not global_state:
             radius = agent.observation_radius
             pos = agent.grid_position
             visible = (np.arange(self.world_dims[0])[:, None] - pos[0]) ** 2 + \
                 (np.arange(self.world_dims[1])[None, :] - pos[1]) ** 2 <= radius ** 2
-            obs_mask_map[~visible] = False
-        obs_mask_agent_id = np.ones_like(agent_id, dtype=bool)
-        obs_mask_target_relative = np.ones_like(target_relative, dtype=bool)
-        obs_mask_other_agents_pos = np.ones_like(other_agents_pos, dtype=bool)
+            fixed_mask_map[~visible] = False
+        fixed_mask_agent_id = np.ones_like(agent_id, dtype=bool)
+        fixed_mask_target_relative = np.ones_like(target_relative, dtype=bool)
+        fixed_mask_other_agents_pos = np.ones_like(other_agents_pos, dtype=bool)
 
         # Check whether the target is visibile.
-        if target is not None and not obs_mask_map[target[0], target[1]]:
-            obs_mask_target_relative[:] = False
+        if target is not None and not fixed_mask_map[target[0], target[1]]:
+            fixed_mask_target_relative[:] = False
         # Check whether other agents are visible.
         for i in range(other_agents_pos.shape[0]):
             if np.linalg.norm(other_agents_pos[i]) > agent.observation_radius:
-                obs_mask_other_agents_pos[i, :] = False
+                fixed_mask_other_agents_pos[i, :] = False
         
         # Build the combined mask.
-        obs_mask = {
-            "agent_role": obs_mask_agent_id,
+        fixed_mask = {
+            "agent_role": fixed_mask_agent_id,
             "agent_position": np.ones_like(obs["agent_position"], dtype=bool),
-            "target_relative": obs_mask_target_relative,
-            "other_agents_relative": obs_mask_other_agents_pos,
-            "map": obs_mask_map.flatten(),
+            "target_relative": fixed_mask_target_relative,
+            "other_agents_relative": fixed_mask_other_agents_pos,
+            "map": fixed_mask_map.flatten(),
             "uncertainty_map": np.ones(np.prod(self.world_dims), dtype=bool),  # Placeholder for uncertainty map
         }
 
-        return obs, obs_mask
+        return obs, fixed_mask
 
 
     def _get_target(self, agent, map):
@@ -1787,51 +1791,51 @@ class parallel_env_flat_map_obs(parallel_env):
         ''' Returns the observation for the given agent.'''
 
         # Collect local data.
-        local_obs, local_obs_mask = self._observe(agent)
+        local_obs, local_fixed_mask = self._observe(agent)
 
         # Set up the matrices.
         combined_obs = {}
-        combined_obs_mask = {}
+        combined_fixed_mask = {}
         # combined_obs = deepcopy(local_obs)
-        # combined_obs_mask = deepcopy(local_obs_mask)
+        # combined_fixed_mask = deepcopy(local_fixed_mask)
         combined_obs = local_obs
-        combined_obs_mask = local_obs_mask
+        combined_fixed_mask = local_fixed_mask
 
         for sender in senders:
-            sender_obs, sender_obs_mask = self._observe(sender)
+            sender_obs, sender_fixed_mask = self._observe(sender)
 
             # Agent role and ID - do not change.
             combined_obs["agent_role"] = local_obs["agent_role"]
-            combined_obs_mask["agent_role"] = local_obs_mask["agent_role"]
+            combined_fixed_mask["agent_role"] = local_fixed_mask["agent_role"]
             combined_obs["agent_position"] = local_obs["agent_position"]
-            combined_obs_mask["agent_position"] = local_obs_mask["agent_position"]
+            combined_fixed_mask["agent_position"] = local_fixed_mask["agent_position"]
 
             # Map - combine.
-            sender_visible = sender_obs_mask["map"] == True
+            sender_visible = sender_fixed_mask["map"] == True
             combined_obs["map"][sender_visible] = sender_obs["map"][sender_visible]
-            combined_obs_mask["map"][sender_visible] = True
+            combined_fixed_mask["map"][sender_visible] = True
 
             # Uncertainty map - do not change (placeholder).
             combined_obs["uncertainty_map"] = local_obs["uncertainty_map"]
-            combined_obs_mask["uncertainty_map"] = local_obs_mask["uncertainty_map"]
+            combined_fixed_mask["uncertainty_map"] = local_fixed_mask["uncertainty_map"]
 
             # Target - recalculate based on combined map.
             target = self._get_target(agent, combined_obs["map"].reshape(self.world_dims))
             combined_obs["target_relative"] = (target - agent.position).astype(np.float32) if target is not None else np.array([0.0, 0.0], dtype=np.float32)
-            if target is not None and not combined_obs_mask["map"][target[0] * self.world_dims[1] + target[1]]:
-                combined_obs_mask["target_relative"][:] = False
+            if target is not None and not combined_fixed_mask["map"][target[0] * self.world_dims[1] + target[1]]:
+                combined_fixed_mask["target_relative"][:] = False
             else:
-                combined_obs_mask["target_relative"][:] = True
+                combined_fixed_mask["target_relative"][:] = True
             
             # Other agents - combine.
             combined_obs["other_agents_relative"] = local_obs["other_agents_relative"]
-            combined_obs_mask["other_agents_relative"] = local_obs_mask["other_agents_relative"]
-            sender_visible = sender_obs_mask["other_agents_relative"] == True
+            combined_fixed_mask["other_agents_relative"] = local_fixed_mask["other_agents_relative"]
+            sender_visible = sender_fixed_mask["other_agents_relative"] == True
             combined_obs["other_agents_relative"][sender_visible] = sender_obs["other_agents_relative"][sender_visible]
-            combined_obs_mask["other_agents_relative"][sender_visible] = True
+            combined_fixed_mask["other_agents_relative"][sender_visible] = True
 
         if self.mask_observations:
-            result = combined_obs * combined_obs_mask
-            return result, combined_obs_mask
+            result = combined_obs * combined_fixed_mask
+            return result, combined_fixed_mask
         else:
-            return combined_obs, combined_obs_mask
+            return combined_obs, combined_fixed_mask
