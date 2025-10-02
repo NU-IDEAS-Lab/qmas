@@ -18,6 +18,8 @@ from onpolicy.runner.shared.base_runner import Runner
 
 from onpolicy.utils.shared_buffer_torchrl import SharedReplayBuffer
 
+from isru_zoo.env.isru_env import parallel_env_map_obs as pemo
+
 
 class PettingzooRunner(Runner):
     def __init__(self, config):
@@ -472,6 +474,11 @@ class PettingzooRunner(Runner):
                         # Strip the action part of the prediction.
                         prediction[:, agentIdx, :] = pred[0].reshape(prediction[:, agentIdx, :].shape)
                         uncertainty[:, agentIdx, :] = variance[0].reshape(uncertainty[:, agentIdx, :].shape)
+
+                        # Inject the uncertainty into the prediction.
+                        MAP_LAYERS = pemo.MAP_LAYERS
+                        # Use the mean uncertainty across all observation channels as the uncertainty value.
+                        prediction[:, agentIdx, MAP_LAYERS.UNCERTAINTY] = torch.mean(uncertainty[:, agentIdx, :], axis=1)
                 else:
                     prediction.zero_()
                     prediction[-1] = torch.from_numpy(obs[0])
