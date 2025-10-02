@@ -44,8 +44,13 @@ class QmasPolicy(R_MAPPOPolicy):
         
         self.predictors = []
         for i in range(args.prediction_ensemble_size):
-            if len(args.cuda_idx_predictor) > 0 and args.cuda and torch.cuda.is_available():
-                device_predictor = torch.device(f"cuda:{args.cuda_idx_predictor[i]}")
+            if args.cuda and torch.cuda.is_available():
+                if len(args.cuda_idx_predictor) > 1:
+                    device_predictor = torch.device(f"cuda:{args.cuda_idx_predictor[i]}")
+                elif len(args.cuda_idx_predictor) == 1:
+                    device_predictor = torch.device(f"cuda:{args.cuda_idx_predictor[0]}")
+                else:
+                    device_predictor = self.device
             else:
                 device_predictor = self.device
 

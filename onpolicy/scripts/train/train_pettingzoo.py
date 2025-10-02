@@ -184,7 +184,7 @@ def validateArgs(all_args):
     env = env_class() # use default arguments
 
     # Check that the number of cuda devices selected matches number of predictors.
-    if all_args.cuda and torch.cuda.is_available() and len(all_args.cuda_idx_predictor) > 0:
+    if all_args.cuda and torch.cuda.is_available() and len(all_args.cuda_idx_predictor) > 1:
         if all_args.prediction_ensemble_size != len(all_args.cuda_idx_predictor):
             raise ValueError(f"Number of cuda devices for predictor {len(all_args.cuda_idx_predictor)} does not match prediction_ensemble_size {all_args.prediction_ensemble_size}.")
 
