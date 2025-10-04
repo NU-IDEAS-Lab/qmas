@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-    "--experiment_name", "isru-comms-e500-20x20-ensemble1",
+    "--experiment_name", "isru-comms-e200-20x20-ensemble1",
     "--project_name", "qmas",
     "--env_class", "isru_zoo.isru_v0.parallel_env_map_obs",
     "--user_name", "ideas-mas",
@@ -27,8 +27,8 @@ args = [
     # "--available_actions_mask",
 
     "--num_env_steps", "30000000",
-    "--episode_length", "500",
-    "--max_cycles", "500",
+    "--episode_length", "200",
+    "--max_cycles", "200",
     "--num_mini_batch", "10",
 
     "--algorithm_class", "qmas.variant_three_modules.algorithm.QmasAlgorithm",
@@ -49,10 +49,10 @@ args = [
     "--n_rollout_threads", "90",
     "--n_training_threads", "32",
     "--cuda",
-    "--cuda_idx", "4",
-    "--cuda_idx_predictor", "3", "6", "5",
+    "--cuda_idx", "5",
+    "--cuda_idx_predictor", "6",
 
-    "--save_interval", "100000",
+    "--save_interval", "200000",
     "--save_checkpoints",
     "--results_dir", "/data/group/mas/qmas/results",
     "--use_wandb",
