@@ -836,6 +836,7 @@ class parallel_env(ParallelEnv):
         REWARD_DEPOSIT = 0.0
         REWARD_EXTRACT = 100000.0
         REWARD_CLOSEST_RESOURCE = 0.2
+        REWARD_UNCERTAINTY_REDUCTION = 0.1
         REWARD_DONE = 1000000.0
 
         self.step_count += 1
@@ -858,11 +859,15 @@ class parallel_env(ParallelEnv):
         stack_value = {a: True for a in self.possible_agents}
 
         # Pre-movement calculations.
+        uncertainty_sum_prev = {}
         visible_cells_prev = {}
         nearest_resource_dist_prev = {}
         for agent in self.agents:
             # Visible cells.
             visible_cells_prev[agent] = self._get_visible_cell_count(agent)
+
+            # Uncertainty sum.
+            uncertainty_sum_prev[agent] = agent.uncertainty.sum()
 
             # Nearest resource distance.
             resource_pos = self._get_nearest_resource(agent.position)
@@ -1042,6 +1047,11 @@ class parallel_env(ParallelEnv):
 
             r_intrinsic = 100.0 * r_deposited + 1.0 * r_cargo + 1.0 * r_exploration
             reward_dict[agent] += r_intrinsic
+
+            # Provide uncertainty reduction reward.
+            uncertainty_sum = agent.uncertainty.sum()
+            if uncertainty_sum < uncertainty_sum_prev[agent]:
+                reward_dict[agent] += REWARD_UNCERTAINTY_REDUCTION * (uncertainty_sum_prev[agent] - uncertainty_sum)
             
             # Provide a completion reward.
             if end_done:
