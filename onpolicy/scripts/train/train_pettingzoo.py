@@ -137,7 +137,9 @@ def parse_args(args, parser):
     parser.add_argument("--video_dir", type=str, default="", 
                         help="directory to save videos.")
     parser.add_argument("--cuda_idx", type=int, default=0, 
-                        help="Index of the GPU to use")
+                        help="Index of the GPU to use for policy and critic networks.")
+    parser.add_argument("--cuda_idx_predictor", type=int, default=[], nargs="+",
+                        help="Index of the GPU to use for world model predictor network.")
     
     # Parse once to get the environment name.
     parsed_args, unknown_args = parser.parse_known_args(args)
@@ -181,6 +183,11 @@ def validateArgs(all_args):
     env_class = get_environment_class(all_args)
     env = env_class() # use default arguments
 
+    # Check that the number of cuda devices selected matches number of predictors.
+    if all_args.cuda and torch.cuda.is_available() and len(all_args.cuda_idx_predictor) > 1:
+        if all_args.prediction_ensemble_size != len(all_args.cuda_idx_predictor):
+            raise ValueError(f"Number of cuda devices for predictor {len(all_args.cuda_idx_predictor)} does not match prediction_ensemble_size {all_args.prediction_ensemble_size}.")
+
     # Set the environment name if it is not set.
     if all_args.env_name == "" and hasattr(env, "metadata") and "name" in env.metadata:
         all_args.env_name = env.metadata["name"]
@@ -206,6 +213,9 @@ def main(args):
     # Torch configuration.
     # This is equivalent to torch.backends.cuda.matmul.allow_tf32 = True
     torch.set_float32_matmul_precision('high')
+    torch._dynamo.config.compiled_autograd = True
+    torch.backends.cudnn.benchmark = True
+
 
     # cuda
     if all_args.cuda and torch.cuda.is_available():
@@ -310,7 +320,7 @@ def main(args):
         eval_envs.close()
 
     # Save the models.
-    runner.save()
+    runner.save(final=True)
 
     if all_args.use_wandb:
         run.finish()

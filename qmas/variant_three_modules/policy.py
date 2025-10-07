@@ -15,13 +15,17 @@ class QmasPolicy(QmasPolicyBase):
         super().__init__(args, obs_space, cent_obs_space, comm_act_space, device)
         self.full_act_space = act_space
 
+        self.env_class = args.env_class
+
         # Use the flatten function to determine which indices of actions correspond to communication vs movement.
         action = self.full_act_space.sample()
-        action["communication"] = 123456789.0 # Unique value to identify communication part.
-        action_flat = torch.from_numpy(spaces.flatten(self.full_act_space, action))
-        self.action_comm_mask = action_flat == 123456789.0
-        self.action_comm_indices = torch.argwhere(self.action_comm_mask)[0]
-        self.action_move_indices = torch.argwhere(~self.action_comm_mask)[0]
+        DUMMY_VALUE = 123456789.0 # Unique value to identify communication part.
+        action["communication"]["request"] = torch.tensor([DUMMY_VALUE])
+        action["communication"]["relative_position"] = torch.tensor([DUMMY_VALUE, DUMMY_VALUE]) 
+        action_flat = torch.from_numpy(spaces.flatten(self.full_act_space, action)).float()
+        self.action_comm_mask = torch.isclose(action_flat, torch.tensor(DUMMY_VALUE, dtype=torch.float32))
+        self.action_comm_indices = torch.argwhere(self.action_comm_mask).squeeze(-1)
+        self.action_move_indices = torch.argwhere(~self.action_comm_mask).squeeze(-1)
 
 
     def get_actions(self, cent_obs, obs, rnn_states_actor, rnn_states_critic, masks, available_actions=None, deterministic=False):
@@ -35,9 +39,9 @@ class QmasPolicy(QmasPolicyBase):
             cent_obs, obs, rnn_states_actor, rnn_states_critic, masks, available_actions, deterministic)
 
         # Get movement actions from heuristic
-        movement_actions = torch.zeros(comm_actions.shape, dtype=comm_actions.dtype)
+        movement_actions = torch.zeros((obs.shape[0], self.action_move_indices.shape[0]), dtype=comm_actions.dtype)
         for i in range(obs.shape[0]):
-            action = get_movement_action_heuristic(obs[i])
+            action = get_movement_action_heuristic(obs[i], self.env_class)
             movement_actions[i] = action
 
         # Combine into full action dict
@@ -81,9 +85,9 @@ class QmasPolicy(QmasPolicyBase):
             obs, rnn_states_actor, masks, available_actions, deterministic)
 
         # Get movement actions from heuristic
-        movement_actions = torch.zeros(comm_actions.shape, dtype=comm_actions.dtype)
+        movement_actions = torch.zeros((obs.shape[0], self.action_move_indices.shape[0]), dtype=comm_actions.dtype)
         for i in range(obs.shape[0]):
-            action = get_movement_action_heuristic(obs[i])
+            action = get_movement_action_heuristic(obs[i], self.env_class)
             movement_actions[i] = action
 
         # Combine into full action dict

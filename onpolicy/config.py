@@ -304,6 +304,8 @@ def get_config():
                         default=False, help='use a linear schedule on the learning rate')
     # save parameters
     parser.add_argument("--save_interval", type=int, default=1, help="time duration between contiunous twice models saving.")
+    parser.add_argument("--save_checkpoints", default=False, action="store_true",
+                        help="Whether to store a checkpoint at each save interval.")
     parser.add_argument("--results_dir", type=str, default="", help="file path at which to store results")
 
     # log parameters
@@ -342,6 +344,10 @@ def get_config():
                     help="Whether to apply visibility mask to observations during policy training")
 
     # diffuser parameters
+    parser.add_argument("--episode_fraction_start_prediction", type=float, default=0.0,
+                        help="The fraction of episodes at which to start training the prediction model.")
+    parser.add_argument("--episode_fraction_stop_policy", type=float, default=1.0,
+                        help="The fraction of episodes at which to stop training the policy.")
     parser.add_argument("--prediction_ensemble_size", type=int, default=1)
     parser.add_argument("--prediction_history_window", type=int, default=8)
     parser.add_argument("--prediction_disable", action=argparse.BooleanOptionalAction, default=False)
@@ -350,6 +356,8 @@ def get_config():
     parser.add_argument("--diffusion_model_type", type=str, default="dit1d",
                         choices=["jannerunet", "dit1d"],
                         help="Type of diffusion model to use")
+    parser.add_argument("--diffusion_epoch", type=int, default=5,
+                        help="Number of epochs to train the diffusion model for at each training step")
 
     # Torch parameters.
     parser.add_argument("--torch_compile", action="store_true",

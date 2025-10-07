@@ -3,6 +3,7 @@ import os
 import importlib
 import numpy as np
 import torch
+import yaml
 from tensorboardX import SummaryWriter
 from onpolicy.utils.shared_buffer import SharedReplayBuffer
 
@@ -153,22 +154,39 @@ class Runner(object):
         next_values = np.array(np.split(_t2n(next_values), self.n_rollout_threads))
         self.buffer.compute_returns(next_values, self.trainer.value_normalizer)
     
-    def train(self):
+    def train(self, episode=None, episodes=None):
         """Train policies with data in buffer. """
         self.trainer.prep_training()
-        train_infos = self.trainer.train(self.buffer)      
+        train_infos = self.trainer.train(self.buffer, episode=episode, episodes=episodes)      
         self.buffer.after_update()
         return train_infos
 
-    def save(self, episode=0):
+    def save(self, episode=0, final=False):
         """Save policy's actor and critic networks."""
+
+        if self.all_args.save_checkpoints and not final:
+            # Create subdirectory for this episode.
+            save_dir = os.path.join(self.save_dir, f"episode_{episode}")
+            # Ensure that the directory exists.
+            if not os.path.exists(save_dir):
+                os.makedirs(save_dir)
+        else:
+            save_dir = self.save_dir
+
         if hasattr(self.policy, "save") and callable(self.policy.save):
-            self.policy.save(self.save_dir, episode)
+            self.policy.save(save_dir, episode)
         else:
             policy_actor = self.trainer.policy.actor
-            torch.save(policy_actor.state_dict(), str(self.save_dir) + "/actor.pt")
+            torch.save(policy_actor.state_dict(), str(save_dir) + "/actor.pt")
             policy_critic = self.trainer.policy.critic
-            torch.save(policy_critic.state_dict(), str(self.save_dir) + "/critic.pt")
+            torch.save(policy_critic.state_dict(), str(save_dir) + "/critic.pt")
+        
+        # Export wandb config to file.
+        if self.all_args.use_wandb:
+            conf = wandb.config._as_dict()
+            with open(os.path.join(save_dir, 'config.yaml'), 'w') as f:
+                yaml.safe_dump(conf, f)
+
 
     def restore(self, model_dir):
         """Restore policy's networks from a saved model."""

@@ -12,7 +12,8 @@ class Predictor(torch.nn.Module):
         self.args = args
         self.device = device
 
-        transition_dim = obs_dim + action_dim
+        # transition_dim = obs_dim + action_dim
+        transition_dim = obs_dim
 
         self.prediction_horizon = args.prediction_history_window
 
@@ -20,15 +21,15 @@ class Predictor(torch.nn.Module):
 
         # Weight actions more heavily in the loss.
         loss_weight = torch.ones((self.prediction_horizon, transition_dim))
-        loss_weight[:, :action_dim] = 1.0
+        # loss_weight[:, :action_dim] = 1.0
         
         # Create Diffuser model.
         print(f"QmasPolicy: Using diffusion model type {args.diffusion_model_type} with prediction horizon {self.prediction_horizon} and transition dimension {transition_dim}.")
         if args.diffusion_model_type == "jannerunet":
             diffuser_base = JannerUNet1d(
-                transition_dim, model_dim=32, emb_dim=32, dim_mult=(1, 2, 4, 8),
+                transition_dim, model_dim=32, emb_dim=32, dim_mult=(1, 2),
                 timestep_emb_type="positional",
-                attention=False, kernel_size=5
+                attention=False, kernel_size=3
             )
             guide_base = HalfJannerUNet1d(
                 horizon=self.prediction_horizon,
@@ -36,7 +37,7 @@ class Predictor(torch.nn.Module):
                 out_dim=1,
                 model_dim=32,
                 emb_dim=32,
-                dim_mult=(1, 2, 4, 8),
+                dim_mult=(1, 2),
                 timestep_emb_type="positional"
             )
         elif args.diffusion_model_type == "dit1d":
@@ -71,6 +72,7 @@ class Predictor(torch.nn.Module):
             None,
             fix_mask,
             loss_weight,
+            diffusion_steps=256,
             classifier=self.guide,
             predict_noise=False
         ).to(device)
