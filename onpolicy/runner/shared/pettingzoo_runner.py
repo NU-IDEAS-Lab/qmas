@@ -18,6 +18,8 @@ from onpolicy.runner.shared.base_runner import Runner
 
 from onpolicy.utils.shared_buffer_torchrl import SharedReplayBuffer
 
+from isru_zoo.env.isru_env import parallel_env_map_obs as pemo
+
 
 class PettingzooRunner(Runner):
     def __init__(self, config):
@@ -195,6 +197,11 @@ class PettingzooRunner(Runner):
         visibility_mask = None
         if "visibility_mask" in infos[0]:
             visibility_mask = np.array([info["visibility_mask"] for info in infos])
+        
+        # Get extra state information from infos.
+        state_visibility_mask = None
+        if "state_visibility_mask" in infos[0]:
+            state_visibility_mask = np.array([info["state_visibility_mask"] for info in infos])
 
         # Add information to the logger.
         keys = infos[0].keys()
@@ -222,7 +229,8 @@ class PettingzooRunner(Runner):
             masks=masks,
             delta_steps=delta_steps,
             available_actions=available_actions,
-            visibility_mask=visibility_mask
+            visibility_mask=visibility_mask,
+            state_visibility_mask=state_visibility_mask
         )
 
 
@@ -466,6 +474,11 @@ class PettingzooRunner(Runner):
                         # Strip the action part of the prediction.
                         prediction[:, agentIdx, :] = pred[0].reshape(prediction[:, agentIdx, :].shape)
                         uncertainty[:, agentIdx, :] = variance[0].reshape(uncertainty[:, agentIdx, :].shape)
+
+                        # Inject the uncertainty into the prediction.
+                        MAP_LAYERS = pemo.MAP_LAYERS
+                        # Use the mean uncertainty across all observation channels as the uncertainty value.
+                        prediction[:, agentIdx, MAP_LAYERS.UNCERTAINTY] = torch.mean(uncertainty[:, agentIdx, :], axis=1)
                 else:
                     prediction.zero_()
                     prediction[-1] = torch.from_numpy(obs[0])

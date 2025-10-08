@@ -4,9 +4,9 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-    "--experiment_name", "isru-comms-e500-20x20",
+    "--experiment_name", "isru-comms-e200-20x20-worldReset",
     "--project_name", "qmas",
-    "--env_class", "isru_zoo.isru_v0.parallel_env_flat_map_obs",
+    "--env_class", "isru_zoo.isru_v0.parallel_env_map_obs",
     "--user_name", "ideas-mas",
 
 	"--num_extractors", "2",
@@ -17,17 +17,18 @@ args = [
     "--hauler_capacity", "5",
 
     "--world_no_reset",
-    "--world_size", "50",
+    "--world_size", "20",
     "--num_obstacles", "0",
     "--num_resources", "20",
+    "--noisy_memory",
 
     "--observation_radius", "2",
     "--observation_mask",
     # "--available_actions_mask",
 
-    "--num_env_steps", "30",
-    "--episode_length", "500",
-    "--max_cycles", "500",
+    "--num_env_steps", "30000000",
+    "--episode_length", "200",
+    "--max_cycles", "200",
     "--num_mini_batch", "10",
 
     "--algorithm_class", "qmas.variant_three_modules.algorithm.QmasAlgorithm",
@@ -40,7 +41,7 @@ args = [
 
     "--diffusion_model_type", "jannerunet",
     "--prediction_ensemble_size", "1",
-    "--prediction_history_window", "64",
+    "--prediction_history_window", "16",
     "--prediction_disable",
 
     "--seed", "0",
@@ -48,7 +49,7 @@ args = [
     "--n_rollout_threads", "100",
     "--n_training_threads", "32",
     "--cuda",
-    "--cuda_idx", "4",
+    "--cuda_idx", "2",
     # "--cuda_idx_predictor", "7",
 
     "--save_interval", "100000",

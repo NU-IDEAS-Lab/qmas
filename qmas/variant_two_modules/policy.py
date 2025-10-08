@@ -13,7 +13,6 @@ class QmasPolicy(R_MAPPOPolicy):
 
     def __init__(self, args, obs_space, cent_obs_space, act_space, device=torch.device("cpu")):
         self.device = device
-        self.device_predictor = device if args.cuda_idx_predictor == -1 else torch.device(f"cuda:{args.cuda_idx_predictor}")
         self.lr = args.lr
         self.critic_lr = args.critic_lr
         self.opti_eps = args.opti_eps
@@ -42,14 +41,26 @@ class QmasPolicy(R_MAPPOPolicy):
 
         if args.prediction_ensemble_size > 1:
             print(f"Creating ensemble of {args.prediction_ensemble_size} predictors.")
-        self.predictors = [
-            Predictor(
+        
+        self.predictors = []
+        for i in range(args.prediction_ensemble_size):
+            if args.cuda and torch.cuda.is_available():
+                if len(args.cuda_idx_predictor) > 1:
+                    device_predictor = torch.device(f"cuda:{args.cuda_idx_predictor[i]}")
+                elif len(args.cuda_idx_predictor) == 1:
+                    device_predictor = torch.device(f"cuda:{args.cuda_idx_predictor[0]}")
+                else:
+                    device_predictor = self.device
+            else:
+                device_predictor = self.device
+
+            predictor = Predictor(
                 obs_dim,
                 action_dim,
                 args,
-                device=self.device_predictor
-            ) for _ in range(args.prediction_ensemble_size)
-        ]
+                device=device_predictor
+            ).to(device_predictor)
+            self.predictors.append(predictor)
 
 
     def get_prediction(self, trajectory, visibility_mask=None, prediction_prev=None):
@@ -66,8 +77,13 @@ class QmasPolicy(R_MAPPOPolicy):
 
         predictions = []
         for predictor in self.predictors:
-            pred = predictor.get_prediction(trajectory.clone(), visibility_mask.clone(), prediction_prev)
-            predictions.append(pred.unsqueeze(0))
+            if prediction_prev is not None:
+                prediction_prev = prediction_prev.to(predictor.device)
+            pred = predictor.get_prediction(
+                trajectory.clone().to(predictor.device),
+                visibility_mask.clone().to(predictor.device),
+                prediction_prev)
+            predictions.append(pred.unsqueeze(0).to(self.device))
         predictions = torch.cat(predictions, dim=0)  # Shape: (num_predictors, T, D_out)
         prediction = predictions.mean(dim=0)
         uncertainty = predictions.var(dim=0)

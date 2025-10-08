@@ -112,17 +112,18 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
                 drop_last=True
             ),
             compilable=True
-            # sampler=TrajectorySampler(
-            #     trajectory_length=5
-            # )
         )
+
+        # The constructor automatically creates an empty Compose() transform.
+        # We don't want this as it slows down the ::add method.
+        self._transform = None
 
         print(f"Buffer initialized with episode length {args.episode_length}")
 
 
     def insert(self, share_obs, obs, rnn_states_actor, rnn_states_critic, actions, action_log_probs,
                value_preds, rewards, masks, bad_masks=None, active_masks=None, delta_steps=None, available_actions=None,
-               visibility_mask=None, legacy_mode=True):
+               visibility_mask=None, state_visibility_mask=None, legacy_mode=True):
         """
         Insert data into the buffer.
         :param share_obs: (argparse.Namespace) arguments containing relevant model, policy, and env information.
@@ -152,6 +153,8 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
             delta_steps = np.ones_like(value_preds)
         if visibility_mask is None:
             visibility_mask = np.ones_like(obs)
+        if state_visibility_mask is None:
+            state_visibility_mask = np.zeros_like(share_obs)
         
         # Convert any np.object arrays to tensors of NonTensorData.
         if isinstance(obs, np.ndarray) and obs.dtype == object:
@@ -197,11 +200,13 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
                 'bad_masks': bad_masks, #+1
                 'active_masks': active_masks, #+1
                 'delta_steps': delta_steps,
-                'available_actions': available_actions, #+1
                 'visibility_mask': visibility_mask, #+1
+                'state_visibility_mask': state_visibility_mask, #+1
             },
             device='cpu',
         )
+        if available_actions is not None:
+            data['available_actions'] = available_actions #+1
 
         # In legacy mode, some data is added for timestep t, others for timestep t+1.
         if legacy_mode:
@@ -474,7 +479,7 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
         active_masks_batch = sample["active_masks"].reshape(*index_shape, 1)
         old_action_log_probs_batch = sample["action_log_probs"].reshape(*index_shape, sample["action_log_probs"].shape[-1])
         adv_targ = sample["advantages"].reshape(*index_shape, 1)
-        if sample["available_actions"] == None or not isinstance(sample["available_actions"], torch.Tensor):
+        if not "available_actions" in sample or sample["available_actions"] == None or not isinstance(sample["available_actions"], torch.Tensor):
             available_actions_batch = None
         else:
             available_actions_batch = sample["available_actions"].reshape(*index_shape, sample["available_actions"].shape[-1])
@@ -501,7 +506,7 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
         rnn_states_actor = sample["rnn_states_actor"].flatten(0, 1)
         rnn_states_critic = sample["rnn_states_critic"].flatten(0, 1)
         masks = sample["masks"].flatten(0, 1)
-        if np.any(sample["available_actions"] == None):
+        if not "available_actions" in sample or np.any(sample["available_actions"] == None):
             available_actions = None
         else:
             available_actions = sample["available_actions"].flatten(0, 1)
@@ -567,4 +572,6 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
     
     @property
     def available_actions(self):
+        if not "available_actions" in self.storage._storage.keys():
+            return None
         return self["available_actions"]

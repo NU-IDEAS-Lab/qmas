@@ -42,15 +42,15 @@ def _get_movement_action_heuristic_pemo(observation):
 
         # Determine role based on agent layers.
         stacked = False
-        if observation[pemo.MAP_LAYERS.AGENTS_EXTRACTOR, agent_pos[0], agent_pos[1]] >= 255.0:
+        if observation[pemo.MAP_LAYERS.AGENTS_EXTRACTOR, agent_pos[0], agent_pos[1]] >= 2.0:
             capabilities = {CAP.EXTRACT: True, CAP.CARRY: False, CAP.PROSPECT: False}
-            stacked = observation[pemo.MAP_LAYERS.AGENTS_EXTRACTOR, agent_pos[0], agent_pos[1]] > 255.0
-        elif observation[pemo.MAP_LAYERS.AGENTS_HAULER, agent_pos[0], agent_pos[1]] >= 255.0:
+            stacked = observation[pemo.MAP_LAYERS.AGENTS_EXTRACTOR, agent_pos[0], agent_pos[1]] > 2.0
+        elif observation[pemo.MAP_LAYERS.AGENTS_HAULER, agent_pos[0], agent_pos[1]] >= 2.0:
             capabilities = {CAP.EXTRACT: False, CAP.CARRY: True, CAP.PROSPECT: False}
-            stacked = observation[pemo.MAP_LAYERS.AGENTS_HAULER, agent_pos[0], agent_pos[1]] > 255.0
-        elif observation[pemo.MAP_LAYERS.AGENTS_PROSPECTOR, agent_pos[0], agent_pos[1]] >= 255.0:
+            stacked = observation[pemo.MAP_LAYERS.AGENTS_HAULER, agent_pos[0], agent_pos[1]] > 2.0
+        elif observation[pemo.MAP_LAYERS.AGENTS_PROSPECTOR, agent_pos[0], agent_pos[1]] >= 2.0:
             capabilities = {CAP.EXTRACT: False, CAP.CARRY: False, CAP.PROSPECT: True}
-            stacked = observation[pemo.MAP_LAYERS.AGENTS_PROSPECTOR, agent_pos[0], agent_pos[1]] > 255.0
+            stacked = observation[pemo.MAP_LAYERS.AGENTS_PROSPECTOR, agent_pos[0], agent_pos[1]] > 2.0
         else:
             raise ValueError("Could not determine agent capabilities from observation.")
 
@@ -69,8 +69,8 @@ def _get_movement_action_heuristic_pemo(observation):
 
         # Create mask.
         mask_self = (rel_pos_x == 0) & (rel_pos_y == 0)
-        mask_extractors = (extractors > 0) & ~mask_self
-        mask = (resources > 0) & ~mask_extractors
+        mask_extractors = (extractors > 0.5) & ~mask_self
+        mask = (resources > 0.5) & ~mask_extractors
 
         positions = torch.argwhere(mask).float()
         if positions.shape[0] == 0:
@@ -83,7 +83,7 @@ def _get_movement_action_heuristic_pemo(observation):
     def obs_nearest_depot(pos):
         ''' Returns the direction to the nearest depot in the observation. '''
         layer = observation[pemo.MAP_LAYERS.DEPOTS]
-        positions = torch.argwhere(layer > 0).float()
+        positions = torch.argwhere(layer > 0.5).float()
         if positions.shape[0] == 0:
             return None
         dists = torch.linalg.norm(positions - pos.float(), axis=1)
@@ -95,27 +95,18 @@ def _get_movement_action_heuristic_pemo(observation):
         ''' Returns the direction to the nearest extractor that is on a resource in the observation. '''
         layer_extractors = observation[pemo.MAP_LAYERS.AGENTS_EXTRACTOR]
         layer_resources = observation[pemo.MAP_LAYERS.RESOURCES_EXTANT]
-        positions_extractors = torch.argwhere(layer_extractors > 0)
-        positions_resources = torch.argwhere(layer_resources > 0)
-        if positions_extractors.shape[0] == 0 or positions_resources.shape[0] == 0:
+        mask = (layer_extractors > 0.5) & (layer_resources > 0.5)
+        positions = torch.argwhere(mask).float()
+        if positions.shape[0] == 0:
             return None
-        dmin = torch.inf
-        nearest_pos = None
-        for pos_e in positions_extractors:
-            for pos_r in positions_resources:
-                if torch.all(pos_e == pos_r):
-                    d = torch.linalg.norm(pos_e.float() - pos.float())
-                    if d < dmin:
-                        dmin = d
-                        nearest_pos = pos_e.float()
-        if nearest_pos is None:
-            return None
+        dists = torch.linalg.norm(positions - pos.float(), axis=1)
+        nearest_pos = positions[torch.argmin(dists)]
         direction = nearest_pos - pos
         return direction
 
     def obs_nearest_unexplored(pos):
         ''' Returns the direction to the nearest unexplored area in the observation. '''
-        explored = observation[pemo.MAP_LAYERS.MASK_RESOURCES_OBSERVED] > 0
+        explored = observation[pemo.MAP_LAYERS.MASK_RESOURCES_OBSERVED] > 0.5
         positions = torch.argwhere(~explored).float()
         if positions.shape[0] == 0:
             return None
