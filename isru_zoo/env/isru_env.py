@@ -1005,6 +1005,19 @@ class parallel_env(ParallelEnv):
                 )
                 if sender is not None:
                     senders_set.add(sender)
+                
+                # Determine the visible cells around the requested position.
+                visible = self._get_observation_radius_mask(absolute_request_position, self.default_observation_radius)
+
+                # Calculate communication statistics.
+                comm_newly_visible_cells = np.sum(visible & ~agent.mask_observed)
+                comm_uncertainty = agent.uncertainty[visible]
+
+                # Provide reward based on the number of newly visible cells in that area.
+                reward_dict[agent] += 1.0 * comm_newly_visible_cells / np.sum(visible)
+
+                # Provide reward based on the level of uncertainty of cells in that area.
+                reward_dict[agent] += 0.1 * np.mean(comm_uncertainty)
 
             # Perform observation.
             agent_observation, fixed_mask = self.observe(
@@ -1020,22 +1033,6 @@ class parallel_env(ParallelEnv):
                 # reward_dict[agent] += REWARD_NO_EXPLORATION
                 # stack_value[agent] = False
             
-            # Provide so-called "stacked value" for reward shaping.
-            # if stack_value[agent]:
-            #     agent.stacked_value += 1
-            # else:
-            #     agent.stacked_value = 0
-            # reward_dict[agent] += 1.5 ** agent.stacked_value
-
-            # Provide reward shaping for moving closer to the nearest resource.
-            # nearest_resource = self._get_nearest_resource(agent.position)
-            # if nearest_resource is not None and agent in nearest_resource_dist_prev:
-            #     nearest_resource_dist = np.linalg.norm(agent.position - nearest_resource)
-            #     if nearest_resource_dist_prev[agent] > nearest_resource_dist:
-            #         reward_dict[agent] -= REWARD_CLOSEST_RESOURCE
-            #     else:
-            #         reward_dict[agent] += REWARD_CLOSEST_RESOURCE
-
             # Provide intrinsic reward.
             total_cells = np.prod(self.world_dims)
             visible_resource_cells = self._get_visible_cell_count(agent, use_resource_mask=True)
@@ -1048,10 +1045,10 @@ class parallel_env(ParallelEnv):
             r_intrinsic = 100.0 * r_deposited + 1.0 * r_cargo + 1.0 * r_exploration
             reward_dict[agent] += r_intrinsic
 
-            # Provide uncertainty reduction reward.
-            uncertainty_sum = agent.uncertainty.sum()
-            if uncertainty_sum < uncertainty_sum_prev[agent]:
-                reward_dict[agent] += REWARD_UNCERTAINTY_REDUCTION * (uncertainty_sum_prev[agent] - uncertainty_sum)
+            # Provide uncertainty reduction reward. TODO: Only give this reward if we had requested comms.
+            # uncertainty_sum = agent.uncertainty.sum()
+            # if uncertainty_sum < uncertainty_sum_prev[agent]:
+            #     reward_dict[agent] += REWARD_UNCERTAINTY_REDUCTION * (uncertainty_sum_prev[agent] - uncertainty_sum)
             
             # Provide a completion reward.
             if end_done:
@@ -1116,6 +1113,15 @@ class parallel_env(ParallelEnv):
                     dmin = d
                     nearest_pos = loc
         return nearest_pos
+
+
+    def _get_observation_radius_mask(self, position, radius):
+        '''
+        Returns a boolean mask of the observation radius around the given position.
+        '''
+        visible = (np.arange(self.world_dims[0])[:, None] - position[0]) ** 2 + \
+            (np.arange(self.world_dims[1])[None, :] - position[1]) ** 2 <= radius ** 2
+        return visible
 
 
     def _get_visible_cell_count(self, agent, use_resource_mask=False):
@@ -1420,18 +1426,15 @@ class parallel_env_map_obs(parallel_env):
         map_rel_pos_x[:, :] = np.arange(self.world_dims[0], dtype=np.float32)[:, None] - agent.position[0]
         map_rel_pos_y = np.zeros(self.world_dims, dtype=np.float32)
         map_rel_pos_y[:, :] = np.arange(self.world_dims[1], dtype=np.float32)[None, :] - agent.position[1]
-        
+
+        # Calculate the visible area based on a circular observation radius.
+        visible = self._get_observation_radius_mask(agent.grid_position, agent.observation_radius)
+
         # Set up the visibility mask.
         if global_state:
             fixed_mask = np.zeros(self.map_shape, dtype=bool)
         else:
             fixed_mask = np.ones(self.map_shape, dtype=bool)
-
-            # Calculate the visible area based on a circular observation radius.
-            radius = agent.observation_radius
-            pos = agent.grid_position
-            visible = (np.arange(self.world_dims[0])[:, None] - pos[0]) ** 2 + \
-                (np.arange(self.world_dims[1])[None, :] - pos[1]) ** 2 <= radius ** 2
 
             # Update the agent's observed resources mask.
             if agent.capabilities[CAP.PROSPECT]:
