@@ -157,110 +157,126 @@ def _get_movement_action_heuristic_pemo(observation):
 
 def _get_movement_action_heuristic_pefmo(observation):
     '''
-    Uses a simple heuristic to determine the movement action based on agent type:
-    - Prospectors: Move toward nearest unexplored area
-    - Extractors: Move toward nearest resource
-    - Haulers: Move toward nearest extractor on a resource
-    
-    Only considers information within the agent's visible area.
+    Uses a simple heuristic to determine the movement action based on agent type
+    for the flat map observation representation.
     
     Args:
-        observation: The agent's observation dict from flat_map_obs environment
+        observation: The agent's flat observation dictionary
         
     Returns:
         int: Movement action (0-8) corresponding to Moore neighborhood
     '''
-    # Constants for map values
-    MAP_VALUE_OBSTACLE = -2.0
-    MAP_VALUE_RESOURCE = 2.0
-    MAP_VALUE_UNEXPLORED = 0.0
-    MAP_VALUE_EXPLORED = -1.0
+    # Extract agent role to determine agent type
+    agent_role = int(observation["agent_role"][0] / 10.0)  # Role is stored as role * 10.0
     
-    # Get the agent's role from the observation
-    agent_role = int(observation["agent_role"][0] / 10.0)  # Convert back from the encoding
-    
-    # Get the world dimensions by assuming square world and taking square root of map size
-    world_size = int(np.sqrt(observation["map"].shape[0]))
-    world_dims = (world_size, world_size)
+    # Use constants from the parallel_env_flat_map_obs class
+    MAP_VALUE_OBSTACLE = pefmo.MAP_VALUE_OBSTACLE
+    MAP_VALUE_RESOURCE = pefmo.MAP_VALUE_RESOURCE
+    MAP_VALUE_UNEXPLORED = pefmo.MAP_VALUE_UNEXPLORED
+    MAP_VALUE_EXPLORED = pefmo.MAP_VALUE_EXPLORED
     
     # Reshape the map to 2D
-    map_2d = observation["map"].reshape(world_dims)
+    world_size = int(np.sqrt(len(observation["map"])))
+    flat_map = observation["map"].reshape((world_size, world_size))
     
-    # Agent is always at (0,0) in its own relative coordinate system
-    agent_pos = np.zeros(2, dtype=np.int32)
+    # Get agent position (already provided in the observation)
+    self_pos = observation["agent_position"].astype(np.int32)
     
-    # Function to convert relative direction to Moore neighborhood index
-    def direction_to_moore_index(direction):
-        # Normalize to single step in Moore neighborhood
-        if np.linalg.norm(direction) > 0:
-            direction = direction / np.linalg.norm(direction)
-            direction = np.round(direction).astype(np.int32)
+    # Determine behavior based on agent type
+    # PROSPECTOR = 0, EXTRACTOR = 1, HAULER = 2 in the AGENT_ROLE enum
+    is_prospector = agent_role == 0
+    is_extractor = agent_role == 1
+    is_hauler = agent_role == 2
+    
+    # Calculate target based on agent type
+    if is_prospector:
+        # For prospector: find nearest unexplored area
+        unexplored = flat_map == MAP_VALUE_UNEXPLORED
+        if np.any(unexplored):
+            unexplored_positions = np.where(unexplored)
+            distances = np.sqrt((unexplored_positions[0] - self_pos[0])**2 + 
+                             (unexplored_positions[1] - self_pos[1])**2)
+            nearest_idx = np.argmin(distances)
+            target_x, target_y = unexplored_positions[0][nearest_idx], unexplored_positions[1][nearest_idx]
         else:
-            direction = np.array([0, 0], dtype=np.int32)
-        
-        # Convert to Moore index (0-8)
-        dx, dy = direction
-        dx = np.clip(dx, -1, 1)
-        dy = np.clip(dy, -1, 1)
-        return (dx + 1) * 3 + (dy + 1)
-    
-    # Determine target position based on agent role
-    if agent_role == AGENT_ROLE.HAULER.value:
-        # Check if we have a target in the target_relative field
-        if np.any(observation["target_relative"] != 0) and np.all(np.isfinite(observation["target_relative"])):
-            return direction_to_moore_index(observation["target_relative"])
-        
-        # Look for extractors in other_agents_relative
-        # We want extractors that might be on resources
-        for i in range(observation["other_agents_relative"].shape[0]):
-            # Skip agents that aren't visible
-            if not np.all(np.isfinite(observation["other_agents_relative"][i])):
-                continue
-                
-            # Get the absolute position of this agent in our map
-            other_agent_rel_pos = observation["other_agents_relative"][i]
-            other_agent_map_x = int(world_size/2 + other_agent_rel_pos[0])
-            other_agent_map_y = int(world_size/2 + other_agent_rel_pos[1])
+            # If everything is explored, use target from observation if available
+            if not np.all(observation["target_relative"] == 0):
+                target_x = int(self_pos[0] + observation["target_relative"][0])
+                target_y = int(self_pos[1] + observation["target_relative"][1])
+            else:
+                # If no target, move randomly
+                return np.random.randint(0, 9)
             
-            # Check if this position is in bounds
-            if (0 <= other_agent_map_x < world_size and 
-                0 <= other_agent_map_y < world_size):
-                
-                # Check if there's a resource at this position
-                map_idx = other_agent_map_x * world_size + other_agent_map_y
-                if map_idx < len(observation["map"]) and observation["map"][map_idx] == MAP_VALUE_RESOURCE:
-                    return direction_to_moore_index(other_agent_rel_pos)
+    elif is_extractor:
+        # For extractor: find nearest resource
+        resources = flat_map == MAP_VALUE_RESOURCE
+        if np.any(resources):
+            resource_positions = np.where(resources)
+            distances = np.sqrt((resource_positions[0] - self_pos[0])**2 + 
+                             (resource_positions[1] - self_pos[1])**2)
+            nearest_idx = np.argmin(distances)
+            target_x, target_y = resource_positions[0][nearest_idx], resource_positions[1][nearest_idx]
+        else:
+            # If no resources visible, use target from observation if available
+            if not np.all(observation["target_relative"] == 0):
+                target_x = int(self_pos[0] + observation["target_relative"][0])
+                target_y = int(self_pos[1] + observation["target_relative"][1])
+            else:
+                # If no target, move randomly
+                return np.random.randint(0, 9)
+            
+    elif is_hauler:
+        # For hauler, we don't have direct info on extractors' positions on resources
+        # in the flat map, so we use target_relative from the observation
+        if not np.all(observation["target_relative"] == 0):
+            target_x = int(self_pos[0] + observation["target_relative"][0])
+            target_y = int(self_pos[1] + observation["target_relative"][1])
+        else:
+            # Check if other agents (likely extractors) are in position
+            other_agents = observation["other_agents_relative"]
+            if len(other_agents) > 0:
+                # Find nearest other agent
+                distances = np.sqrt(np.sum(other_agents**2, axis=1))
+                nearest_idx = np.argmin(distances)
+                target_x = int(self_pos[0] + other_agents[nearest_idx][0])
+                target_y = int(self_pos[1] + other_agents[nearest_idx][1])
+            else:
+                # If no target or other agents, move randomly
+                return np.random.randint(0, 9)
+    
+    # Calculate direction to target
+    dx = np.sign(target_x - self_pos[0])
+    dy = np.sign(target_y - self_pos[1])
+    
+    # Check if the move would hit an obstacle
+    next_x, next_y = self_pos[0] + dx, self_pos[1] + dy
+    if (0 <= next_x < world_size and 
+        0 <= next_y < world_size and 
+        flat_map[next_x, next_y] == MAP_VALUE_OBSTACLE):
+        # If obstacle in direct path, try to move around it
+        # Try alternative directions (prioritize maintaining one component of direction)
+        alternatives = []
+        if dx != 0:
+            alternatives.append((dx, 0))  # Keep x-direction
+        if dy != 0:
+            alternatives.append((0, dy))  # Keep y-direction
+        if dx != 0 and dy != 0:
+            alternatives.append((dx, -dy))  # Diagonal alternative 1
+            alternatives.append((-dx, dy))  # Diagonal alternative 2
         
-        # If no extractors on resources found, move toward any visible resource
-        resource_positions = np.argwhere(map_2d == MAP_VALUE_RESOURCE)
-        if len(resource_positions) > 0:
-            # Convert positions to relative coordinates
-            relative_positions = resource_positions - np.array([world_size/2, world_size/2])
-            distances = np.linalg.norm(relative_positions, axis=1)
-            nearest_idx = np.argmin(distances)
-            return direction_to_moore_index(relative_positions[nearest_idx])
-            
-    elif agent_role == AGENT_ROLE.EXTRACTOR.value:
-        # Move toward nearest resource
-        resource_positions = np.argwhere(map_2d == MAP_VALUE_RESOURCE)
-        if len(resource_positions) > 0:
-            # Convert positions to relative coordinates
-            relative_positions = resource_positions - np.array([world_size/2, world_size/2])
-            distances = np.linalg.norm(relative_positions, axis=1)
-            nearest_idx = np.argmin(distances)
-            return direction_to_moore_index(relative_positions[nearest_idx])
-            
-    elif agent_role == AGENT_ROLE.PROSPECTOR.value:
-        # Move toward nearest unexplored area
-        unexplored_positions = np.argwhere(map_2d == MAP_VALUE_UNEXPLORED)
-        if len(unexplored_positions) > 0:
-            # Convert positions to relative coordinates
-            relative_positions = unexplored_positions - np.array([world_size/2, world_size/2])
-            distances = np.linalg.norm(relative_positions, axis=1)
-            nearest_idx = np.argmin(distances)
-            return direction_to_moore_index(relative_positions[nearest_idx])
+        # Try each alternative
+        for alt_dx, alt_dy in alternatives:
+            alt_x, alt_y = self_pos[0] + alt_dx, self_pos[1] + alt_dy
+            if (0 <= alt_x < world_size and 
+                0 <= alt_y < world_size and 
+                flat_map[alt_x, alt_y] != MAP_VALUE_OBSTACLE):
+                dx, dy = alt_dx, alt_dy
+                break
     
-    # If we haven't returned by now, use a random movement
-    random_direction = np.random.randint(-1, 2, 2)
-    return direction_to_moore_index(random_direction)
+    # Convert to Moore neighborhood index (0-8)
+    # [0 1 2]
+    # [3 4 5]
+    # [6 7 8]
+    moore_idx = (dx + 1) * 3 + (dy + 1)
     
+    return moore_idx
