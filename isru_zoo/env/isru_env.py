@@ -1009,15 +1009,17 @@ class parallel_env(ParallelEnv):
                 # Determine the visible cells around the requested position.
                 visible = self._get_observation_radius_mask(absolute_request_position, self.default_observation_radius)
 
-                # Calculate communication statistics.
-                comm_newly_visible_cells = np.sum(visible & ~agent.mask_observed)
-                comm_uncertainty = agent.uncertainty[visible]
+                # Check if any visible.
+                if np.any(visible):
+                    # Calculate communication statistics.
+                    comm_newly_visible_cells = np.sum(visible & ~agent.mask_observed)
+                    comm_uncertainty = agent.uncertainty[visible]
 
-                # Provide reward based on the number of newly visible cells in that area.
-                reward_dict[agent] += 1.0 * comm_newly_visible_cells / np.sum(visible)
+                    # Provide reward based on the number of newly visible cells in that area.
+                    reward_dict[agent] += 1.0 * comm_newly_visible_cells / np.sum(visible)
 
-                # Provide reward based on the level of uncertainty of cells in that area.
-                reward_dict[agent] += 0.1 * np.mean(comm_uncertainty)
+                    # Provide reward based on the level of uncertainty of cells in that area.
+                    reward_dict[agent] += 0.1 * np.mean(comm_uncertainty)
 
             # Perform observation.
             agent_observation, fixed_mask = self.observe(
