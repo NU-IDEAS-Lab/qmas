@@ -241,7 +241,13 @@ class PettingzooEnv(object):
             # Combine the visibility masks into a single tensor.
             all_viz = np.array(all_viz, dtype=np.float32)
             info["visibility_mask"] = all_viz
-
+        
+        # Flatten the state visibility mask if needed.
+        if "state_visibility_mask" in info and self.flatten_observations_global:
+            svm = info["state_visibility_mask"]
+            svm = flatten_mask(self.env.state_space, svm)
+            info["state_visibility_mask"] = svm.astype(np.float32)
+        
         return info
 
     def _get_matching_arg_dict(self, fn, args_input):
