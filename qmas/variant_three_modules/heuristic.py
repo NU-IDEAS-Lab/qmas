@@ -4,14 +4,14 @@ from isru_zoo.env.entity import *
 from isru_zoo.env.isru_env import parallel_env_map_obs as pemo
 from isru_zoo.env.isru_env import parallel_env_flat_map_obs as pefmo
 
-def get_movement_action_heuristic(observation, env_name):
+def get_movement_action_heuristic(args,observation, env_name):
     '''
     Wrapper function to select appropriate heuristic based on environment name.
     '''
     if env_name == "isru_zoo.isru_v0.parallel_env_map_obs":
         return _get_movement_action_heuristic_pemo(observation)
     elif env_name == "isru_zoo.isru_v0.parallel_env_flat_map_obs":
-        return _get_movement_action_heuristic_pefmo(observation)
+        return _get_movement_action_heuristic_pefmo(args,observation)
     else:
         raise ValueError(f"Unknown environment name: {env_name}")
 
@@ -155,128 +155,70 @@ def _get_movement_action_heuristic_pemo(observation):
     moore_index = pemo._velocity_to_moore_index(None, direction)
     return moore_index
 
-def _get_movement_action_heuristic_pefmo(observation):
-    '''
-    Uses a simple heuristic to determine the movement action based on agent type
-    for the flat map observation representation.
-    
-    Args:
-        observation: The agent's flat observation dictionary
-        
-    Returns:
-        int: Movement action (0-8) corresponding to Moore neighborhood
-    '''
-    # Extract agent role to determine agent type
-    agent_role = int(observation["agent_role"][0] / 10.0)  # Role is stored as role * 10.0
-    
-    # Use constants from the parallel_env_flat_map_obs class
-    MAP_VALUE_OBSTACLE = pefmo.MAP_VALUE_OBSTACLE
-    MAP_VALUE_RESOURCE = pefmo.MAP_VALUE_RESOURCE
-    MAP_VALUE_UNEXPLORED = pefmo.MAP_VALUE_UNEXPLORED
-    MAP_VALUE_EXPLORED = pefmo.MAP_VALUE_EXPLORED
-    
-    # Reshape the map to 2D
-    world_size = int(np.sqrt(len(observation["map"])))
-    flat_map = observation["map"].reshape((world_size, world_size))
-    
-    # Get agent position (already provided in the observation)
-    self_pos = observation["agent_position"].astype(np.int32)
-    
-    # Determine behavior based on agent type
-    # PROSPECTOR = 0, EXTRACTOR = 1, HAULER = 2 in the AGENT_ROLE enum
-    is_prospector = agent_role == 0
-    is_extractor = agent_role == 1
-    is_hauler = agent_role == 2
-    
-    # Calculate target based on agent type
-    if is_prospector:
-        # For prospector: find nearest unexplored area
-        unexplored = flat_map == MAP_VALUE_UNEXPLORED
-        if np.any(unexplored):
-            unexplored_positions = np.where(unexplored)
-            distances = np.sqrt((unexplored_positions[0] - self_pos[0])**2 + 
-                             (unexplored_positions[1] - self_pos[1])**2)
-            nearest_idx = np.argmin(distances)
-            target_x, target_y = unexplored_positions[0][nearest_idx], unexplored_positions[1][nearest_idx]
-        else:
-            # If everything is explored, use target from observation if available
-            if not np.all(observation["target_relative"] == 0):
-                target_x = int(self_pos[0] + observation["target_relative"][0])
-                target_y = int(self_pos[1] + observation["target_relative"][1])
-            else:
-                # If no target, move randomly
-                return np.random.randint(0, 9)
-            
-    elif is_extractor:
-        # For extractor: find nearest resource
-        resources = flat_map == MAP_VALUE_RESOURCE
-        if np.any(resources):
-            resource_positions = np.where(resources)
-            distances = np.sqrt((resource_positions[0] - self_pos[0])**2 + 
-                             (resource_positions[1] - self_pos[1])**2)
-            nearest_idx = np.argmin(distances)
-            target_x, target_y = resource_positions[0][nearest_idx], resource_positions[1][nearest_idx]
-        else:
-            # If no resources visible, use target from observation if available
-            if not np.all(observation["target_relative"] == 0):
-                target_x = int(self_pos[0] + observation["target_relative"][0])
-                target_y = int(self_pos[1] + observation["target_relative"][1])
-            else:
-                # If no target, move randomly
-                return np.random.randint(0, 9)
-            
-    elif is_hauler:
-        # For hauler, we don't have direct info on extractors' positions on resources
-        # in the flat map, so we use target_relative from the observation
-        if not np.all(observation["target_relative"] == 0):
-            target_x = int(self_pos[0] + observation["target_relative"][0])
-            target_y = int(self_pos[1] + observation["target_relative"][1])
-        else:
-            # Check if other agents (likely extractors) are in position
-            other_agents = observation["other_agents_relative"]
-            if len(other_agents) > 0:
-                # Find nearest other agent
-                distances = np.sqrt(np.sum(other_agents**2, axis=1))
-                nearest_idx = np.argmin(distances)
-                target_x = int(self_pos[0] + other_agents[nearest_idx][0])
-                target_y = int(self_pos[1] + other_agents[nearest_idx][1])
-            else:
-                # If no target or other agents, move randomly
-                return np.random.randint(0, 9)
-    
-    # Calculate direction to target
-    dx = np.sign(target_x - self_pos[0])
-    dy = np.sign(target_y - self_pos[1])
-    
-    # Check if the move would hit an obstacle
-    next_x, next_y = self_pos[0] + dx, self_pos[1] + dy
-    if (0 <= next_x < world_size and 
-        0 <= next_y < world_size and 
-        flat_map[next_x, next_y] == MAP_VALUE_OBSTACLE):
-        # If obstacle in direct path, try to move around it
-        # Try alternative directions (prioritize maintaining one component of direction)
-        alternatives = []
-        if dx != 0:
-            alternatives.append((dx, 0))  # Keep x-direction
-        if dy != 0:
-            alternatives.append((0, dy))  # Keep y-direction
-        if dx != 0 and dy != 0:
-            alternatives.append((dx, -dy))  # Diagonal alternative 1
-            alternatives.append((-dx, dy))  # Diagonal alternative 2
-        
-        # Try each alternative
-        for alt_dx, alt_dy in alternatives:
-            alt_x, alt_y = self_pos[0] + alt_dx, self_pos[1] + alt_dy
-            if (0 <= alt_x < world_size and 
-                0 <= alt_y < world_size and 
-                flat_map[alt_x, alt_y] != MAP_VALUE_OBSTACLE):
-                dx, dy = alt_dx, alt_dy
-                break
-    
-    # Convert to Moore neighborhood index (0-8)
-    # [0 1 2]
-    # [3 4 5]
-    # [6 7 8]
-    moore_idx = (dx + 1) * 3 + (dy + 1)
-    
-    return moore_idx
+import torch
+import numpy as np
+
+def _unit_moore(vec2: torch.Tensor) -> torch.Tensor:
+    v = torch.as_tensor(vec2, dtype=torch.float32)
+    n = torch.linalg.norm(v)
+    if n == 0 or torch.isnan(n):
+        return torch.tensor([0, 0], dtype=torch.int32)
+    v = torch.clamp(v / n, -1.0, 1.0)
+    return torch.round(v).to(torch.int32)  # [dx, dy] in {-1,0,1}
+
+def _moore_index_from_step(step_ij: torch.Tensor) -> int:
+    dx, dy = int(step_ij[0].item()), int(step_ij[1].item())
+    return (dx + 1) * 3 + (dy + 1)  # 0..8
+
+def _flat_offsets(args):
+    """
+    Compute [start, end) offsets for the top-level fields in your flat layout,
+    using only args.world_size and args.num_agents.
+    """
+    W = int(getattr(args, "world_size"))
+    N = W * W
+    K = int(getattr(args, "num_agents")) - 1  # other agents
+
+    sizes = {
+        "agent_position": 2,
+        "agent_role": 1,
+        "map": N,
+        "other_agents_relative": 2 * K,
+        "target_relative": 2,
+        "uncertainty_map": N,
+    }
+    # cumulative offsets in the fixed order
+    order = [
+        "agent_position",
+        "agent_role",
+        "map",
+        "other_agents_relative",
+        "target_relative",
+        "uncertainty_map",
+    ]
+    offs = {}
+    start = 0
+    for key in order:
+        size = sizes[key]
+        offs[key] = (start, start + size)
+        start += size
+    offs["_total"] = start
+    return offs
+
+def slice_target_relative_from_flat(flat_obs, args) -> torch.Tensor:
+    flat = torch.as_tensor(flat_obs, dtype=torch.float32).flatten()
+    offs = _flat_offsets(args)
+    s, e = offs["target_relative"]
+    if flat.numel() < e:
+        raise ValueError(f"flat_obs too short (have {flat.numel()}, need at least {e})")
+    return flat[s:e]  # shape (2,)
+
+def _get_movement_action_heuristic_pefmo(args,flat_obs) -> int:
+    """
+    1) Slice target_relative using args.world_size & args.num_agents
+    2) Convert to one-cell Moore step
+    3) Return discrete action index (0..8)
+    """
+    target_rel = slice_target_relative_from_flat(flat_obs, args)   # (2,)
+    step = _unit_moore(target_rel)                                 # int32 [dx, dy]
+    return _moore_index_from_step(step)
