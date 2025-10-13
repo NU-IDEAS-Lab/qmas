@@ -104,6 +104,7 @@ class parallel_env(ParallelEnv):
             hauler_capacity: float = 10.0,
             hauler_pickup_threshold: float = 1.5,
             noisy_memory: bool = False,
+            communication_mode: str = "nearest",
             render_mode: str = "human",
         ):
         """
@@ -127,6 +128,7 @@ class parallel_env(ParallelEnv):
         self.default_hauler_capacity = hauler_capacity
         self.hauler_pickup_threshold = hauler_pickup_threshold
         self.noisy_memory = noisy_memory
+        self.communication_mode = communication_mode
 
         # Set up entities.
         self.possible_agents = \
@@ -661,16 +663,17 @@ class parallel_env(ParallelEnv):
                 "request": spaces.Box(
                     low=0, high=1, shape=(1,), dtype=np.int32
                 ),
-            })        
-            return spaces.Dict({
+            })
+        else:
+            raise ValueError(f"Unsupported communication_mode: {self.communication_mode}")
+
+        return spaces.Dict({
             # Movement is specified in terms of the Moore neighborhood.
             # The agent can only move one space at a time.
             "movement": spaces.Box(low=0, high=8, shape=(1,), dtype=np.int32),
 
-            # Communication encodes a flag and a RELATIVE coordinate (dx, dy) in grid units.
-            # The agent whose current position is closest to (agent.position + [dx, dy]) will respond if comm_flag == 1.
+            # Communication encodes a flag and optionally a relative coordinate.
             "communication": comm_space,
-            
 
             # Resource actions are represented as follows:
             # -1 = drop off all resources
