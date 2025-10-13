@@ -47,6 +47,10 @@ def add_args(parser):
                         help="Max Euclidean distance (in grid units) a Hauler must be within of any Extractor to pick up resources.")
     parser.add_argument("--noisy_memory", action="store_true",
                         help="Whether to allow the agent to see areas which are explored but not currently visible, with added noise.")
+    parser.add_argument("--communication_mode", type=str, default="nearest",
+                        choices=["nearest", "broadcast"],
+                        help="How communication requests are handled: 'nearest' queries one nearby agent, "
+                             "'broadcast' queries all other agents.")
     parser.add_argument("--render_mode", type=str, default="human",
                         choices=parallel_env.metadata["render_modes"],
                         help="The rendering mode for the environment.")
@@ -654,28 +658,31 @@ class parallel_env(ParallelEnv):
     @functools.cache
     def action_space(self, agent):
         ''' Returns the action space for the given agent. '''
-        
-        return spaces.Dict({
+        if self.communication_mode == "nearest":
+            comm_space = spaces.Dict({
+                "request": spaces.Box(
+                    low=0, high=1, shape=(1,), dtype=np.int32
+                ),
+                "relative_position": spaces.Box(
+                    low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32
+                ),
+            })
+        elif self.communication_mode == "broadcast":
+            # Broadcast does not need relative position — only a request flag
+            comm_space = spaces.Dict({
+                "request": spaces.Box(
+                    low=0, high=1, shape=(1,), dtype=np.int32
+                ),
+            })        
+            return spaces.Dict({
             # Movement is specified in terms of the Moore neighborhood.
             # The agent can only move one space at a time.
             "movement": spaces.Box(low=0, high=8, shape=(1,), dtype=np.int32),
 
             # Communication encodes a flag and a RELATIVE coordinate (dx, dy) in grid units.
             # The agent whose current position is closest to (agent.position + [dx, dy]) will respond if comm_flag == 1.
-            "communication": spaces.Dict({
-                "request": spaces.Box(
-                    low=0,
-                    high=1,
-                    shape=(1,),
-                    dtype=np.int32
-                ),
-                "relative_position": spaces.Box(
-                    low=-np.inf,
-                    high=np.inf,
-                    shape=(2,),
-                    dtype=np.float32
-                ),
-            }),
+            "communication": comm_space,
+            
 
             # Resource actions are represented as follows:
             # -1 = drop off all resources
@@ -868,6 +875,7 @@ class parallel_env(ParallelEnv):
         }
         info_dict.update({agent: {} for agent in self.possible_agents})
         comms_requests_relative = {}
+        comms_requests_explicit = {}
         stack_value = {a: True for a in self.possible_agents}
 
         # Pre-movement calculations.
@@ -924,9 +932,14 @@ class parallel_env(ParallelEnv):
 
                 # Handle communication (request-based).
                 comms_request = bool(action["communication"]["request"][0] == 1)
-                if comms_request:
-                    comms_position_relative = action["communication"]["relative_position"]
-                    comms_requests_relative[agent] = comms_position_relative
+                if comms_request and len(self.possible_agents) > 1:
+                    if self.communication_mode == "broadcast":
+                        senders = {other for other in self.possible_agents if other is not agent}
+                        if senders:
+                            comms_requests_explicit[agent] = senders
+                    else:
+                        comms_position_relative = action["communication"]["relative_position"]
+                        comms_requests_relative[agent] = comms_position_relative
                     info_dict["communication/requests_made"] += 1
                     reward_dict[agent] += REWARD_COMMUNICATION
 
@@ -1008,6 +1021,9 @@ class parallel_env(ParallelEnv):
         for agent in self.possible_agents:
             # Determine which agents will respond to communication requests.
             senders_set = set()
+            if agent in comms_requests_explicit:
+                # Broadcast requests
+                senders_set |= comms_requests_explicit[agent]
             if agent in comms_requests_relative:
                 absolute_request_position = agent.position + comms_requests_relative[agent]
                 sender = self._get_nearest_entity(
