@@ -409,7 +409,7 @@ class parallel_env(ParallelEnv):
             plt.close()
             return img_arr
 
-    def render_state(self, state, figsize=(9, 6), visibility_mask=None):
+    def render_state(self, state, figsize=(9, 6), visibility_mask=None, last_action=None):
         ''' Renders the given state.
             
             Args:
@@ -504,6 +504,18 @@ class parallel_env(ParallelEnv):
         positions = np.argwhere(where_x_zero & where_y_zero)
         if positions.size > 0:
             ax_hr.scatter(positions[:, 1], positions[:, 0], label="Self", marker="s", s=150, facecolors='none', edgecolors='black', linewidths=2)
+
+            if last_action is not None:
+                if last_action["communication"]["request"][0] > 0.5:
+                    # Plot a line from the agent to the requested position.
+                    rel_pos = last_action["communication"]["relative_position"]
+                    ax_hr.arrow(
+                        positions[0, 1], positions[0, 0],
+                        rel_pos[1], rel_pos[0],
+                        head_width=0.5, head_length=0.5,
+                        fc='blue', ec='blue', linestyle='--', alpha=0.5
+                    )
+
 
         # Plot a partially-completed ring around the haulers to indicate their cargo.
         cargo_layer = MAP_LAYERS.RESOURCES_CARGO
@@ -1565,7 +1577,13 @@ class parallel_env_map_obs(parallel_env):
             self.render_state(pred[-1, 0].numpy(), figsize=figsize)
 
         obs, fixed_mask = self._observe(self.agents[0], global_state=False)
-        return self.render_state(obs, figsize=figsize, visibility_mask=fixed_mask[self.MAP_LAYERS.AGENTS_PROSPECTOR])
+        obs *= fixed_mask  # Apply the visibility mask for rendering.
+        return self.render_state(
+            obs,
+            figsize=figsize,
+            visibility_mask=fixed_mask[self.MAP_LAYERS.AGENTS_PROSPECTOR],
+            last_action=self.agents[0].last_action,
+        )
 
 
 class parallel_env_map_obs_comms_only(parallel_env_map_obs):
