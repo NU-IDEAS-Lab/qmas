@@ -6,7 +6,7 @@ os.environ["WANDB__SERVICE_WAIT"] = "300"
 args = [
     "--experiment_name", "isru-UN-2e2h2p-e500-r10-h10-10x10-1024x3",
     "--project_name", "qmas",
-    "--env_class", "isru_zoo.isru_v0.parallel_env_flat_map_obs",
+    "--env_class", "isru_zoo.isru_v0.parallel_env_map_obs",
     "--user_name", "ideas-mas",
 
 	"--num_extractors", "2",
@@ -45,7 +45,7 @@ args = [
 
     "--seed", "0",
 
-    "--n_rollout_threads", "1",
+    "--n_rollout_threads", "100",
     "--n_training_threads", "32",
     "--cuda",
     "--cuda_idx", "2",
