@@ -1628,7 +1628,7 @@ class parallel_env_map_obs_comms_only(parallel_env_map_obs):
         for i, a in enumerate(self.possible_agents):
             pos = a.grid_position
             if a == agent:
-                map_agents[pos[0], pos[1], a.role.value] += 255  # Ego agent
+                map_agents[pos[0], pos[1], a.role.value] += 2  # Ego agent
             else:
                 map_agents[pos[0], pos[1], a.role.value] += 1
         
