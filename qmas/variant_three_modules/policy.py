@@ -41,7 +41,7 @@ class QmasPolicy(QmasPolicyBase):
         # Get movement actions from heuristic
         movement_actions = torch.zeros((obs.shape[0], self.action_move_indices.shape[0]), dtype=comm_actions.dtype)
         for i in range(obs.shape[0]):
-            action = get_movement_action_heuristic(obs[i], self.env_class)
+            action = get_movement_action_heuristic(self.args,obs[i], self.env_class)
             movement_actions[i] = action
 
         # Combine into full action dict
@@ -87,7 +87,7 @@ class QmasPolicy(QmasPolicyBase):
         # Get movement actions from heuristic
         movement_actions = torch.zeros((obs.shape[0], self.action_move_indices.shape[0]), dtype=comm_actions.dtype)
         for i in range(obs.shape[0]):
-            action = get_movement_action_heuristic(obs[i], self.env_class)
+            action = get_movement_action_heuristic(self.args,obs[i], self.env_class)
             movement_actions[i] = action
 
         # Combine into full action dict
