@@ -368,6 +368,11 @@ class PettingzooRunner(Runner):
                 # Take a step in the environment.
                 obs, share_obs, eval_rewards, dones, infos, available_actions = eval_env.step(actions_env)
                 viz_mask_obs = np.expand_dims(infos[0]["visibility_mask"], 0) if "visibility_mask" in infos[0] else np.ones_like(obs)
+
+                # Apply the visibility mask to the observation.
+                if self.all_args.observation_mask:
+                    obs[0] = obs[0] * viz_mask_obs[0]
+
                 viz_mask = viz_mask_obs.reshape(self.n_eval_rollout_threads, self.num_agents, -1)
                 for i in range(self.num_agents):
                     transition = obs[0][i].flatten()
@@ -508,6 +513,11 @@ class PettingzooRunner(Runner):
                 # Take a step in the environment and get the results.
                 obs, share_obs, render_rewards, dones, infos, available_actions = render_env.step(actions_env)
                 viz_mask_obs = np.expand_dims(infos[0]["visibility_mask"], 0) if "visibility_mask" in infos[0] else np.ones_like(obs)
+
+                # Apply the visibility mask to the observation.
+                if self.all_args.observation_mask:
+                    obs[0] = obs[0] * viz_mask_obs[0]
+
                 # viz_mask_actions = np.ones(actions.shape, dtype=np.float32)  # Assuming actions are fully visible.
                 # viz_mask = np.concatenate([viz_mask_actions, viz_mask_obs.reshape(self.n_render_rollout_threads, self.num_agents, -1)], axis=-1)
                 viz_mask = viz_mask_obs.reshape(self.n_render_rollout_threads, self.num_agents, -1)
