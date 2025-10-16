@@ -1030,23 +1030,23 @@ class parallel_env(ParallelEnv):
                 senders_set |= comms_requests_explicit[agent]
             if agent in comms_requests_relative:
                 absolute_request_position = agent.position + comms_requests_relative[agent]
+                #Find agent with lowest summed uncertainty in the requested region
                 region_mask = self._get_observation_radius_mask(absolute_request_position, self.default_observation_radius)
                 min_sum = None
                 min_agent = None
                 for other in self.possible_agents:
                     if other is agent:
                         continue
-                    # Only consider agents with an uncertainty attribute (should always be true)
-                    this_sum = np.sum(other.uncertainty[region_mask])
-                    if (min_sum is None) or (this_sum < min_sum):
-                        min_sum = this_sum
+                    uq_sum = np.sum(other.uncertainty[region_mask])
+                    if (min_sum is None) or (uq_sum < min_sum):
+                        min_sum = uq_sum
                         min_agent = other
                 if min_agent is not None:
                     senders_set.add(min_agent)
 
                 
                 # Determine the visible cells around the requested position.
-                visible = region_mask
+                visible = self._get_observation_radius_mask(absolute_request_position, self.default_observation_radius)
 
                 # Check if any visible.
                 if np.any(visible):
@@ -1547,7 +1547,6 @@ class parallel_env_map_obs(parallel_env):
             else:
                 share_cells = sender_visible_cells
 
-
             share_mask = np.broadcast_to(share_cells[None, :, :], sender_visible.shape)
             share_mask &= sender_visible
 
@@ -1558,8 +1557,8 @@ class parallel_env_map_obs(parallel_env):
             agent.mask_observed[share_cells] = agent.mask_observed[share_cells] | sender.mask_observed[share_cells]
             agent.mask_resources_observed[share_cells] = agent.mask_resources_observed[share_cells] | sender.mask_resources_observed[share_cells]
             precedence_seen_mask[share_cells] = True
-    
-    # Apply local observations (overwrite any communicated data).
+        
+        # Apply local observations (overwrite any communicated data).
         map[local_fixed_mask == True] = local_obs[local_fixed_mask == True]
         map_mask |= local_fixed_mask
 
