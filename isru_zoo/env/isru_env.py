@@ -1547,7 +1547,7 @@ class parallel_env_map_obs(parallel_env):
             else:
                 share_cells = sender_visible_cells
 
-            share_mask = np.broadcast_to(share_cells[None, :, :], sender_visible.shape)
+            share_mask = np.broadcast_to(share_cells[None, :, :], sender_visible.shape).copy()
             share_mask &= sender_visible
 
             map[share_mask] = sender_obs[share_mask]
