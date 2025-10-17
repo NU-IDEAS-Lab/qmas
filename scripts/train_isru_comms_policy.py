@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-    "--experiment_name", "isru-comms-e200-20x20-worldReset",
+    "--experiment_name", "isru-comms-e200-20x20",
     "--project_name", "qmas",
     "--env_class", "isru_zoo.isru_v0.parallel_env_map_obs",
     "--user_name", "ideas-mas",

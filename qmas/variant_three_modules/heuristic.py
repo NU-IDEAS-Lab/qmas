@@ -4,14 +4,14 @@ from isru_zoo.env.entity import *
 from isru_zoo.env.isru_env import parallel_env_map_obs as pemo
 from isru_zoo.env.isru_env import parallel_env_flat_map_obs as pefmo
 
-def get_movement_action_heuristic(observation, env_name):
+def get_movement_action_heuristic(args,observation, env_name):
     '''
     Wrapper function to select appropriate heuristic based on environment name.
     '''
     if env_name == "isru_zoo.isru_v0.parallel_env_map_obs":
         return _get_movement_action_heuristic_pemo(observation)
     elif env_name == "isru_zoo.isru_v0.parallel_env_flat_map_obs":
-        return _get_movement_action_heuristic_pefmo(observation)
+        return _get_movement_action_heuristic_pefmo(args,observation)
     else:
         raise ValueError(f"Unknown environment name: {env_name}")
 
@@ -155,56 +155,70 @@ def _get_movement_action_heuristic_pemo(observation):
     moore_index = pemo._velocity_to_moore_index(None, direction)
     return moore_index
 
-def _get_movement_action_heuristic_pefmo(observation):
-    '''
-    Simple movement heuristic for parallel_env_flat_map_obs environment.
-    Uses agent role and target_relative to select a movement action.
-    Args:
-        observation: dict with keys 'agent_role', 'agent_position', 'target_relative', etc.
-    Returns:
-        int: Movement action (0-8) corresponding to Moore neighborhood
-    '''
-    import numpy as np
-    # The observation is a flattened array. We need to extract the correct slices.
-    # The structure is (see _observe):
-    #   agent_role: 1
-    #   agent_position: 2
-    #   target_relative: 2
-    #   other_agents_relative: N*2 (N = num other agents, unknown here)
-    #   map: prod(world_dims)
-    #   uncertainty_map: prod(world_dims)
-    # We'll use only the first 5 elements (agent_role, agent_position, target_relative)
-    agent_role = observation[0]
-    agent_position = observation[1:3]
-    # target_relative = observation[3:5]
-    # If target is not visible (all zeros), do not move
-    # if np.allclose(target_relative, 0):
-    #     return 4  # Center (no movement)
+import torch
+import numpy as np
 
-    if agent_role == AGENT_ROLE.PROSPECTOR:
-        # Move randomly for prospectors
-        target_relative = np.random.randint(-1, 2, size=2)
-    elif agent_role == AGENT_ROLE.EXTRACTOR:
-        # Move toward nearest resource (assumed to be at target_relative)
-        target_relative = observation[3:5]
-        if np.allclose(target_relative, 0):
-            return 4  # No movement if no target
-    elif agent_role == AGENT_ROLE.HAULER:
-        # Move toward nearest extractor (assumed to be at target_relative)
-        target_relative = observation[3:5]
-        if np.allclose(target_relative, 0):
-            return 4  # No movement if no target
-    else:
-        # Unknown role, do not move
-        return 4  # Center (no movement)
+def _unit_moore(vec2: torch.Tensor) -> torch.Tensor:
+    v = torch.as_tensor(vec2, dtype=torch.float32)
+    n = torch.linalg.norm(v)
+    if n == 0 or torch.isnan(n):
+        return torch.tensor([0, 0], dtype=torch.int32)
+    v = torch.clamp(v / n, -1.0, 1.0)
+    return torch.round(v).to(torch.int32)  # [dx, dy] in {-1,0,1}
 
-    # Compute direction to target
-    dx = int(np.sign(target_relative[0]))
-    dy = int(np.sign(target_relative[1]))
-    # Convert to Moore neighborhood index (0-8)
-    # [0 1 2]
-    # [3 4 5]
-    # [6 7 8]
-    moore_idx = (dx + 1) * 3 + (dy + 1)
-    return moore_idx
+def _moore_index_from_step(step_ij: torch.Tensor) -> int:
+    dx, dy = int(step_ij[0].item()), int(step_ij[1].item())
+    return (dx + 1) * 3 + (dy + 1)  # 0..8
 
+def _flat_offsets(args):
+    """
+    Compute [start, end) offsets for the top-level fields in your flat layout,
+    using only args.world_size and args.num_agents.
+    """
+    W = int(getattr(args, "world_size"))
+    N = W * W
+    K = int(getattr(args, "num_agents")) - 1  # other agents
+
+    sizes = {
+        "agent_position": 2,
+        "agent_role": 1,
+        "map": N,
+        "other_agents_relative": 2 * K,
+        "target_relative": 2,
+        "uncertainty_map": N,
+    }
+    # cumulative offsets in the fixed order
+    order = [
+        "agent_position",
+        "agent_role",
+        "map",
+        "other_agents_relative",
+        "target_relative",
+        "uncertainty_map",
+    ]
+    offs = {}
+    start = 0
+    for key in order:
+        size = sizes[key]
+        offs[key] = (start, start + size)
+        start += size
+    offs["_total"] = start
+    return offs
+
+def slice_target_relative_from_flat(flat_obs, args) -> torch.Tensor:
+    flat = torch.as_tensor(flat_obs, dtype=torch.float32).flatten()
+    offs = _flat_offsets(args)
+    s, e = offs["target_relative"]
+    if flat.numel() < e:
+        raise ValueError(f"flat_obs too short (have {flat.numel()}, need at least {e})")
+    return flat[s:e]  # shape (2,)
+
+def _get_movement_action_heuristic_pefmo(args,flat_obs) -> int:
+    """
+    1) Slice target_relative using args.world_size & args.num_agents
+    2) Convert to one-cell Moore step
+    3) Return discrete action index (0..8)
+    """
+    target_rel = slice_target_relative_from_flat(flat_obs, args)   # (2,)
+    step = _unit_moore(target_rel)                                 # int32 [dx, dy]
+    return _moore_index_from_step(step)
