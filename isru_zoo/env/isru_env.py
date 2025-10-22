@@ -1518,43 +1518,33 @@ class parallel_env_map_obs(parallel_env):
 
         # Set up the matrices.
         map = np.copy(local_obs)
-        map_mask = np.zeros_like(local_fixed_mask, dtype=bool)
+        map_mask = local_fixed_mask
 
         # Handle communicated data.
         for sender in senders:
             sender_obs, sender_fixed_mask = self._observe(sender)
 
-            sender_visible = sender_fixed_mask == True
-            map[sender_visible] = sender_obs[sender_visible]
-            map_mask[sender_visible] = True
+            new_info_mask = sender_fixed_mask & ~map_mask
+            map[new_info_mask] = sender_obs[new_info_mask]
+            map_mask |= new_info_mask
 
             # Update the agent's known space masks.
             agent.mask_observed |= sender.mask_observed
             agent.mask_resources_observed |= sender.mask_resources_observed
-        
-        # Apply local observations (overwrite any communicated data).
-        map[local_fixed_mask == True] = local_obs[local_fixed_mask == True]
-        map_mask |= local_fixed_mask
 
         # Update the observed masks.
         map[self.MAP_LAYERS.MASK_OBSERVED] = agent.mask_observed
         map[self.MAP_LAYERS.MASK_RESOURCES_OBSERVED] = agent.mask_resources_observed
-        
-        # Apply the local relative position layers (overwrite any communicated data).
-        map[self.MAP_LAYERS.RELATIVE_POS_X] = local_obs[self.MAP_LAYERS.RELATIVE_POS_X]
-        map[self.MAP_LAYERS.RELATIVE_POS_Y] = local_obs[self.MAP_LAYERS.RELATIVE_POS_Y]
-        map_mask[self.MAP_LAYERS.RELATIVE_POS_X] = True
-        map_mask[self.MAP_LAYERS.RELATIVE_POS_Y] = True
 
         # Update the agent's persistent uncertainty map. First increase uncertainty everywhere by a small amount.
         agent.uncertainty += np.random.uniform(0.0001, 0.001, size=agent.uncertainty.shape).astype(np.float32)
-        visible = map_mask[self.MAP_LAYERS.AGENTS_PROSPECTOR] # This layer should always represent visibility.
-        agent.uncertainty[visible] = 0.0  
+        local_visible = map_mask[self.MAP_LAYERS.AGENTS_PROSPECTOR] # This layer should always represent visibility.
+        agent.uncertainty[local_visible] = 0.0  
 
         # If using noisy memory (for training), set all explored areas to
         # visible and add noise to the explored but not directly visible areas.
         if self.noisy_memory:
-            explored_not_visible = agent.mask_observed & ~visible
+            explored_not_visible = agent.mask_observed & ~local_visible
             u = agent.uncertainty[explored_not_visible]
             mean = np.zeros_like(u, dtype=np.float32)
             std = u ** 0.5
