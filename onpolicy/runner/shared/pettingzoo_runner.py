@@ -160,6 +160,49 @@ class PettingzooRunner(Runner):
     def collect(self, step):
         share_obs, obs, rnn_states, rnn_states_critic, masks, available_actions = self.buffer.compatibility_get_policy_input(step)
 
+        # Check whether to use predictor.
+        use_prediction = hasattr(self.policy, "predictors") and not self.all_args.prediction_disable
+        if use_prediction:
+            # Prepare the trajectory for the predictor.
+            HISTORY_LENGTH = self.all_args.prediction_history_window
+            trajectory = torch.zeros((HISTORY_LENGTH, self.num_agents, obs.shape[-1]), dtype=torch.float32, device=self.device)
+            visibility_mask = torch.zeros_like(trajectory, dtype=torch.float32, device=self.device)
+
+            for agentIdx in range(self.num_agents):
+                for t in range(HISTORY_LENGTH):
+                    buffer_index = step - HISTORY_LENGTH + 1 + t
+                    if buffer_index < 0:
+                        continue
+                    
+                    transition_obs = self.buffer.obs[buffer_index][:, agentIdx, :].to(self.device)
+                    # transition_action = self.buffer.actions[buffer_index][:, agentIdx, :].to(self.device)
+                    # transition = torch.cat([transition_action, transition_obs], dim=-1)
+                    transition = transition_obs
+
+                    trajectory[t, agentIdx, :] = transition
+
+                    if "visibility_mask" in self.buffer.extra_data:
+                        viz_mask = self.buffer.extra_data["visibility_mask"][buffer_index][:, agentIdx, :].to(self.device)
+                        visibility_mask[t, agentIdx, :] = viz_mask
+                    else:
+                        visibility_mask[t, agentIdx, :] = 1.0  # Default to all visible.
+
+            # Get predictions from each predictor and average them.
+            predictions = torch.zeros_like(trajectory, dtype=torch.float32, device=self.device)
+            for predictor in self.policy.predictors:
+                pred, _ = predictor.get_prediction(
+                    trajectory=trajectory[:, 0, :],  # Use the first environment only.
+                    visibility_mask=visibility_mask[:, 0, :],
+                    prediction_prev=None
+                )
+                predictions.append(pred)
+
+            # Average predictions.
+            prediction = torch.mean(torch.stack(predictions, dim=0), dim=0)
+
+            # Use the prediction as the observation input to the policy.
+            obs = prediction[:, -obs.shape[-1]:]  # Take only the observation part.
+
         values, action, action_log_prob, rnn_states, rnn_states_critic = self.trainer.policy.get_actions(
             share_obs,
             obs,
