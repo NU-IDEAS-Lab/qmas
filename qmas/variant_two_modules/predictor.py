@@ -93,10 +93,11 @@ class Predictor(torch.nn.Module):
         '''
 
         # Set up trajectory and visibility mask.
-        trajectory = trajectory.unsqueeze(0)  # Add sample dimension.
+        if trajectory.dim() < 3:
+            trajectory = trajectory.unsqueeze(0)  # Add sample dimension.
         if visibility_mask == None:
             visibility_mask = torch.ones_like(trajectory)  # Default to all visible.
-        else:
+        elif visibility_mask.dim() < 3:
             visibility_mask = visibility_mask.unsqueeze(0) # Add sample dimension.
 
         # Apply the visibility mask to the trajectory.
