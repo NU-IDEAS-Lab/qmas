@@ -184,6 +184,14 @@ class PettingzooRunner(Runner):
                 *self.buffer.obs.shape[3:]
             ).to(self.device)
 
+            # Reshape the uncertainty.
+            uncertainty = uncertainty[:, -1, :].reshape(obs.shape).to(self.device)
+            # Inject the uncertainty into the prediction.
+            MAP_LAYERS = pemo.MAP_LAYERS
+            # Use the mean uncertainty across all observation channels as the uncertainty value.
+            for i in range(obs.shape[0]):
+                obs[i, MAP_LAYERS.UNCERTAINTY] = torch.mean(uncertainty[i], axis=0)
+            
         values, action, action_log_prob, rnn_states, rnn_states_critic = self.trainer.policy.get_actions(
             share_obs,
             obs,
