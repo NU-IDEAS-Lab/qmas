@@ -86,7 +86,10 @@ class QmasPolicy(R_MAPPOPolicy):
             predictions.append(pred.unsqueeze(0).to(self.device))
         predictions = torch.cat(predictions, dim=0)  # Shape: (num_predictors, T, D_out)
         prediction = predictions.mean(dim=0)
-        uncertainty = predictions.var(dim=0)
+        if predictions.shape[0] > 1:
+            uncertainty = predictions.var(dim=0)
+        else:
+            uncertainty = torch.zeros_like(prediction)
 
         return prediction, uncertainty
 
