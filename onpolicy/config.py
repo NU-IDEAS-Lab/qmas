@@ -304,6 +304,8 @@ def get_config():
                         default=False, help='use a linear schedule on the learning rate')
     # save parameters
     parser.add_argument("--save_interval", type=int, default=1, help="time duration between contiunous twice models saving.")
+    parser.add_argument("--save_checkpoints", default=False, action="store_true",
+                        help="Whether to store a checkpoint at each save interval.")
     parser.add_argument("--results_dir", type=str, default="", help="file path at which to store results")
 
     # log parameters
@@ -354,6 +356,8 @@ def get_config():
     parser.add_argument("--diffusion_model_type", type=str, default="dit1d",
                         choices=["jannerunet", "dit1d", "unet2d"],
                         help="Type of diffusion model to use")
+    parser.add_argument("--diffusion_epoch", type=int, default=5,
+                        help="Number of epochs to train the diffusion model for at each training step")
 
     # Torch parameters.
     parser.add_argument("--torch_compile", action="store_true",

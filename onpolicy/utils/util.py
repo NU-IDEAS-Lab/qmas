@@ -7,7 +7,32 @@ from gymnasium import spaces
 def check(input):
     if type(input) == np.ndarray:
         return torch.from_numpy(input)
-        
+
+def nanvar(tensor, dim: int=None, keepdim: bool=False, correction: int=1):
+    """ From https://github.com/pytorch/pytorch/issues/61474#issuecomment-2770234466 """
+    # Count non-NaN elements
+    count = torch.sum(~torch.isnan(tensor), dim=dim, keepdim=keepdim)
+    
+    # Compute mean while ignoring NaNs
+    mean = torch.nanmean(tensor, dim=dim, keepdim=True)
+    
+    # Compute squared difference from the mean
+    sq_diff = (tensor - mean).pow(2)
+    sq_diff = torch.where(torch.isnan(sq_diff), torch.tensor(0.0, device=tensor.device, dtype=tensor.dtype), sq_diff)
+    
+    # Sum of squared differences
+    sum_sq_diff = sq_diff.sum(dim=dim, keepdim=keepdim)
+    
+    # Degrees of freedom correction (e.g., 1 for sample variance)
+    divisor = count - correction
+    divisor = torch.clamp(divisor, min=1)  # Avoid division by zero
+    return sum_sq_diff / divisor
+
+def nanstd(tensor, dim: int=None, keepdim: bool=False, correction: int=1):
+    """ From https://github.com/pytorch/pytorch/issues/61474#issuecomment-2770234466 """
+    return nanvar(tensor, dim=dim, keepdim=keepdim, correction=correction).sqrt()
+
+
 def get_grad_norm(it):
     sum_grad = 0
     for x in it:

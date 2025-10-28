@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch_geometric.data import Batch
-from onpolicy.utils.util import get_grad_norm, huber_loss, mse_loss
+from onpolicy.utils.util import get_grad_norm, huber_loss, mse_loss, nanstd
 from onpolicy.utils.valuenorm import ValueNorm
 from onpolicy.models.utils.util import check
 from copy import deepcopy
@@ -205,10 +205,10 @@ class R_MAPPO():
             advantages = buffer.returns[:last_step] - self.value_normalizer.denormalize(buffer.value_preds[:last_step])
         else:
             advantages = buffer.returns[:last_step] - buffer.value_preds[:last_step]
-        advantages_copy = deepcopy(advantages)
+        advantages_copy = advantages.clone()
         advantages_copy[buffer.active_masks[:last_step] == 0.0] = np.nan
-        mean_advantages = np.nanmean(advantages_copy)
-        std_advantages = np.nanstd(advantages_copy)
+        mean_advantages = torch.nanmean(advantages_copy)
+        std_advantages = nanstd(advantages_copy)
         advantages = (advantages - mean_advantages) / (std_advantages + 1e-5)
         
 
@@ -230,6 +230,7 @@ class R_MAPPO():
                 num_updates += 1
 
         for k in train_info.keys():
+            train_info[k] = train_info[k].item()
             train_info[k] /= num_updates
  
         return train_info
@@ -242,9 +243,9 @@ class R_MAPPO():
         value_loss, critic_grad_norm, policy_loss, dist_entropy, actor_grad_norm, imp_weights \
                     = self.ppo_update(sample, update_actor, update_critic)
 
-        train_info['value_loss'] += value_loss.item()
-        train_info['policy_loss'] += policy_loss.item()
-        train_info['dist_entropy'] += dist_entropy.item()
+        train_info['value_loss'] += value_loss
+        train_info['policy_loss'] += policy_loss
+        train_info['dist_entropy'] += dist_entropy
         train_info['actor_grad_norm'] += actor_grad_norm
         train_info['critic_grad_norm'] += critic_grad_norm
         train_info['ratio'] += imp_weights.mean()
