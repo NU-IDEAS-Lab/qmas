@@ -473,6 +473,8 @@ class parallel_env(ParallelEnv):
         ax_hr.imshow(background, cmap=cmap_visibility, vmin=0, vmax=1)
         ax_hr.set_title("Human-Readable State")
         ax_hr.axis("on")
+        ax_hr.set_xlim(-1, self.world_dims[0])
+        ax_hr.set_ylim(-1, self.world_dims[1])
 
         # Plot obstacles.
         positions = np.argwhere(state[MAP_LAYERS.OBSTACLES] > 0.9)
