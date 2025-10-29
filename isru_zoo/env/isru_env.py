@@ -1059,6 +1059,7 @@ class parallel_env(ParallelEnv):
                 agent,
                 senders=senders_set
             )
+            agent.last_observation = agent_observation, fixed_mask
             obs_dict[agent] = agent_observation
             info_dict[agent]["visibility_mask"] = fixed_mask
 
@@ -1587,11 +1588,20 @@ class parallel_env_map_obs(parallel_env):
         if pred is not None:
             self.render_state(pred[-1, 0].numpy(), figsize=figsize)
 
-        obs, fixed_mask = self._observe(self.agents[0], global_state=False)
-        obs *= fixed_mask  # Apply the visibility mask for rendering.
+        agent = self.agents[0]
+        if agent.last_observation != None:
+            # Use the prior observation if possible since this will contain communicated information.
+            obs, fixed_mask = agent.last_observation
+        else:
+            obs, fixed_mask = self._observe(agent)
+
+        # Apply the visibility mask for rendering.
+        obs *= fixed_mask
+
         return self.render_state(
             obs,
             figsize=figsize,
+            # This mask determines which areas of the map are shown as black/white.
             visibility_mask=fixed_mask[self.MAP_LAYERS.AGENTS_PROSPECTOR],
             last_action=self.agents[0].last_action,
         )
