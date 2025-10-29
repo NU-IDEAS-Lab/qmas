@@ -474,7 +474,7 @@ class parallel_env(ParallelEnv):
         ax_hr.set_title("Human-Readable State")
         ax_hr.axis("on")
         ax_hr.set_xlim(-1, self.world_dims[0])
-        ax_hr.set_ylim(-1, self.world_dims[1])
+        ax_hr.set_ylim(self.world_dims[1], -1)  # Invert y-axis to match array indexing
 
         # Plot obstacles.
         positions = np.argwhere(state[MAP_LAYERS.OBSTACLES] > 0.9)
