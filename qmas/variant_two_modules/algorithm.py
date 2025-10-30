@@ -198,10 +198,11 @@ class QmasAlgorithm(R_MAPPO):
         )['diffusion_loss']
 
         # Update guide model.
-        guide_loss = predictor.diffuser.update_classifier(
-            x0=trajectories,
-            condition_cg=returns_batch
-        )['classifier_loss']
+        # guide_loss = predictor.diffuser.update_classifier(
+        #     x0=trajectories,
+        #     condition_cg=returns_batch
+        # )['classifier_loss']
+        guide_loss = torch.tensor(0.0, device=predictor.device)  # Placeholder if guide update is disabled.
 
         train_info['diffuser_loss'] += diffuser_loss
         train_info['guide_loss'] += guide_loss

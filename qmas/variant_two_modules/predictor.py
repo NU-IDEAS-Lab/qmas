@@ -66,14 +66,14 @@ class Predictor(torch.nn.Module):
             raise ValueError(f"Unknown diffusion model type: {args.diffusion_model_type}")
         
         # Create the guide and diffuser.
-        self.guide = OptimalityClassifier(guide_base).to(device)
+        # self.guide = OptimalityClassifier(guide_base).to(device)
         self.diffuser = DiscreteDiffusionSDE(
             diffuser_base,
             None,
             fix_mask,
             loss_weight,
             diffusion_steps=256,
-            classifier=self.guide,
+            # classifier=self.guide,
             predict_noise=False
         ).to(device)
 
@@ -125,7 +125,7 @@ class Predictor(torch.nn.Module):
                 sample_steps=5,
                 condition_cg=trajectory,
                 condition_cg_mask=visibility_mask,
-                w_cg=0.1,
+                w_cg=0.0,
                 w_cfg=0.0
             )
 
