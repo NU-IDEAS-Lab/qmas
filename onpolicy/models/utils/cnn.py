@@ -151,7 +151,7 @@ class EncoderLayer(nn.Module):
         self.encoder = smp.encoders.get_encoder(
             "resnet18",
             in_channels=input_channel,
-            depth=2,
+            depth=1,
             weights=None,
         )
 
@@ -194,8 +194,8 @@ class UNetLayer(nn.Module):
                 in_channels=input_channel,                  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
                 classes=1,                      # model output channels (number of classes in your dataset)
                 activation=None,          # activation function
-                encoder_depth=2,
-                decoder_channels=[32, 16],
+                encoder_depth=1,
+                decoder_channels=[32],
             ),
             Flatten(),
             init_(nn.Linear(input_width * input_height, hidden_size)),
