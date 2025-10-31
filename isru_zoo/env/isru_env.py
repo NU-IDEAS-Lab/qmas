@@ -1081,10 +1081,11 @@ class parallel_env(ParallelEnv):
             r_intrinsic = 100.0 * r_deposited + 1.0 * r_cargo + 1.0 * r_exploration
             reward_dict[agent] += r_intrinsic
 
-            # Provide uncertainty reduction reward. TODO: Only give this reward if we had requested comms.
-            # uncertainty_sum = agent.uncertainty.sum()
-            # if uncertainty_sum < uncertainty_sum_prev[agent]:
-            #     reward_dict[agent] += REWARD_UNCERTAINTY_REDUCTION * (uncertainty_sum_prev[agent] - uncertainty_sum)
+            # Provide uncertainty reduction reward.
+            if agent in comms_requests_explicit or agent in comms_requests_relative:
+                uncertainty_sum = agent.uncertainty.sum()
+                if uncertainty_sum < uncertainty_sum_prev[agent]:
+                    reward_dict[agent] += REWARD_UNCERTAINTY_REDUCTION * (uncertainty_sum_prev[agent] - uncertainty_sum)
             
             # Provide a completion reward.
             if end_done:
