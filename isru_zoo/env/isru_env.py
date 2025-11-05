@@ -855,7 +855,8 @@ class parallel_env(ParallelEnv):
         # Reward constants.
         REWARD_COLLISION = -2.0
         REWARD_NO_EXPLORATION = -1.0
-        REWARD_COMMUNICATION = -5.0  
+        REWARD_COMMUNICATION = -5.0
+        REWARD_NO_COMMUNICATION = 5.0
         REWARD_EXTRACTOR_ON_RESOURCE = 20.0
         REWARD_DEPOSIT = 0.0
         REWARD_EXTRACT = 100000.0
@@ -946,7 +947,9 @@ class parallel_env(ParallelEnv):
                         comms_position_relative = action["communication"]["relative_position"]
                         comms_requests_relative[agent] = comms_position_relative
                     info_dict["communication/requests_made"] += 1
-                    reward_dict[agent] += REWARD_COMMUNICATION
+                    # reward_dict[agent] += REWARD_COMMUNICATION
+                else:
+                    reward_dict[agent] += REWARD_NO_COMMUNICATION
 
                 # Corrected resource handling for Hauler agents
                 if agent.capabilities[CAP.CARRY]:
@@ -1081,10 +1084,11 @@ class parallel_env(ParallelEnv):
             r_intrinsic = 100.0 * r_deposited + 1.0 * r_cargo + 1.0 * r_exploration
             reward_dict[agent] += r_intrinsic
 
-            # Provide uncertainty reduction reward. TODO: Only give this reward if we had requested comms.
-            # uncertainty_sum = agent.uncertainty.sum()
-            # if uncertainty_sum < uncertainty_sum_prev[agent]:
-            #     reward_dict[agent] += REWARD_UNCERTAINTY_REDUCTION * (uncertainty_sum_prev[agent] - uncertainty_sum)
+            # Provide uncertainty reduction reward.
+            if agent in comms_requests_explicit or agent in comms_requests_relative:
+                uncertainty_sum = agent.uncertainty.sum()
+                if uncertainty_sum < uncertainty_sum_prev[agent]:
+                    reward_dict[agent] += REWARD_UNCERTAINTY_REDUCTION * (uncertainty_sum_prev[agent] - uncertainty_sum)
             
             # Provide a completion reward.
             if end_done:
@@ -1430,7 +1434,21 @@ class parallel_env_map_obs(parallel_env):
         # Set up the agent maps.
         map_agents = np.zeros((*self.world_dims, len(AGENT_ROLE) + 1), dtype=np.int32)
         for i, a in enumerate(self.possible_agents):
-            pos = a.grid_position
+            # Inject positional noise into agent posiitons
+            if self.noisy_memory and a is not agent:
+                base_pos = a.grid_position
+                u = float(agent.uncertainty[base_pos[0], base_pos[1]])
+                sigma = np.sqrt(u) if u > 0 else 0.0
+                if sigma > 0.0:
+                    xy_noisy = a.position + np.random.normal(0.0, sigma, size=2)
+                    pos = np.floor(xy_noisy).astype(np.int32)
+                    pos[0] = np.clip(pos[0], 0, self.world_dims[0] - 1)
+                    pos[1] = np.clip(pos[1], 0, self.world_dims[1] - 1)
+                else:
+                    pos = base_pos
+            else:
+                pos = a.grid_position
+
             # map_agents[pos[0], pos[1], a.role.value] = 1
             if a == agent:
                 map_agents[pos[0], pos[1], a.role.value] += 2  # Ego agent
@@ -1628,7 +1646,19 @@ class parallel_env_map_obs_comms_only(parallel_env_map_obs):
         # Set up the agent maps.
         map_agents = np.zeros((*self.world_dims, len(AGENT_ROLE) + 1), dtype=np.int32)
         for i, a in enumerate(self.possible_agents):
-            pos = a.grid_position
+            if self.noisy_memory and a is not agent:
+                base_pos = a.grid_position
+                u = float(agent.uncertainty[base_pos[0], base_pos[1]])
+                sigma = np.sqrt(u) if u > 0 else 0.0
+                if sigma > 0.0:
+                    xy_noisy = a.position + np.random.normal(0.0, sigma, size=2)
+                    pos = np.floor(xy_noisy).astype(np.int32)
+                    pos[0] = np.clip(pos[0], 0, self.world_dims[0] - 1)
+                    pos[1] = np.clip(pos[1], 0, self.world_dims[1] - 1)
+                else:
+                    pos = base_pos
+            else:
+                pos = a.grid_position
             if a == agent:
                 map_agents[pos[0], pos[1], a.role.value] += 2  # Ego agent
             else:
