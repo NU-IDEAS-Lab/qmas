@@ -201,6 +201,9 @@ class R_MAPPO():
         :return train_info: (dict) contains information regarding training update (e.g. loss, grad norms, etc).
         """
 
+        if not self.policy.IS_TRAINABLE:
+            return {}
+
         if self._use_popart or self._use_valuenorm:
             advantages = buffer.returns[:last_step] - self.value_normalizer.denormalize(buffer.value_preds[:last_step])
         else:

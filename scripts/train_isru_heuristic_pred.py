@@ -48,8 +48,7 @@ args = [
 
     "--seed", "0",
 
-    # "--n_rollout_threads", "90",
-    "--n_rollout_threads", "1",
+    "--n_rollout_threads", "90",
     "--n_training_threads", "32",
     "--cuda",
     "--cuda_idx", "5",
@@ -57,8 +56,8 @@ args = [
 
     "--save_interval", "200000",
     # "--save_checkpoints",
-    # "--results_dir", "/data/group/mas/qmas/results",
-    # "--use_wandb",
+    "--results_dir", "/data/group/mas/qmas/results",
+    "--use_wandb",
 ]
 
 main(args)

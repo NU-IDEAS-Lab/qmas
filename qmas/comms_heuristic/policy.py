@@ -2,11 +2,13 @@
 import torch
 import gymnasium.spaces as spaces
 from qmas.variant_two_modules.policy import QmasPolicy as QmasPolicyBase
-from .heuristic import get_action_heuristic
+from qmas.comms_heuristic.heuristic import get_action_heuristic
 
 
 class QmasPolicy(QmasPolicyBase):
     ''' This class implements the QMAS policy. '''
+
+    IS_TRAINABLE = False
 
     def __init__(self, args, obs_space, cent_obs_space, act_space, device=torch.device("cpu")):
 
@@ -22,15 +24,12 @@ class QmasPolicy(QmasPolicyBase):
         agents: list of agent objects (needed for heuristic)
         raw_obs: list of raw observation dicts (needed for heuristic)
         """
-        # Get actions from heuristic
-        actions = torch.zeros((obs.shape[0], self.action_dim), dtype=torch.float32)
-        for i in range(obs.shape[0]):
-            action = get_action_heuristic(self.args, self.act_space, obs[i], self.args.env_class)
-            actions[i] = action
+        
+        actions, rnn_states_actor = self.act(obs, rnn_states_actor, masks, available_actions, deterministic)
         
         # Provide dummy tensors for values and log_probs since they are not used.
         values = torch.zeros((cent_obs.shape[0], 1, 1), dtype=torch.float32)
-        log_probs = torch.zeros((obs.shape[0], 1, 1), dtype=torch.float32)
+        log_probs = torch.zeros((obs.shape[0], 1), dtype=torch.float32)
 
         return values, actions, log_probs, rnn_states_actor, rnn_states_critic
 
@@ -41,12 +40,8 @@ class QmasPolicy(QmasPolicyBase):
         Expects action to be a list/dict with 'communication' and 'movement' keys.
         """
         
-        # Provide dummy tensors for values and log_probs since they are not used.
-        values = torch.zeros((obs.shape[0], obs.shape[1], 1), dtype=torch.float32)
-        log_probs = torch.zeros((obs.shape[0], obs.shape[1], 1), dtype=torch.float32)
-        dist_entropy = torch.zeros((obs.shape[0], obs.shape[1], 1), dtype=torch.float32)
+        raise NotImplementedError("QmasPolicy does not implement evaluate_actions since it is not trainable.")
 
-        return values, log_probs, dist_entropy
 
     def act(self, obs, rnn_states_actor, masks, available_actions=None, deterministic=False):
         """

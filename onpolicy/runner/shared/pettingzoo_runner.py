@@ -84,8 +84,10 @@ class PettingzooRunner(Runner):
             # Get certain stats.
             avg_episode_rewards = self.buffer.rewards.mean().item() * self.episode_length
 
-            # compute return and update network
-            self.compute()
+            # compute return
+            if self.policy.IS_TRAINABLE:
+                self.compute()
+
             if self.all_args.torch_compile:
                 train_infos = self.train_compiled()
             else:
@@ -133,7 +135,10 @@ class PettingzooRunner(Runner):
             actions_shape = (self.n_rollout_threads, self.num_agents, act_shape)
         
         # Get the shape of action log probabilities from the policy.
-        action_log_prob_shape = (self.n_rollout_threads, self.num_agents, self.policy.actor.act.log_prob_dim)
+        if self.policy.IS_TRAINABLE:
+            action_log_prob_shape = (self.n_rollout_threads, self.num_agents, self.policy.actor.act.log_prob_dim)
+        else:
+            action_log_prob_shape = (self.n_rollout_threads, self.num_agents, 1)
 
         # Initialize buffer.
         self.buffer.insert(
