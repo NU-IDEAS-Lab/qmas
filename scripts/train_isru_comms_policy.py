@@ -24,7 +24,10 @@ args = [
 
     "--observation_radius", "2",
     "--observation_mask",
-    # "--available_actions_mask",
+    
+    # "--broadcast_uncertainty_threshold", "0.5",
+    # "--nearest_uncertainty_threshold", "0.5",
+
 
     "--num_env_steps", "30000000",
     "--episode_length", "200",

@@ -22,7 +22,7 @@ args = [
 
     "--algorithm_class", "qmas.variant_two_modules.algorithm.QmasAlgorithm",
     "--policy_class", "qmas.variant_two_modules.policy.QmasPolicy",
-    "--algorithm_name", "mappo",
+    "--algorithm_name", "rmappo",
     "--use_centralized_V",
     "--use_gae",
     "--use_gae_amadm",

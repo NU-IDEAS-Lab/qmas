@@ -1,4 +1,3 @@
-
 import torch
 import gymnasium.spaces as spaces
 from isru_zoo.env.entity import *
@@ -10,13 +9,13 @@ def get_action_heuristic(args, action_space, observation, env_name):
     Wrapper function to select appropriate heuristic based on environment name.
     '''
     if env_name == "isru_zoo.isru_v0.parallel_env_map_obs":
-        return _get_action_heuristic_pemo(action_space, observation)
+        return _get_action_heuristic_pemo(args, action_space, observation)
     elif env_name == "isru_zoo.isru_v0.parallel_env_flat_map_obs":
         return _get_action_heuristic_pefmo(args, observation)
     else:
         raise ValueError(f"Unknown environment name: {env_name}")
 
-def _get_action_heuristic_pemo(action_space, observation):
+def _get_action_heuristic_pemo(args, action_space, observation):
     '''
     Uses a simple heuristic to determine the action based on agent type:
     - Prospectors: Move toward nearest unexplored area
@@ -157,9 +156,51 @@ def _get_action_heuristic_pemo(action_space, observation):
 
     action = action_space.sample()  # Sample a dummy action.
     action["movement"] = moore_index
-    action["communication"]["request"] = 1  # Dummy communication.
-    if "relative_position" in action["communication"]:
-        action["communication"]["relative_position"] = [0, 0]  # Dummy communication
+
+    
+    communication_mode = getattr(args, "communication_mode", "nearest")
+    # UNCERTAINTY layer is normalized to [0, 1] in the env.
+    uncertainty_layer = observation[pemo.MAP_LAYERS.UNCERTAINTY]
+
+    # - Broadcast mode: request communication only if the ego agent's
+    #   mean uncertainty over the map exceeds a threshold.
+    if communication_mode == "broadcast":
+        mean_uncertainty = float(torch.mean(uncertainty_layer).item())
+        threshold = args.broadcast_uncertainty_threshold
+
+        if mean_uncertainty > threshold:
+            request_flag = 1 
+        else :
+            request_flag = 0
+
+    elif communication_mode == "nrearest":
+        # # Local heuristic: request communication for all cells 
+        # whose uncertainty exceeds the threshold.
+        threshold = args.nearest_uncertainty_threshold
+
+        mask = uncertainty_layer > threshold
+        if torch.any(mask):
+            # Find all locations above the threshold
+            positions = torch.argwhere(mask)
+
+            request_flag = 1
+
+            # Build a list of relative positions we request comms from.
+            rel_positions = []
+            for (x, y) in positions:
+                rel_x = float(observation[pemo.MAP_LAYERS.RELATIVE_POS_X, x, y].item())
+                rel_y = float(observation[pemo.MAP_LAYERS.RELATIVE_POS_Y, x, y].item())
+                rel_positions.append([rel_x, rel_y])
+
+            if "relative_position" in action["communication"]:
+                action["communication"]["relative_position"] = rel_positions
+        else:
+            request_flag = 0
+            if "relative_position" in action["communication"]:
+                action["communication"]["relative_position"] = []
+
+    # Ensure shape compatibility with Box(low=0, high=1, shape=(1,))
+    action["communication"]["request"][0] = request_flag
     
     action_flat = torch.from_numpy(spaces.flatten(action_space, action))
 
