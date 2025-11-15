@@ -198,13 +198,13 @@ class QmasAlgorithm(R_MAPPO):
         )['diffusion_loss']
 
         # Update guide model.
-        guide_loss = predictor.diffuser.update_classifier(
-            x0=trajectories,
-            condition_cg=returns_batch
-        )['classifier_loss']
+        # guide_loss = predictor.diffuser.update_classifier(
+        #     x0=trajectories,
+        #     condition_cg=returns_batch
+        # )['classifier_loss']
 
         train_info['diffuser_loss'] += diffuser_loss
-        train_info['guide_loss'] += guide_loss
+        # train_info['guide_loss'] += guide_loss
 
     def prep_training(self):
         super().prep_training()
