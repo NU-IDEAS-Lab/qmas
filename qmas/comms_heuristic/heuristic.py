@@ -191,9 +191,9 @@ def _get_action_heuristic_pemo(args, action_space, observation):
                 rel_x = float(observation[pemo.MAP_LAYERS.RELATIVE_POS_X, x, y].item())
                 rel_y = float(observation[pemo.MAP_LAYERS.RELATIVE_POS_Y, x, y].item())
                 rel_positions.append([rel_x, rel_y])
-
+            
             if "relative_position" in action["communication"]:
-                action["communication"]["relative_position"] = rel_positions
+                action["communication"]["relative_position"] = rel_positions[0]
         else:
             request_flag = 0
             if "relative_position" in action["communication"]:
