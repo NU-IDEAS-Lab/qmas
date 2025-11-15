@@ -140,6 +140,11 @@ def parse_args(args, parser):
                         help="Index of the GPU to use for policy and critic networks.")
     parser.add_argument("--cuda_idx_predictor", type=int, default=[], nargs="+",
                         help="Index of the GPU to use for world model predictor network.")
+
+    parser.add_argument("--broadcast_uncertainty_threshold", type=float, default=0.5, 
+                        help="Threshold for heuristic communication in broadcast mode.")
+    parser.add_argument("--nearest_uncertainty_threshold", type=float, default=0.5, 
+                        help="Threshold for heuristic communication in nearest mode.")
     
     # Parse once to get the environment name.
     parsed_args, unknown_args = parser.parse_known_args(args)
