@@ -173,7 +173,7 @@ def _get_action_heuristic_pemo(args, action_space, observation):
         else :
             request_flag = 0
 
-    elif communication_mode == "nrearest":
+    elif communication_mode == "nearest":
         # # Local heuristic: request communication for all cells 
         # whose uncertainty exceeds the threshold.
         threshold = args.nearest_uncertainty_threshold
@@ -198,6 +198,8 @@ def _get_action_heuristic_pemo(args, action_space, observation):
             request_flag = 0
             if "relative_position" in action["communication"]:
                 action["communication"]["relative_position"] = []
+    else:
+        raise ValueError(f"Unknown communication mode: {communication_mode}")
 
     # Ensure shape compatibility with Box(low=0, high=1, shape=(1,))
     action["communication"]["request"][0] = request_flag
