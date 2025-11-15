@@ -112,4 +112,4 @@ class QmasPolicy(R_MAPPOPolicy):
             if 'diffuser.fix_mask' in predictor_state_dict:
                 predictor_state_dict['diffuser.fix_mask'] = predictor.diffuser.fix_mask
 
-            predictor.load_state_dict(predictor_state_dict)
+            predictor.load_state_dict(predictor_state_dict, strict=False)

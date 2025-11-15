@@ -73,7 +73,7 @@ class Predictor(torch.nn.Module):
             fix_mask,
             loss_weight,
             diffusion_steps=256,
-            classifier=self.guide,
+            # classifier=self.guide,
             predict_noise=False
         ).to(device)
 
