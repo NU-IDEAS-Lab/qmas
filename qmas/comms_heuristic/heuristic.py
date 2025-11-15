@@ -197,7 +197,7 @@ def _get_action_heuristic_pemo(args, action_space, observation):
         else:
             request_flag = 0
             if "relative_position" in action["communication"]:
-                action["communication"]["relative_position"] = []
+                action["communication"]["relative_position"] = [0.0, 0.0]
     else:
         raise ValueError(f"Unknown communication mode: {communication_mode}")
 
