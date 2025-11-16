@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-    "--experiment_name", "isru-heuristicComms-e200-20x20-ensemble3",
+    "--experiment_name", "isru-heuristicComms-e200-20x20-ensemble3-fullViz",
     "--project_name", "qmas",
     "--env_class", "isru_zoo.isru_v0.parallel_env_map_obs",
     "--user_name", "ideas-mas",
@@ -20,9 +20,9 @@ args = [
     "--world_size", "20",
     "--num_obstacles", "0",
     "--num_resources", "20",
-    "--noisy_memory",
+    # "--noisy_memory",
 
-    "--observation_radius", "2",
+    "--observation_radius", "999999",
     "--observation_mask",
     # "--available_actions_mask",
 
@@ -51,8 +51,8 @@ args = [
     "--n_rollout_threads", "300",
     "--n_training_threads", "32",
     "--cuda",
-    "--cuda_idx", "7",
-    "--cuda_idx_predictor", "7",
+    "--cuda_idx", "3",
+    "--cuda_idx_predictor", "3",
 
     "--save_interval", "200000",
     "--save_checkpoints",
