@@ -174,26 +174,21 @@ def _get_action_heuristic_pemo(args, action_space, observation):
             request_flag = 0
 
     elif communication_mode == "nearest":
-        # # Local heuristic: request communication for all cells 
-        # whose uncertainty exceeds the threshold.
+        # Request communication for the single cell with the maximum uncertainty.
         threshold = args.nearest_uncertainty_threshold
 
-        mask = uncertainty_layer > threshold
-        if torch.any(mask):
-            # Find all locations above the threshold
-            positions = torch.argwhere(mask)
+        # Find the maximum uncertainty value and its position
+        max_val = torch.max(uncertainty_layer)
+        max_pos = torch.argwhere(uncertainty_layer == max_val)
+      
+        max_pos0 = max_pos[0]
 
+        if max_val > threshold:
             request_flag = 1
-
-            # Build a list of relative positions we request comms from.
-            rel_positions = []
-            for (x, y) in positions:
-                rel_x = float(observation[pemo.MAP_LAYERS.RELATIVE_POS_X, x, y].item())
-                rel_y = float(observation[pemo.MAP_LAYERS.RELATIVE_POS_Y, x, y].item())
-                rel_positions.append([rel_x, rel_y])
-            
+            rel_x = float(observation[pemo.MAP_LAYERS.RELATIVE_POS_X, max_pos0[0], max_pos0[1]].item())
+            rel_y = float(observation[pemo.MAP_LAYERS.RELATIVE_POS_Y, max_pos0[0], max_pos0[1]].item())
             if "relative_position" in action["communication"]:
-                action["communication"]["relative_position"] = rel_positions[0]
+                action["communication"]["relative_position"] = [rel_x, rel_y]
         else:
             request_flag = 0
             if "relative_position" in action["communication"]:
