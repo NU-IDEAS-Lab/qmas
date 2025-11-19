@@ -473,6 +473,8 @@ class parallel_env(ParallelEnv):
         ax_hr.imshow(background, cmap=cmap_visibility, vmin=0, vmax=1)
         ax_hr.set_title("Human-Readable State")
         ax_hr.axis("on")
+        ax_hr.set_xlim(-1, self.world_dims[0])
+        ax_hr.set_ylim(self.world_dims[1], -1)  # Invert y-axis to match array indexing
 
         # Plot obstacles.
         positions = np.argwhere(state[MAP_LAYERS.OBSTACLES] > 0.9)
@@ -853,7 +855,8 @@ class parallel_env(ParallelEnv):
         # Reward constants.
         REWARD_COLLISION = -2.0
         REWARD_NO_EXPLORATION = -1.0
-        REWARD_COMMUNICATION = -5.0  
+        REWARD_COMMUNICATION = -5.0
+        REWARD_NO_COMMUNICATION = 5.0
         REWARD_EXTRACTOR_ON_RESOURCE = 20.0
         REWARD_DEPOSIT = 0.0
         REWARD_EXTRACT = 100000.0
@@ -944,7 +947,9 @@ class parallel_env(ParallelEnv):
                         comms_position_relative = action["communication"]["relative_position"]
                         comms_requests_relative[agent] = comms_position_relative
                     info_dict["communication/requests_made"] += 1
-                    reward_dict[agent] += REWARD_COMMUNICATION
+                    # reward_dict[agent] += REWARD_COMMUNICATION
+                else:
+                    reward_dict[agent] += REWARD_NO_COMMUNICATION
 
                 # Corrected resource handling for Hauler agents
                 if agent.capabilities[CAP.CARRY]:
@@ -1057,6 +1062,7 @@ class parallel_env(ParallelEnv):
                 agent,
                 senders=senders_set
             )
+            agent.last_observation = agent_observation, fixed_mask
             obs_dict[agent] = agent_observation
             info_dict[agent]["visibility_mask"] = fixed_mask
 
@@ -1078,10 +1084,11 @@ class parallel_env(ParallelEnv):
             r_intrinsic = 100.0 * r_deposited + 1.0 * r_cargo + 1.0 * r_exploration
             reward_dict[agent] += r_intrinsic
 
-            # Provide uncertainty reduction reward. TODO: Only give this reward if we had requested comms.
-            # uncertainty_sum = agent.uncertainty.sum()
-            # if uncertainty_sum < uncertainty_sum_prev[agent]:
-            #     reward_dict[agent] += REWARD_UNCERTAINTY_REDUCTION * (uncertainty_sum_prev[agent] - uncertainty_sum)
+            # Provide uncertainty reduction reward.
+            if agent in comms_requests_explicit or agent in comms_requests_relative:
+                uncertainty_sum = agent.uncertainty.sum()
+                if uncertainty_sum < uncertainty_sum_prev[agent]:
+                    reward_dict[agent] += REWARD_UNCERTAINTY_REDUCTION * (uncertainty_sum_prev[agent] - uncertainty_sum)
             
             # Provide a completion reward.
             if end_done:
@@ -1585,11 +1592,20 @@ class parallel_env_map_obs(parallel_env):
         if pred is not None:
             self.render_state(pred[-1, 0].numpy(), figsize=figsize)
 
-        obs, fixed_mask = self._observe(self.agents[0], global_state=False)
-        obs *= fixed_mask  # Apply the visibility mask for rendering.
+        agent = self.agents[0]
+        if agent.last_observation != None:
+            # Use the prior observation if possible since this will contain communicated information.
+            obs, fixed_mask = agent.last_observation
+        else:
+            obs, fixed_mask = self._observe(agent)
+
+        # Apply the visibility mask for rendering.
+        obs *= fixed_mask
+
         return self.render_state(
             obs,
             figsize=figsize,
+            # This mask determines which areas of the map are shown as black/white.
             visibility_mask=fixed_mask[self.MAP_LAYERS.AGENTS_PROSPECTOR],
             last_action=self.agents[0].last_action,
         )
