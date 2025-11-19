@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 import threading
+import einops
 
 from onpolicy.algorithms.r_mappo.r_mappo import R_MAPPO
 from onpolicy.utils.util import get_grad_norm, get_shape_from_obs_space, get_shape_from_act_space
@@ -24,6 +25,7 @@ class QmasAlgorithm(R_MAPPO):
         self.predictors = policy.predictors
         self.num_predictors = len(self.predictors)
         self.prediction_horizon = self.predictors[0].prediction_horizon  # Assume all predictors have same horizon
+        self.predictor_2d_conv = args.diffusion_model_type == "unet2d"
 
     def train(self, buffer, update_actor=True, update_critic=True, last_step=-1, episode=None, episodes=None):
         """
@@ -136,52 +138,38 @@ class QmasAlgorithm(R_MAPPO):
     def train_sample_diffuser(self, sample, train_info, predictor, thread_indices=None):
         ''' Performs update for a single sample for a given predictor. '''
         
-        # Permute, flatten, and then permute back to get rid of the thread dimension.
-
-        # Process observations.
+        # If thread indices given, use only data from those threads.
         if thread_indices is None:
             obs_batch = sample["share_obs"]
+            rewards_batch = sample["rewards"]
+            fix_mask_batch = sample["state_visibility_mask"]
         else:
             obs_batch = sample["share_obs"][:, :, thread_indices]
-        obs_batch = obs_batch.permute(1, 0, *range(2, obs_batch.ndim))
-        obs_batch = obs_batch.flatten(start_dim=1, end_dim=2)
-        obs_batch = obs_batch.permute(1, 0, *range(2, obs_batch.ndim))
-        obs_batch = obs_batch.reshape(*obs_batch.shape[:2], -1)
-
-        # Process rewards.
-        if thread_indices is None:
-            rewards_batch = sample["rewards"]
-        else:
             rewards_batch = sample["rewards"][:, :, thread_indices]
-        rewards_batch = rewards_batch.permute(1, 0, *range(2, rewards_batch.ndim))
-        rewards_batch = rewards_batch.flatten(start_dim=1, end_dim=2)
-        rewards_batch = rewards_batch.permute(1, 0, *range(2, rewards_batch.ndim))
-        rewards_batch = rewards_batch.reshape(*rewards_batch.shape[:2], -1)
+            fix_mask_batch = sample["state_visibility_mask"][:, :, thread_indices]
 
-        # Sum rewards across all agents.
+        if self.predictor_2d_conv:
+            # Set up batches for 2D convolution.
+            obs_batch = einops.rearrange(obs_batch, 'b h t c ... -> (b t) (h c) ...')
+            fix_mask_batch = einops.rearrange(fix_mask_batch, 'b h t c ... -> (b t) (h c) ...')
+        else:
+            # Set up batches for 1D convolution.
+            obs_batch = einops.rearrange(obs_batch, 'b h t ... -> (b t) h (...)')
+            fix_mask_batch = einops.rearrange(fix_mask_batch, 'b h t ... -> (b t) h (...)')
+
+        # Process rewards. Sum rewards across all agents.
+        rewards_batch = einops.rearrange(rewards_batch, 'b h t ... -> (b t) h ...')
         rewards_batch = torch.sum(rewards_batch, dim=-1)
 
-        # Condition using visibility mask.
-        if thread_indices is None:
-            visibility_mask_batch = sample["state_visibility_mask"]
-        else:
-            visibility_mask_batch = sample["state_visibility_mask"][:, :, thread_indices]
-        visibility_mask_batch = visibility_mask_batch.permute(1, 0, *range(2, visibility_mask_batch.ndim))
-        visibility_mask_batch = visibility_mask_batch.flatten(start_dim=1, end_dim=2)
-        visibility_mask_batch = visibility_mask_batch.permute(1, 0, *range(2, visibility_mask_batch.ndim))
-        visibility_mask_batch = visibility_mask_batch.reshape(*visibility_mask_batch.shape[:2], -1)
-        fix_mask_batch = visibility_mask_batch.float()
-        
         # Calculate trajectory returns.
         discounts = torch.ones((rewards_batch.shape[0], rewards_batch.shape[1]), dtype=torch.float32) * 0.997 # TODO: This constant is from Janner et al. (2022).
         discounts = torch.pow(discounts, torch.arange(1, rewards_batch.shape[1] + 1, dtype=torch.float32))
-        returns_batch = torch.sum(rewards_batch * discounts, dim=1).reshape((-1, 1))
+        discounts = discounts.unsqueeze(-1)
+        returns_batch = torch.sum(rewards_batch * discounts, dim=1) #.reshape((-1, 1))
 
         # Build trajectories.
         # trajectories = torch.cat([actions_batch, obs_batch], dim=-1)
         trajectories = obs_batch
-
-        # Get the visibility mask for the current agent.
 
         # Transfer tensors to the device.
         trajectories = trajectories.to(predictor.device)
@@ -196,15 +184,16 @@ class QmasAlgorithm(R_MAPPO):
         diffuser_loss = predictor.diffuser.update_diffusion(
             x0=trajectories,
         )['diffusion_loss']
+        train_info['diffuser_loss'] += diffuser_loss
 
         # Update guide model.
-        # guide_loss = predictor.diffuser.update_classifier(
-        #     x0=trajectories,
-        #     condition_cg=returns_batch
-        # )['classifier_loss']
+        if predictor.diffuser.classifier is not None:
+            guide_loss = predictor.diffuser.update_classifier(
+                x0=trajectories,
+                condition_cg=returns_batch
+            )['classifier_loss']
+            train_info['guide_loss'] += guide_loss
 
-        train_info['diffuser_loss'] += diffuser_loss
-        # train_info['guide_loss'] += guide_loss
 
     def prep_training(self):
         super().prep_training()

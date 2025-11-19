@@ -354,7 +354,7 @@ def get_config():
     parser.add_argument("--diffusion_steps", type=int, default=20)
     parser.add_argument("--diffusion_autoregression_steps", type=int, default=0)
     parser.add_argument("--diffusion_model_type", type=str, default="dit1d",
-                        choices=["jannerunet", "dit1d"],
+                        choices=["jannerunet", "dit1d", "unet2d"],
                         help="Type of diffusion model to use")
     parser.add_argument("--diffusion_epoch", type=int, default=5,
                         help="Number of epochs to train the diffusion model for at each training step")
