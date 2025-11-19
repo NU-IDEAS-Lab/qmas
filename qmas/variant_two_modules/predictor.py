@@ -70,22 +70,12 @@ class Predictor(torch.nn.Module):
             diffuser_base = UNet2d(
                 n_channels = obs_shape[0] * self.prediction_horizon,
             )
-            guide_base = HalfDiT1d(
-                x_dim=transition_dim,
-                out_dim=1,
-                x_seq_len=self.prediction_horizon,
-                emb_dim=128,
-                d_model=256,
-                n_heads=8,
-                depth=4,
-                timestep_emb_type="untrainable_fourier",
-                timestep_emb_params={"scale": 0.02},
-            )
+            guide_base = None
         else:
             raise ValueError(f"Unknown diffusion model type: {args.diffusion_model_type}")
 
         # Create the guide and diffuser.
-        self.guide = OptimalityClassifier(guide_base).to(device)
+        self.guide = None if guide_base is None else OptimalityClassifier(guide_base).to(device)
         self.diffuser = DiscreteDiffusionSDE(
             diffuser_base,
             None,
