@@ -174,20 +174,47 @@ def _get_action_heuristic_pemo(args, action_space, observation):
             request_flag = 0
 
     elif communication_mode == "nearest":
-        # Request communication for the single cell with the maximum uncertainty.
+        # Request communication for the region with the maximum summed uncertainty.
         threshold = args.nearest_uncertainty_threshold
 
-        # Find the maximum uncertainty value and its position
-        max_val = torch.max(uncertainty_layer)
-        max_pos = torch.argwhere(uncertainty_layer == max_val)
-      
-        max_pos0 = max_pos[0]
+        # Tile the uncertainty map into squares and select the one
+        # with the largest sum of uncertainty values for comms request.
+        H, W = uncertainty_layer.shape
+        
+        region_size = int(args.nearest_region_size)
+        
 
-        if max_val > threshold:
+        best_region_sum = None
+        best_region_mean = 0.0
+        best_cell = None
+
+        for i in range(0, H, region_size):
+            for j in range(0, W, region_size):
+                sub = uncertainty_layer[i:i + region_size, j:j + region_size]
+                if sub.numel() == 0:
+                    continue
+
+                region_sum = float(torch.sum(sub).item())
+                region_mean = region_sum / float(sub.numel())
+
+                if best_region_sum is None or region_sum > best_region_sum:
+                    best_region_sum = region_sum
+                    best_region_mean = region_mean
+
+                    # Within this region, use the cell with maximum uncertainty
+                    # as the representative target for the communication request.
+                    flat_idx = int(torch.argmax(sub).item())
+                    _, local_w = sub.shape
+                    local_i = flat_idx // local_w
+                    local_j = flat_idx % local_w
+                    best_cell = (i + local_i, j + local_j)
+
+        if best_region_sum is not None and best_region_mean > threshold:
             request_flag = 1
-            rel_x = float(observation[pemo.MAP_LAYERS.RELATIVE_POS_X, max_pos0[0], max_pos0[1]].item())
-            rel_y = float(observation[pemo.MAP_LAYERS.RELATIVE_POS_Y, max_pos0[0], max_pos0[1]].item())
-            if "relative_position" in action["communication"]:
+            if best_cell is not None and "relative_position" in action["communication"]:
+                bi, bj = best_cell
+                rel_x = float(observation[pemo.MAP_LAYERS.RELATIVE_POS_X, bi, bj].item())
+                rel_y = float(observation[pemo.MAP_LAYERS.RELATIVE_POS_Y, bi, bj].item())
                 action["communication"]["relative_position"] = [rel_x, rel_y]
         else:
             request_flag = 0
