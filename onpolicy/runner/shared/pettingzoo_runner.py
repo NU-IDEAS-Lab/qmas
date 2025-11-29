@@ -1,8 +1,7 @@
 from collections import defaultdict, deque
 from collections.abc import Iterable
-from itertools import chain
-import os
 import time
+import einops
 
 import imageio
 import numpy as np
@@ -11,9 +10,8 @@ import wandb
 import zarr
 from tqdm.auto import tqdm
 from collections import deque
-import matplotlib.pyplot as plt
 
-from onpolicy.utils.util import update_linear_schedule, get_shape_from_act_space, get_shape_from_obs_space
+from onpolicy.utils.util import get_shape_from_act_space, get_shape_from_obs_space
 from onpolicy.runner.shared.base_runner import Runner
 
 from onpolicy.utils.shared_buffer_torchrl import SharedReplayBuffer
@@ -438,7 +436,7 @@ class PettingzooRunner(Runner):
 
             for i in range(self.num_agents):
                 # transition = np.concatenate((np.zeros(act_size, dtype=np.float32), obs[0][i].flatten()), axis=0)
-                transition = obs[0][i].flatten()
+                transition = obs[0][i]
                 buffer[i].append({
                     "transition": torch.from_numpy(transition).to(self.device),
                     "visibility_mask": torch.ones(transition.shape, dtype=torch.float32, device=self.device)
@@ -464,6 +462,16 @@ class PettingzooRunner(Runner):
                     for agentIdx in range(self.num_agents):
                         trajectory = torch.stack([t["transition"] for t in buffer[agentIdx]], dim=0)
                         visibility_mask = torch.stack([t["visibility_mask"] for t in buffer[agentIdx]], dim=0)
+
+                        # Reshape trajectory.
+                        if self.all_args.diffusion_model_type == "unet2d":
+                            # Set up for 2D convolution.
+                            trajectory = einops.rearrange(trajectory, 'h c ... -> (h c) ...')
+                            visibility_mask = einops.rearrange(visibility_mask, 'h c ... -> (h c) ...')
+                        else:
+                            # Set up for 1D convolution.
+                            trajectory = einops.rearrange(trajectory, 'h ... -> h (...)')
+                            visibility_mask = einops.rearrange(visibility_mask, 'h ... -> h (...)')
 
                         # Get the prediction from the predictor.
                         pred, variance = self.trainer.policy.get_prediction(
@@ -520,10 +528,11 @@ class PettingzooRunner(Runner):
 
                 # viz_mask_actions = np.ones(actions.shape, dtype=np.float32)  # Assuming actions are fully visible.
                 # viz_mask = np.concatenate([viz_mask_actions, viz_mask_obs.reshape(self.n_render_rollout_threads, self.num_agents, -1)], axis=-1)
-                viz_mask = viz_mask_obs.reshape(self.n_render_rollout_threads, self.num_agents, -1)
+                # viz_mask = viz_mask_obs.reshape(self.n_render_rollout_threads, self.num_agents, -1)
+                viz_mask = viz_mask_obs
                 for i in range(self.num_agents):
                     # transition = np.concatenate((actions[0][i].float(), obs[0][i].flatten()), axis=0)
-                    transition = obs[0][i].flatten()
+                    transition = obs[0][i]
                     agent_viz_mask = viz_mask[0, i]
                     buffer[i].append({
                         "transition": torch.from_numpy(transition).to(self.device),
