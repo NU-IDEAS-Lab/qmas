@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-    "--experiment_name", "isru-heuristicComms-e200-20x20-ensemble3-fullViz",
+    "--experiment_name", "isru-heuristicComms-e200-20x20-ensemble3",
     "--project_name", "qmas",
     "--env_class", "isru_zoo.isru_v0.parallel_env_map_obs",
     "--user_name", "ideas-mas",
@@ -22,9 +22,11 @@ args = [
     "--num_resources", "20",
     # "--noisy_memory",
 
-    "--observation_radius", "999999",
+    "--observation_radius", "2",
     "--observation_mask",
     # "--available_actions_mask",
+
+    "--nearest_region_size", "3",
 
     "--num_env_steps", "30000000",
     "--episode_length", "200",
@@ -43,19 +45,19 @@ args = [
 
     "--diffusion_model_type", "jannerunet",
     "--prediction_ensemble_size", "3",
-    "--prediction_history_window", "10",
+    "--prediction_history_window", "16",
     # "--prediction_disable",
 
     "--seed", "0",
 
-    "--n_rollout_threads", "300",
+    "--n_rollout_threads", "90",
     "--n_training_threads", "32",
     "--cuda",
-    "--cuda_idx", "3",
-    "--cuda_idx_predictor", "3",
+    "--cuda_idx", "5",
+    "--cuda_idx_predictor", "5",
 
     "--save_interval", "200000",
-    "--save_checkpoints",
+    # "--save_checkpoints",
     "--results_dir", "/data/group/mas/qmas/results",
     "--use_wandb",
 ]
