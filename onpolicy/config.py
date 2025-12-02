@@ -238,8 +238,6 @@ def get_config():
                         help="Maximum number of nodes that the GNN can support.")
     parser.add_argument("--gnn_max_neighbors", type=int, default=15,
                         help="Maximum number of neighbors that each node may have.")
-    parser.add_argument("--graph_feat_type", type=str, default=None,
-                        help="Optional feature type flag for graph-based environments and scenarios.")
     # recurrent parameters
     parser.add_argument("--use_naive_recurrent_policy", action=argparse.BooleanOptionalAction,
                         help='Whether to use a naive recurrent policy',
@@ -360,7 +358,7 @@ def get_config():
     parser.add_argument("--diffusion_steps", type=int, default=20)
     parser.add_argument("--diffusion_autoregression_steps", type=int, default=0)
     parser.add_argument("--diffusion_model_type", type=str, default="dit1d",
-                        choices=["jannerunet", "dit1d"],
+                        choices=["jannerunet", "dit1d", "unet2d"],
                         help="Type of diffusion model to use")
     parser.add_argument("--diffusion_epoch", type=int, default=5,
                         help="Number of epochs to train the diffusion model for at each training step")

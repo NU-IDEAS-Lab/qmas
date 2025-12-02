@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-    "--experiment_name", "isru-heuristicComms-e200-20x20-ensemble3",
+    "--experiment_name", "isru-heuristicComms-e200-20x20-ensemble3-unet1d",
     "--project_name", "qmas",
     "--env_class", "isru_zoo.isru_v0.parallel_env_map_obs",
     "--user_name", "ideas-mas",
@@ -45,19 +45,19 @@ args = [
 
     "--diffusion_model_type", "jannerunet",
     "--prediction_ensemble_size", "3",
-    "--prediction_history_window", "16",
+    "--prediction_history_window", "10",
     # "--prediction_disable",
 
     "--seed", "0",
 
-    "--n_rollout_threads", "90",
+    "--n_rollout_threads", "300",
     "--n_training_threads", "32",
     "--cuda",
     "--cuda_idx", "5",
     "--cuda_idx_predictor", "5",
 
     "--save_interval", "200000",
-    # "--save_checkpoints",
+    "--save_checkpoints",
     "--results_dir", "/data/group/mas/qmas/results",
     "--use_wandb",
 ]
