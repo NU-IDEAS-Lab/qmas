@@ -1590,7 +1590,11 @@ class parallel_env_map_obs(parallel_env):
         '''
 
         if pred is not None:
-            self.render_state(pred[-1, 0].numpy(), figsize=figsize)
+            self.render_state(
+                pred[-1, 0].numpy(),
+                figsize=figsize,
+                last_action=self.agents[0].last_action,
+            )
 
         agent = self.agents[0]
         if agent.last_observation != None:
