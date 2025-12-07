@@ -343,6 +343,10 @@ def get_config():
     parser.add_argument("--observation_mask", action="store_true",
                     help="Whether to apply visibility mask to observations during policy training")
 
+    # State encoder parameters
+    parser.add_argument("--state_encoder_output_dim", type=int, default=32,
+                        help="Output dimension of the state encoder network")
+
     # diffuser parameters
     parser.add_argument("--episode_fraction_start_prediction", type=float, default=0.0,
                         help="The fraction of episodes at which to start training the prediction model.")
