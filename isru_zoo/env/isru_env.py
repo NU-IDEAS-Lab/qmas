@@ -1238,6 +1238,97 @@ class parallel_env(ParallelEnv):
         return (dx + 1) * 3 + (dy + 1)
 
 
+class parallel_env_partial_obs(parallel_env):
+    ''' A partial observation version of the ISRU environment. '''
+
+    class MAP_LAYERS(IntEnum):
+        OBSTACLES = 0
+        AGENTS_PROSPECTOR = auto()
+        AGENTS_EXTRACTOR = auto()
+        AGENTS_HAULER = auto()
+        RELATIVE_POS_X = auto()
+        RELATIVE_POS_Y = auto()
+        DEPOTS = auto()
+        RESOURCES_EXTANT = auto()
+        RESOURCES_DEPOSITED = auto()
+        RESOURCES_CARGO = auto()
+        MASK_OBSERVED = auto()
+        MASK_RESOURCES_OBSERVED = auto()
+        UNCERTAINTY = auto()
+    
+    # Layers of the map which are always fixed/visible.
+    MAP_LAYERS_FIXED = [
+        MAP_LAYERS.RELATIVE_POS_X,
+        MAP_LAYERS.RELATIVE_POS_Y,
+        MAP_LAYERS.DEPOTS,
+        MAP_LAYERS.MASK_OBSERVED,
+        MAP_LAYERS.MASK_RESOURCES_OBSERVED,
+        MAP_LAYERS.UNCERTAINTY,
+    ]
+
+
+    @property
+    def map_shape(self):
+        ''' Returns the map shape. '''
+        return (len(self.MAP_LAYERS), *self.world_dims)
+
+
+    @functools.cache
+    def observation_space(self, agent):
+        ''' Returns the observation space for the given agent. '''
+
+        obs_width = agent.observation_radius * 2 + 1
+        return spaces.Box(
+            low=-np.inf,
+            high=np.inf,
+            shape=(len(self.MAP_LAYERS), obs_width, obs_width),
+            dtype=np.float32
+        )
+
+
+    def observe(self, agent, senders=set()):
+        ''' Fills in the state/observation space for the given agent. '''
+
+        obs, fixed_mask = parallel_env_map_obs._observe(self, agent, global_state=False)
+
+        # Set up a larger map with buffer size equal to the observation radius.
+        buffer_size = agent.observation_radius
+        obs_padded = np.zeros((
+            obs.shape[0],
+            obs.shape[1] + 2 * buffer_size,
+            obs.shape[2] + 2 * buffer_size
+        ), dtype=obs.dtype)
+        fixed_mask_padded = np.zeros((
+            fixed_mask.shape[0],
+            fixed_mask.shape[1] + 2 * buffer_size,
+            fixed_mask.shape[2] + 2 * buffer_size
+        ), dtype=fixed_mask.dtype)
+        obs_padded[:, buffer_size:-buffer_size, buffer_size:-buffer_size] = obs
+        fixed_mask_padded[:, buffer_size:-buffer_size, buffer_size:-buffer_size] = fixed_mask
+
+        # Trim based on the agent's observation radius.
+        pos = agent.grid_position + buffer_size
+        rad = agent.observation_radius
+        obs_padded = obs_padded[:, pos[0]-rad:pos[0]+rad+1, pos[1]-rad:pos[1]+rad+1]
+        fixed_mask_padded = fixed_mask_padded[:, pos[0]-rad:pos[0]+rad+1, pos[1]-rad:pos[1]+rad+1]
+        
+        return obs_padded, fixed_mask_padded
+
+
+    @property
+    @functools.cache
+    def state_space(self):
+        ''' Returns the global state space. '''
+
+        return parallel_env_map_obs.observation_space(self, self.possible_agents[0])
+
+
+    def _state(self):
+        ''' Returns the global state and mask of the environment.'''
+
+        return parallel_env_map_obs._observe(self, self.possible_agents[0], global_state=True)
+
+
 class parallel_env_simple_obs(parallel_env):
     ''' A simple observation version of the ISRU environment. '''
 
