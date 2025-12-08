@@ -1040,7 +1040,37 @@ class parallel_env(ParallelEnv):
                     exclude={agent}
                 )
                 if sender is not None:
-                    senders_set.add(sender)
+
+                    # Case 1: Prospector responding to Extractor
+                    if sender.capabilities[CAP.PROSPECT] and agent.capabilities[CAP.EXTRACT]:
+                        # Prospector should respond only if it has actually observed resources
+                        prospector_obs = sender.mask_resources_observed
+                        prospector_has_seen_resource = np.any(prospector_obs)
+
+                        if prospector_has_seen_resource:
+                            senders_set.add(sender)
+
+                    # Case 2: Extractor responding to Hauler
+                    elif sender.capabilities[CAP.EXTRACT] and agent.capabilities[CAP.CARRY]:
+                        # Extractor should respond only if it is on a resource AND hauler has no assigned extractor
+                        px, py = sender.grid_position
+
+                        extractor_on_resource = any(
+                            self.map_resources[r][px, py] > 0 for r in self.possible_resources
+                        )
+
+                        # Find whether any hauler is assigned within pickup range
+                        hauler_assigned = False
+                        for h in self.agents:
+                            if h.capabilities[CAP.CARRY]:
+                                dist = np.linalg.norm(h.position - sender.position)
+                                if dist <= self.hauler_pickup_threshold:
+                                    hauler_assigned = True
+                                    break
+
+                        if extractor_on_resource and not hauler_assigned:
+                            senders_set.add(sender)
+
                 
                 # Determine the visible cells around the requested position.
                 visible = self._get_observation_radius_mask(absolute_request_position, self.default_observation_radius)
@@ -1590,7 +1620,11 @@ class parallel_env_map_obs(parallel_env):
         '''
 
         if pred is not None:
-            self.render_state(pred[-1, 0].numpy(), figsize=figsize)
+            self.render_state(
+                pred[-1, 0].numpy(),
+                figsize=figsize,
+                last_action=self.agents[0].last_action,
+            )
 
         agent = self.agents[0]
         if agent.last_observation != None:

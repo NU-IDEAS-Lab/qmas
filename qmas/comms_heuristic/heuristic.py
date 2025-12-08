@@ -173,31 +173,58 @@ def _get_action_heuristic_pemo(args, action_space, observation):
         else :
             request_flag = 0
 
-    elif communication_mode == "nrearest":
-        # # Local heuristic: request communication for all cells 
-        # whose uncertainty exceeds the threshold.
+    elif communication_mode == "nearest":
+        # Request communication for the region with the maximum summed uncertainty.
         threshold = args.nearest_uncertainty_threshold
 
-        mask = uncertainty_layer > threshold
-        if torch.any(mask):
-            # Find all locations above the threshold
-            positions = torch.argwhere(mask)
+        # Tile the uncertainty map into squares and select the one
+        # with the largest sum of uncertainty values for comms request.
+        H, W = uncertainty_layer.shape
+        
+        region_size = int(args.nearest_region_size)
+        
 
-            request_flag = 1
+        # Collect all regions whose mean uncertainty is above threshold.
+        best_cell = None  # Highest-uncertainty cell among qualifying regions.
+        best_cell_value = float("-inf")
+        qualifying_cells = []
+        for i in range(0, H, region_size):
+            for j in range(0, W, region_size):
+                sub = uncertainty_layer[i:i + region_size, j:j + region_size]
+                if sub.numel() == 0:
+                    continue
 
-            # Build a list of relative positions we request comms from.
-            rel_positions = []
-            for (x, y) in positions:
-                rel_x = float(observation[pemo.MAP_LAYERS.RELATIVE_POS_X, x, y].item())
-                rel_y = float(observation[pemo.MAP_LAYERS.RELATIVE_POS_Y, x, y].item())
-                rel_positions.append([rel_x, rel_y])
+                region_mean = float(torch.mean(sub).item())
+                if region_mean <= threshold:
+                    continue
 
-            if "relative_position" in action["communication"]:
-                action["communication"]["relative_position"] = rel_positions
+                # Region qualifies; choose the center cell of the subdivision.
+                center_local_i = (sub.shape[0] // 2)
+                center_local_j = (sub.shape[1] // 2)
+
+                global_cell = (
+                    i + center_local_i,
+                    j + center_local_j
+                )
+                qualifying_cells.append(global_cell)
+
+                # For region comparison, use region_mean to pick the best region.
+                if region_mean > best_cell_value:
+                    best_cell_value = region_mean
+                    best_cell = global_cell
+
+        if len(qualifying_cells) > 0:
+            if best_cell is not None and "relative_position" in action["communication"]:
+                bi, bj = best_cell
+                rel_x = float(observation[pemo.MAP_LAYERS.RELATIVE_POS_X, bi, bj].item())
+                rel_y = float(observation[pemo.MAP_LAYERS.RELATIVE_POS_Y, bi, bj].item())
+                action["communication"]["relative_position"] = [rel_x, rel_y]
         else:
             request_flag = 0
             if "relative_position" in action["communication"]:
-                action["communication"]["relative_position"] = []
+                action["communication"]["relative_position"] = [0.0, 0.0]
+    else:
+        raise ValueError(f"Unknown communication mode: {communication_mode}")
 
     # Ensure shape compatibility with Box(low=0, high=1, shape=(1,))
     action["communication"]["request"][0] = request_flag
