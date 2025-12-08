@@ -65,7 +65,7 @@ class QmasPolicy(Policy):
 
 
     def get_actions(self, cent_obs, obs, rnn_states_actor, rnn_states_critic, masks, available_actions=None,
-                    deterministic=False):
+                    deterministic=False, global_obs=None):
         """
         Compute actions and value function predictions for the given inputs.
         :param cent_obs (np.ndarray): centralized input to the critic.
@@ -84,7 +84,7 @@ class QmasPolicy(Policy):
         :return rnn_states_critic: (torch.Tensor) updated critic network RNN states.
         """
         actions, action_log_probs, rnn_states_actor = self.actor(obs,
-                                                                 cent_obs,
+                                                                 global_obs,
                                                                  rnn_states_actor,
                                                                  masks,
                                                                  available_actions,
@@ -94,7 +94,7 @@ class QmasPolicy(Policy):
         return values, actions, action_log_probs, rnn_states_actor, rnn_states_critic
 
 
-    def act(self, obs, rnn_states_actor, masks, available_actions=None, deterministic=False, cent_obs=None):
+    def act(self, obs, rnn_states_actor, masks, available_actions=None, deterministic=False, global_obs=None):
         """
         Compute actions using the given inputs.
         :param obs (np.ndarray): local agent inputs to the actor.
@@ -104,12 +104,12 @@ class QmasPolicy(Policy):
                                   (if None, all actions available)
         :param deterministic: (bool) whether the action should be mode of distribution or should be sampled.
         """
-        actions, _, rnn_states_actor = self.actor(obs, cent_obs, rnn_states_actor, masks, available_actions, deterministic)
+        actions, _, rnn_states_actor = self.actor(obs, global_obs, rnn_states_actor, masks, available_actions, deterministic)
         return actions, rnn_states_actor
 
 
     def evaluate_actions(self, cent_obs, obs, rnn_states_actor, rnn_states_critic, action, masks,
-                         available_actions=None, active_masks=None):
+                         available_actions=None, active_masks=None, global_obs=None):
         """
         Get action logprobs / entropy and value function predictions for actor update.
         :param cent_obs (np.ndarray): centralized input to the critic.
@@ -127,7 +127,7 @@ class QmasPolicy(Policy):
         :return dist_entropy: (torch.Tensor) action distribution entropy for the given inputs.
         """
         action_log_probs, dist_entropy = self.actor.evaluate_actions(obs,
-                                                                     cent_obs,
+                                                                     global_obs,
                                                                      rnn_states_actor,
                                                                      action,
                                                                      masks,

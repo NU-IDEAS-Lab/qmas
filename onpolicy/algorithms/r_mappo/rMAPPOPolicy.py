@@ -127,7 +127,7 @@ class R_MAPPOPolicy:
         values, _ = self.critic(cent_obs, rnn_states_critic, masks)
         return values, action_log_probs, dist_entropy
 
-    def act(self, obs, rnn_states_actor, masks, available_actions=None, deterministic=False, cent_obs=None):
+    def act(self, obs, rnn_states_actor, masks, available_actions=None, deterministic=False, global_obs=None):
         """
         Compute actions using the given inputs.
         :param obs (np.ndarray): local agent inputs to the actor.

@@ -123,7 +123,7 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
 
     def insert(self, share_obs, obs, rnn_states_actor, rnn_states_critic, actions, action_log_probs,
                value_preds, rewards, masks, bad_masks=None, active_masks=None, delta_steps=None, available_actions=None,
-               visibility_mask=None, state_visibility_mask=None, legacy_mode=True):
+               visibility_mask=None, state_visibility_mask=None, observation_global=None, legacy_mode=True):
         """
         Insert data into the buffer.
         :param share_obs: (argparse.Namespace) arguments containing relevant model, policy, and env information.
@@ -140,6 +140,8 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
         :param available_actions: (np.ndarray) actions available to each agent. If None, all actions are available.
         :param delta_steps: (np.ndarray) number of steps since last update.
         :param visibility_mask: (np.ndarray) visibility mask for agent observations, if applicable.
+        :param state_visibility_mask: (np.ndarray) visibility mask for global state, if applicable.
+        :param observation_global: (np.ndarray) globally-situated observations for each agent, if applicable.
         :param legacy_mode: (bool) whether to use legacy mode for inserting data. Will use timesteps t and t+1.
         """
 
@@ -155,6 +157,8 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
             visibility_mask = np.ones_like(obs)
         if state_visibility_mask is None:
             state_visibility_mask = np.zeros_like(share_obs)
+        if observation_global is None:
+            observation_global = np.zeros((*obs.shape[0:2], *share_obs.shape[1:]), dtype=obs.dtype)
         
         # Convert any np.object arrays to tensors of NonTensorData.
         if isinstance(obs, np.ndarray) and obs.dtype == object:
@@ -207,6 +211,8 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
         )
         if available_actions is not None:
             data['available_actions'] = available_actions #+1
+        if observation_global is not None:
+            data['observation_global'] = observation_global #+1
 
         # In legacy mode, some data is added for timestep t, others for timestep t+1.
         if legacy_mode:
@@ -463,8 +469,11 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
         if self.share_obs_object:
             sample_share_obs = np.array(sample["share_obs"])
             share_obs_batch = sample_share_obs.reshape(*index_shape, *sample_share_obs.shape[data_start_dim+1:])
+            sample_global_obs = np.array(sample["observation_global"])
+            global_obs_batch = sample_global_obs.reshape(*index_shape, *sample_global_obs.shape[data_start_dim+1:])
         else:
             share_obs_batch = sample["share_obs"].reshape(*index_shape, *sample["share_obs"].shape[2:])
+            global_obs_batch = sample["observation_global"].reshape(*index_shape, *sample["observation_global"].shape[data_start_dim:])
         if self.obs_object:
             sample_obs = np.array(sample["obs"])
             obs_batch = sample_obs.reshape(*index_shape, *sample_obs.shape[data_start_dim+1:])
@@ -484,7 +493,7 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
         else:
             available_actions_batch = sample["available_actions"].reshape(*index_shape, sample["available_actions"].shape[-1])
 
-        return share_obs_batch, obs_batch, rnn_states_batch, rnn_states_critic_batch, actions_batch, \
+        return share_obs_batch, obs_batch, global_obs_batch, rnn_states_batch, rnn_states_critic_batch, actions_batch, \
         value_preds_batch, return_batch, masks_batch, active_masks_batch, old_action_log_probs_batch, \
         adv_targ, available_actions_batch
 
@@ -496,8 +505,10 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
         if self.share_obs_object:
             sample_share_obs = sample["share_obs"]
             share_obs = sample_share_obs.reshape(-1, *sample_share_obs.shape[4:])
+            global_obs = sample["observation_global"].reshape(-1, *sample["observation_global"].shape[4:], 1)
         else:
             share_obs = sample["share_obs"]
+            global_obs = sample["observation_global"].flatten(0, 1)
         if self.obs_object:
             sample_obs = sample["obs"]
             obs = sample_obs.reshape(-1, *sample_obs.shape[4:], 1)
@@ -511,7 +522,7 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
         else:
             available_actions = sample["available_actions"].flatten(0, 1)
 
-        return share_obs, obs, rnn_states_actor, rnn_states_critic, masks, available_actions
+        return share_obs, obs, global_obs, rnn_states_actor, rnn_states_critic, masks, available_actions
 
 
     @property
