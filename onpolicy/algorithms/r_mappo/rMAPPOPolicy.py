@@ -48,7 +48,7 @@ class R_MAPPOPolicy:
         update_linear_schedule(self.critic_optimizer, episode, episodes, self.critic_lr)
 
     def get_actions(self, cent_obs, obs, rnn_states_actor, rnn_states_critic, masks, available_actions=None,
-                    deterministic=False):
+                    deterministic=False, global_obs=None):
         """
         Compute actions and value function predictions for the given inputs.
         :param cent_obs (np.ndarray): centralized input to the critic.
