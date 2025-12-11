@@ -2031,78 +2031,88 @@ class parallel_env_flat_map_obs(parallel_env):
 class parallel_env_partial_obs(parallel_env_map_obs):
     ''' A partial observation version of the ISRU environment. '''
 
-    class MAP_LAYERS(IntEnum):
-        OBSTACLES = 0
-        AGENTS_PROSPECTOR = auto()
-        AGENTS_EXTRACTOR = auto()
-        AGENTS_HAULER = auto()
-        RELATIVE_POS_X = auto()
-        RELATIVE_POS_Y = auto()
-        DEPOTS = auto()
-        RESOURCES_EXTANT = auto()
-        RESOURCES_DEPOSITED = auto()
-        RESOURCES_CARGO = auto()
-        MASK_OBSERVED = auto()
-        MASK_RESOURCES_OBSERVED = auto()
-        UNCERTAINTY = auto()
-    
-    # Layers of the map which are always fixed/visible.
-    MAP_LAYERS_FIXED = [
-        MAP_LAYERS.RELATIVE_POS_X,
-        MAP_LAYERS.RELATIVE_POS_Y,
-        MAP_LAYERS.DEPOTS,
-        MAP_LAYERS.MASK_OBSERVED,
-        MAP_LAYERS.MASK_RESOURCES_OBSERVED,
-        MAP_LAYERS.UNCERTAINTY,
-    ]
-
-
-    @property
-    def map_shape(self):
-        ''' Returns the map shape. '''
-        return (len(self.MAP_LAYERS), *self.world_dims)
+    class MAP_MASKS(IntEnum):
+        EMPTY = 0
+        OBSTACLE = 0b1
+        # UNEXPLORED = 0b1
+        RESOURCE = 0b100
+        AGENT_PROSPECTOR = 0b1000
+        AGENT_EXTRACTOR = 0b10000
+        AGENT_HAULER = 0b100000
+        DEPOT = 0b1000000
 
 
     @functools.cache
     def observation_space(self, agent):
         ''' Returns the observation space for the given agent. '''
 
-        obs_width = agent.observation_radius * 2 + 1
-        return spaces.Box(
-            low=-np.inf,
-            high=np.inf,
-            shape=(len(self.MAP_LAYERS), obs_width, obs_width),
-            dtype=np.float32
-        )
+        map_width = 2 * agent.observation_radius + 1
+        return spaces.Dict({
+            "role": spaces.Discrete(len(AGENT_ROLE)),
+            "local_map": spaces.Box(
+                low=-np.inf,
+                high=np.inf,
+                shape=(1, map_width, map_width),
+                dtype=np.float32
+            ),
+        })
 
 
     def observe(self, agent, senders=set()):
         ''' Fills in the state/observation space for the given agent. '''
 
-        obs, fixed_mask = parallel_env_map_obs._observe(self, agent, global_state=False)
+        # Set up the padded observation.
+        map_center = agent.grid_position
+        map_diameter = 2 * agent.observation_radius + 1
+        map = np.zeros((1, map_diameter, map_diameter), dtype=np.int32)
 
-        # Set up a larger map with buffer size equal to the observation radius.
-        buffer_size = agent.observation_radius
-        obs_padded = np.zeros((
-            obs.shape[0],
-            obs.shape[1] + 2 * buffer_size,
-            obs.shape[2] + 2 * buffer_size
-        ), dtype=obs.dtype)
-        fixed_mask_padded = np.zeros((
-            fixed_mask.shape[0],
-            fixed_mask.shape[1] + 2 * buffer_size,
-            fixed_mask.shape[2] + 2 * buffer_size
-        ), dtype=fixed_mask.dtype)
-        obs_padded[:, buffer_size:-buffer_size, buffer_size:-buffer_size] = obs
-        fixed_mask_padded[:, buffer_size:-buffer_size, buffer_size:-buffer_size] = fixed_mask
-
-        # Trim based on the agent's observation radius.
-        pos = agent.grid_position + buffer_size
-        rad = agent.observation_radius
-        obs_padded = obs_padded[:, pos[0]-rad:pos[0]+rad+1, pos[1]-rad:pos[1]+rad+1]
-        fixed_mask_padded = fixed_mask_padded[:, pos[0]-rad:pos[0]+rad+1, pos[1]-rad:pos[1]+rad+1]
+        # Fill in agent data.
+        for a in self.possible_agents:
+            if a != agent:
+                pos = a.grid_position - map_center + agent.observation_radius
+                if np.all(pos < map_diameter) and np.all(pos >= 0):
+                    map[0, pos[0], pos[1]] |= {
+                        AGENT_ROLE.PROSPECTOR: self.MAP_MASKS.AGENT_PROSPECTOR,
+                        AGENT_ROLE.EXTRACTOR: self.MAP_MASKS.AGENT_EXTRACTOR,
+                        AGENT_ROLE.HAULER: self.MAP_MASKS.AGENT_HAULER
+                    }[a.role]
         
-        return obs_padded, fixed_mask_padded
+        # Calculate slice information.
+        pos_x_min = max(0, map_center[0] - agent.observation_radius)
+        pos_x_max = min(self.world_dims[0], map_center[0] + agent.observation_radius + 1)
+        pos_y_min = max(0, map_center[1] - agent.observation_radius)
+        pos_y_max = min(self.world_dims[1], map_center[1] + agent.observation_radius + 1)
+        map_x_min = pos_x_min - (map_center[0] - agent.observation_radius)
+        map_x_max = map_x_min + (pos_x_max - pos_x_min)
+        map_y_min = pos_y_min - (map_center[1] - agent.observation_radius)
+        map_y_max = map_y_min + (pos_y_max - pos_y_min)
+
+        # Fill in resource data.
+        for r in self.possible_resources:
+            map_slice = self.map_resources[r][pos_x_min:pos_x_max, pos_y_min:pos_y_max] > 0
+            map[0, map_x_min:map_x_max, map_y_min:map_y_max][map_slice] |= self.MAP_MASKS.RESOURCE
+        
+        # Fill in depot data.
+        depot_slice = self.map_depots[pos_x_min:pos_x_max, pos_y_min:pos_y_max] > 0
+        map[0, map_x_min:map_x_max, map_y_min:map_y_max][depot_slice] |= self.MAP_MASKS.DEPOT
+
+        # Fill in obstacle data.
+        obstacle_slice = self.map_obstacles[pos_x_min:pos_x_max, pos_y_min:pos_y_max] > 0
+        map[0, map_x_min:map_x_max, map_y_min:map_y_max][obstacle_slice] |= self.MAP_MASKS.OBSTACLE
+
+        # Set up the observation.
+        obs = {
+            "role": np.array([agent.role], dtype=np.int32),
+            "local_map": map.astype(np.float32),
+        }
+
+        # Set up the fixed mask.
+        fixed_mask = {
+            "role": np.ones(len(AGENT_ROLE), dtype=bool),
+            "local_map": np.zeros(map.shape, dtype=bool)
+        }
+        
+        return obs, fixed_mask
 
 
     @property
