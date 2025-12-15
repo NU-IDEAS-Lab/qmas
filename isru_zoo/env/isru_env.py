@@ -48,9 +48,10 @@ def add_args(parser):
     parser.add_argument("--noisy_memory", action="store_true",
                         help="Whether to allow the agent to see areas which are explored but not currently visible, with added noise.")
     parser.add_argument("--communication_mode", type=str, default="nearest",
-                        choices=["nearest", "broadcast"],
+                        choices=["nearest", "broadcast", "full"],
                         help="How communication requests are handled: 'nearest' queries one nearby agent, "
-                             "'broadcast' queries all other agents.")
+                             "'broadcast' queries all other agents, "
+                             "'full' provides all agents' observations.")
     parser.add_argument("--render_mode", type=str, default="human",
                         choices=parallel_env.metadata["render_modes"],
                         help="The rendering mode for the environment.")
@@ -678,23 +679,25 @@ class parallel_env(ParallelEnv):
                     low=0, high=1, shape=(1,), dtype=np.int32
                 ),
             })
+        elif self.communication_mode == "full":
+            comm_space = None  # Full communication does not require an action component
         else:
             raise ValueError(f"Unsupported communication_mode: {self.communication_mode}")
 
-        return spaces.Dict({
+        action_space_dict = {
             # Movement is specified in terms of the Moore neighborhood.
             # The agent can only move one space at a time.
             "movement": spaces.Box(low=0, high=8, shape=(1,), dtype=np.int32),
-
-            # Communication encodes a flag and optionally a relative coordinate.
-            "communication": comm_space,
 
             # Resource actions are represented as follows:
             # -1 = drop off all resources
             # 0 = do nothing
             # 1 = pick up resources until full or no more available
             # "resources": spaces.Box(low=-1, high=1, shape=(len(self.possible_resources),), dtype=np.int32),
-        })
+        }
+        if comm_space is not None:
+            action_space_dict["communication"] = comm_space
+        return spaces.Dict(action_space_dict)
 
 
     @functools.cache
@@ -937,19 +940,24 @@ class parallel_env(ParallelEnv):
                     agent.steps_stationary = 1
 
                 # Handle communication (request-based).
-                comms_request = bool(action["communication"]["request"][0] == 1)
-                if comms_request and len(self.possible_agents) > 1:
-                    if self.communication_mode == "broadcast":
-                        senders = {other for other in self.possible_agents if other is not agent}
-                        if senders:
-                            comms_requests_explicit[agent] = senders
-                    else:
-                        comms_position_relative = action["communication"]["relative_position"]
-                        comms_requests_relative[agent] = comms_position_relative
+                if self.communication_mode == "full":
+                    senders = {other for other in self.possible_agents if other is not agent}
+                    comms_requests_explicit[agent] = senders
                     info_dict["communication/requests_made"] += 1
-                    # reward_dict[agent] += REWARD_COMMUNICATION
                 else:
-                    reward_dict[agent] += REWARD_NO_COMMUNICATION
+                    comms_request = bool(action["communication"]["request"][0] == 1)
+                    if comms_request and len(self.possible_agents) > 1:
+                        if self.communication_mode == "broadcast":
+                            senders = {other for other in self.possible_agents if other is not agent}
+                            if senders:
+                                comms_requests_explicit[agent] = senders
+                        else:
+                            comms_position_relative = action["communication"]["relative_position"]
+                            comms_requests_relative[agent] = comms_position_relative
+                        info_dict["communication/requests_made"] += 1
+                        # reward_dict[agent] += REWARD_COMMUNICATION
+                    else:
+                        reward_dict[agent] += REWARD_NO_COMMUNICATION
 
                 # Corrected resource handling for Hauler agents
                 if agent.capabilities[CAP.CARRY]:

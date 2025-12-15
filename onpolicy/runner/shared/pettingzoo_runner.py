@@ -178,10 +178,11 @@ class PettingzooRunner(Runner):
         rnn_states = rnn_states.detach().cpu().reshape((self.n_rollout_threads, self.num_agents, *rnn_states.shape[1:]))
         rnn_states_critic = rnn_states_critic.detach().cpu().reshape((self.n_rollout_threads, self.num_agents, *rnn_states_critic.shape[1:]))
 
-        if actions.shape[-1] == 1:
-            actions_env = [actions[idx, :, 0].numpy() for idx in range(self.n_rollout_threads)]
-        else:
-            actions_env = [actions[idx, :, :].numpy() for idx in range(self.n_rollout_threads)]
+        # if actions.shape[-1] == 1:
+        #     actions_env = [actions[idx, :, 0].numpy() for idx in range(self.n_rollout_threads)]
+        # else:
+        #     actions_env = [actions[idx, :, :].numpy() for idx in range(self.n_rollout_threads)]
+        actions_env = [actions[idx, :, :].numpy() for idx in range(self.n_rollout_threads)]
         
 
         return values, actions, action_log_probs, rnn_states, rnn_states_critic, actions_env
