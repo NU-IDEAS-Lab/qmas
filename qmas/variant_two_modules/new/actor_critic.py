@@ -23,6 +23,8 @@ class StateEncoder(nn.Module):
 
         input_dim = np.prod(obs_shape)
 
+        print(f"State encoder use_cnn: {self._use_cnn}, input_dim: {input_dim}, output_dim: {output_dim}")
+
         if self._use_cnn:
             self.cnn = CNNBase(args, obs_shape, mode="encoder")
             input_dim = hidden_size
