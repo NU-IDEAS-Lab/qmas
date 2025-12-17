@@ -2141,3 +2141,32 @@ class parallel_env_partial_obs(parallel_env_map_obs):
         ''' Returns a globally situated observation for the given agent. '''
 
         return parallel_env_map_obs.observe(self, agent, senders=senders)
+
+
+    def render_observation(self, obs):
+        ''' Renders the given observation.
+            
+            Args:
+                obs (np.ndarray): The observation to render.
+                
+            Returns:
+                None or np.ndarray: None if render_mode is "human", otherwise an RGB array.
+        '''
+
+        # Need to write a customer renderer here using matplotlib.
+        fig = plt.figure(figsize=(6, 6))
+        ax = fig.add_subplot(1, 1, 1)
+
+        map = obs["local_map"][0]
+        ax.imshow(map, cmap='plasma', interpolation='nearest')
+        ax.set_title("Agent Observation")
+        ax.axis('off')
+
+        if self.render_mode == "human":
+            plt.show()
+        else:
+            fig.canvas.draw()
+            width, height = fig.canvas.get_width_height()
+            image = np.frombuffer(fig.canvas.tostring_rgb(), dtype='uint8').reshape(height, width, 3)
+            plt.close(fig)
+            return image
