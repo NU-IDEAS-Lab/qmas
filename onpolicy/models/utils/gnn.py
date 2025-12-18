@@ -2,11 +2,13 @@ import torch
 import torch.nn as nn
 from torch_geometric.nn import MessagePassing
 from torch_geometric.nn import GraphSAGE
-from torch_geometric.nn import GraphSAGE
+from torch_geometric.utils import sort_edge_index
 
 from onpolicy.models.utils.gnn_conv import SAGEConvWithEdges
 
 from typing import Tuple, Union, Final
+from torch_geometric.nn import AttentionalAggregation, SortAggregation
+from onpolicy.models.utils.mlp import MLPLayer
 
 """GNN modules."""
 
@@ -19,22 +21,56 @@ class GNNBase(nn.Module):
                  node_embedding_num: int = 2,
                  dropout_rate: float = 0.0,
                  jk = False,
+                 aggr = "attention",
+                 concat_k = 0,
+                 use_orthogonal = True,
+                 use_ReLU = True,
                  **kwargs):
         super(GNNBase, self).__init__(**kwargs)
 
         self.node_type_idx = node_type_idx
+        features_channels = node_dim - node_type_dim + node_type_embed_dim + edge_dim
 
+        # Embedding for node types.
         self.entity_embed = nn.Embedding(node_embedding_num, node_type_embed_dim)
+
+        # Set up aggregation method.
+        if aggr == "attention":
+            # Attentional aggregation.
+            self.aggr = AttentionalAggregation(
+                gate_nn=MLPLayer(
+                    input_dim=features_channels,
+                    output_dim=1,
+                    hidden_size=512,
+                    layer_N=3,
+                    use_orthogonal=use_orthogonal,
+                    use_ReLU=use_ReLU,
+                    use_layer_norm=False,
+                    gain=nn.init.calculate_gain("relu")
+                )
+            )
+        else:
+            self.aggr = aggr
+        
+        # Create the GNN itself.
         self.sage = GraphSAGEWithEdges(
-            in_channels=node_dim - node_type_dim + node_type_embed_dim + edge_dim,
+            in_channels=features_channels,
             hidden_channels=hidden_dim,
             out_channels=output_dim,
             num_layers=layers,
             dropout=dropout_rate,
             edge_channels=edge_dim,
             jk="cat" if jk else None,
-            aggr="add"
+            aggr=self.aggr,
         )
+        if concat_k > 0:
+            # Modify the size of the last layer to account for the connection back to hidden size.
+            self.sage.convs[-1] = SAGEConvWithEdges(
+                in_channels=hidden_dim if layers > 1 else features_channels, # Needs to connect to hidden layer if there is more than 1 layer
+                out_channels=output_dim,
+                edge_channels=edge_dim,
+                concat_k=concat_k,
+            )
 
 
     def forward(self, x: torch.Tensor, edge_attr: torch.Tensor, edge_index: torch.Tensor, node_index=None) -> torch.Tensor:
@@ -52,6 +88,8 @@ class GNNBase(nn.Module):
 
         # Concatenate node features and type embeddings.
         info = torch.cat([node_feat, node_type_embed, edge_feat], dim=1)
+        
+        edge_index, edge_attr = sort_edge_index(edge_index, edge_attr, sort_by_row=False)
 
         return self.sage(info, edge_index, edge_attr=edge_attr)
     
@@ -94,12 +132,17 @@ class GNNBase(nn.Module):
     def graphAggr(self, x: torch.Tensor, aggr: str = "mean"):
         """
         This method is borrowed from InforMARL: https://github.com/nsidn98/InforMARL/blob/main/onpolicy/algorithms/utils/gnn.py#L381
+
         Aggregate the graph node features by performing global pool
+
+
         Args:
             x (Tensor): Tensor of shape [batch_size, num_nodes, num_feats]
             aggr (str): Aggregation method for performing the global pool
+
         Raises:
             ValueError: If `aggr` is not in ['mean', 'max']
+
         Returns:
             Tensor: The global aggregated tensor of shape [batch_size, num_feats]
         """

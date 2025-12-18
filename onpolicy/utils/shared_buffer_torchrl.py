@@ -158,17 +158,27 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
         if state_visibility_mask is None:
             state_visibility_mask = np.zeros_like(share_obs)
         if observation_global is None:
-            observation_global = np.zeros((*obs.shape[0:2], *share_obs.shape[1:]), dtype=obs.dtype)
+            observation_global = np.zeros((*obs.shape[0:2], *share_obs.shape[1:]), dtype=share_obs.dtype)
         
         # Convert any np.object arrays to tensors of NonTensorData.
-        if isinstance(obs, np.ndarray) and obs.dtype == object:
-            self.obs_object = True
-            obs = NonTensorStack(NonTensorData(
-                obs,
-                batch_size=torch.Size([]),
-                device='cpu',
-                names=None,
-            ))
+        if isinstance(obs, np.ndarray):
+            if obs.dtype == object:
+                self.obs_object = True
+                obs = NonTensorStack(NonTensorData(
+                    obs,
+                    batch_size=torch.Size([]),
+                    device='cpu',
+                    names=None,
+                ))
+                visibility_mask = NonTensorStack(NonTensorData(
+                    visibility_mask,
+                    batch_size=torch.Size([]),
+                    device='cpu',
+                    names=None,
+                ))
+            else:
+                obs = torch.from_numpy(obs).float()
+                visibility_mask = torch.from_numpy(visibility_mask).float()
         if isinstance(share_obs, np.ndarray) and share_obs.dtype == object:
             self.share_obs_object = True
             share_obs = NonTensorStack(NonTensorData(
@@ -179,8 +189,6 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
             ))
         
         # Create the partial observation.
-        obs = torch.from_numpy(obs).float()
-        visibility_mask = torch.from_numpy(visibility_mask).float()
         if self.args.observation_mask:
             obs_full = obs.clone()
             obs = obs * visibility_mask

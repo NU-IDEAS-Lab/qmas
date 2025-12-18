@@ -59,11 +59,20 @@ class QmasActor(Actor):
     def __init__(self, args, obs_space, share_obs_space, act_space, device=torch.device("cpu")):
 
         # Enhance the observation space to include encoded global state.
-        enhanced_obs_space = spaces.Dict({
-            'obs': obs_space,
-            'encoded_state': spaces.Box(low=-np.inf, high=np.inf, shape=(args.state_encoder_output_dim,), dtype=np.float32)
-        })
+        if type(obs_space) == spaces.Dict:
+            enhanced_obs_space = obs_space
+            enhanced_obs_space['encoded_state'] = spaces.Box(low=-np.inf, high=np.inf, shape=(args.state_encoder_output_dim,), dtype=np.float32)
+        else:
+            enhanced_obs_space = spaces.Dict({
+                'obs': obs_space,
+                'encoded_state': spaces.Box(low=-np.inf, high=np.inf, shape=(args.state_encoder_output_dim,), dtype=np.float32)
+            })
         enhanced_obs_space = spaces.flatten_space(enhanced_obs_space)
+        for key, space in enhanced_obs_space.spaces.items():
+            # We store other attributes in the graph space that get removed when flattening.
+            if isinstance(space, spaces.Graph):
+                enhanced_obs_space[key] = obs_space[key]
+
         
         super().__init__(args, enhanced_obs_space, act_space, device)
 
