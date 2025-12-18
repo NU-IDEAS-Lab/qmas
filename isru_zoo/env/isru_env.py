@@ -1,7 +1,9 @@
 from enum import IntEnum, auto
 from pettingzoo import ParallelEnv
 from pettingzoo.utils import parallel_to_aec
+from torch_geometric.data import Data
 
+import torch
 import functools
 from gymnasium import spaces
 import random
@@ -2170,3 +2172,173 @@ class parallel_env_partial_obs(parallel_env_map_obs):
             image = np.frombuffer(fig.canvas.tostring_rgb(), dtype='uint8').reshape(height, width, 3)
             plt.close(fig)
             return image
+
+
+class parallel_env_graph_obs(parallel_env_map_obs):
+    ''' A partial observation version of the ISRU environment. '''
+
+    @functools.cache
+    def observation_space(self, agent):
+        ''' Returns the observation space for the given agent. '''
+
+        obs_space = spaces.Dict({
+            "role": spaces.Discrete(len(AGENT_ROLE)),
+            "graph": spaces.Graph(
+                node_space = spaces.Box(
+                    # nodeType, posX, posY, velX, velY
+                    low = np.array([0.0, -np.inf, -np.inf, -np.inf, -np.inf]),
+                    high = np.array([np.inf, np.inf, np.inf, np.inf, np.inf]),
+                    dtype=np.float32
+                ),
+                edge_space = spaces.Box(
+                    # weight (distance)
+                    low = np.array([-np.inf]),
+                    high = np.array([np.inf]),
+                    dtype=np.float32
+                )
+            )
+        })
+
+        obs_space["graph"].node_type_idx = 0  # nodeType is the first feature
+        return obs_space
+
+
+    def observe(self, agent, senders=set()):
+        ''' Fills in the state/observation space for the given agent. '''
+
+        node_features = []  # Node features
+        edge_index = [[], []]  # Edge connections
+        edge_features = []  # Edge features
+
+        # Add ego agent as the root node.
+        node_features.append([
+            AGENT_ROLE(agent.role).value,
+            agent.position[0],
+            agent.position[1],
+            agent.velocity[0],
+            agent.velocity[1]
+        ])
+
+        # Add other agents.
+        for other_agent in self.possible_agents:
+            if other_agent != agent:
+                dist = np.linalg.norm(other_agent.position - agent.position)
+                if dist <= agent.observation_radius:
+                    # Add node features: [nodeType, posX, posY, velX, velY]
+                    node_features.append([
+                        AGENT_ROLE(other_agent.role).value,
+                        other_agent.position[0],
+                        other_agent.position[1],
+                        other_agent.velocity[0],
+                        other_agent.velocity[1]
+                    ])
+                    node_idx = len(node_features) - 1
+
+                    # Add edge from agent to other_agent
+                    edge_index[0].append(0)  # From agent (index 0)
+                    edge_index[1].append(node_idx)  # To other_agent
+                    edge_features.append([dist])
+
+                    # Add edge from other_agent to agent
+                    edge_index[0].append(node_idx)  # From other_agent
+                    edge_index[1].append(0)  # To agent (index 0)
+                    edge_features.append([dist])
+
+        # Add nearby resources.
+        for r in self.possible_resources:
+            resource_positions = np.argwhere(self.map_resources[r] > 0)
+            for pos in resource_positions:
+                pos_float = pos.astype(np.float32)
+                dist = np.linalg.norm(pos_float - agent.position)
+                if dist <= agent.observation_radius:
+                    # Add node features: [nodeType, posX, posY, velX, velY]
+                    node_features.append([
+                        -1,  # Resource node type
+                        pos_float[0],
+                        pos_float[1],
+                        0.0,
+                        0.0
+                    ])
+                    node_idx = len(node_features) - 1
+
+                    # Add edge from agent to resource
+                    edge_index[0].append(0)  # From agent (index 0)
+                    edge_index[1].append(node_idx)  # To resource
+                    edge_features.append([dist])
+
+                    # Add edge from resource to agent
+                    edge_index[0].append(node_idx)  # From resource
+                    edge_index[1].append(0)  # To agent (index 0)
+                    edge_features.append([dist])
+
+        # Add depots.
+        depot_positions = np.argwhere(self.map_depots > 0)
+        for pos in depot_positions:
+            pos_float = pos.astype(np.float32)
+            dist = np.linalg.norm(pos_float - agent.position)
+            if dist <= agent.observation_radius:
+                # Add node features: [nodeType, posX, posY, velX, velY]
+                node_features.append([
+                    -2,  # Depot node type
+                    pos_float[0],
+                    pos_float[1],
+                    0.0,
+                    0.0
+                ])
+                node_idx = len(node_features) - 1
+
+                # Add edge from agent to depot
+                edge_index[0].append(0)  # From agent (index 0)
+                edge_index[1].append(node_idx)  # To depot
+                edge_features.append([dist])
+
+                # Add edge from depot to agent
+                edge_index[0].append(node_idx)  # From depot
+                edge_index[1].append(0)  # To agent (index 0)
+                edge_features.append([dist])
+    
+        # Convert to tensors.
+        node_features = torch.tensor(node_features, dtype=torch.float32)
+        edge_index = torch.tensor(edge_index, dtype=torch.int32)
+        edge_features = torch.tensor(edge_features, dtype=torch.float32)
+
+        # Build the PyG graph of nearby entities.
+        graph = Data(
+            x = node_features,
+            edge_index = edge_index,
+            edge_attr = edge_features
+        )
+
+        # Set up the observation.
+        obs = {
+            "role": np.array([agent.role], dtype=np.int32),
+            "graph": graph,
+        }
+
+        # Set up the fixed mask.
+        fixed_mask = {
+            "role": np.ones(len(AGENT_ROLE), dtype=bool),
+            # "local_map": np.zeros(map.shape, dtype=bool)
+        }
+        
+        return obs, fixed_mask
+
+
+    @property
+    @functools.cache
+    def state_space(self):
+        ''' Returns the global state space. '''
+
+        return parallel_env_map_obs.observation_space(self, self.possible_agents[0])
+
+
+    def _state(self):
+        ''' Returns the global state and mask of the environment.'''
+
+        return parallel_env_map_obs._observe(self, self.possible_agents[0], global_state=True)
+
+
+    def get_observation_and_comms_situated(self, agent, senders=set()):
+        ''' Returns a globally situated observation for the given agent. '''
+
+        return parallel_env_map_obs.observe(self, agent, senders=senders)
