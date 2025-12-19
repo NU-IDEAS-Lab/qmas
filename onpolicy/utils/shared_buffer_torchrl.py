@@ -46,6 +46,16 @@ class FixedSamplerWithoutReplacement(SamplerWithoutReplacement):
             return length - 1
         return length
 
+class ComparisonAlwaysFalseWrapper(np.ndarray):
+    ''' A wrapper that makes all comparisons return False. '''
+
+    def __new__(cls, input_array):
+        obj = np.asarray(input_array).view(cls)
+        return obj
+    
+    def __eq__(self, other):
+        return False
+
 # class TrajectorySampler(RandomSampler):
 #     ''' Samples trajectories of contiguous data from the replay buffer. '''
 
@@ -154,41 +164,19 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
         if delta_steps is None:
             delta_steps = np.ones_like(value_preds)
         if visibility_mask is None:
-            visibility_mask = np.ones_like(obs)
+            visibility_mask = np.ones_like(obs, dtype=np.float32)
         if state_visibility_mask is None:
-            state_visibility_mask = np.zeros_like(share_obs)
+            state_visibility_mask = np.zeros_like(share_obs, dtype=np.float32)
         if observation_global is None:
             observation_global = np.zeros((*obs.shape[0:2], *share_obs.shape[1:]), dtype=share_obs.dtype)
         
-        # Convert any np.object arrays to tensors of NonTensorData.
-        if isinstance(obs, np.ndarray):
-            if obs.dtype == object:
-                self.obs_object = True
-                obs = NonTensorStack(NonTensorData(
-                    obs,
-                    batch_size=torch.Size([]),
-                    device='cpu',
-                    names=None,
-                ))
-                visibility_mask = NonTensorStack(NonTensorData(
-                    visibility_mask,
-                    batch_size=torch.Size([]),
-                    device='cpu',
-                    names=None,
-                ))
-            else:
-                obs = torch.from_numpy(obs).float()
-                visibility_mask = torch.from_numpy(visibility_mask).float()
-        if isinstance(share_obs, np.ndarray) and share_obs.dtype == object:
-            self.share_obs_object = True
-            share_obs = NonTensorStack(NonTensorData(
-                share_obs,
-                batch_size=torch.Size([]),
-                device='cpu',
-                names=None,
-            ))
+        obs = self.convert_input_to_tensor(obs)
+        self.obs_object = isinstance(obs, NonTensorStack)
+        share_obs = self.convert_input_to_tensor(share_obs)
+        self.share_obs_object = isinstance(share_obs, NonTensorStack)
         
         # Create the partial observation.
+        visibility_mask = torch.from_numpy(visibility_mask).float()
         if self.args.observation_mask:
             obs_full = obs.clone()
             obs = obs * visibility_mask
@@ -247,6 +235,19 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
         else:
             # In non-legacy mode, add all data for timestep t.
             self.add(data)
+
+
+    def convert_input_to_tensor(self, input):
+        # Convert any np.object arrays to tensors of NonTensorData.
+        if isinstance(input, np.ndarray) and input.dtype == object:
+                return NonTensorStack(NonTensorData(
+                    ComparisonAlwaysFalseWrapper(input),
+                    batch_size=torch.Size([]),
+                    device='cpu',
+                    names=None,
+                ))
+        else:
+            return torch.from_numpy(input).float()
 
 
     def after_update(self, last_step=-1):
@@ -511,15 +512,15 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
         sample = self[step]
         
         if self.share_obs_object:
-            sample_share_obs = sample["share_obs"]
-            share_obs = sample_share_obs.reshape(-1, *sample_share_obs.shape[4:])
-            global_obs = sample["observation_global"].reshape(-1, *sample["observation_global"].shape[4:], 1)
+            sample_share_obs = np.array(sample["share_obs"])
+            share_obs = sample_share_obs.reshape(-1, *sample_share_obs.shape[2:])
+            global_obs = sample["observation_global"].reshape(-1, *sample["observation_global"].shape[3:])
         else:
-            share_obs = sample["share_obs"]
+            share_obs = np.array(sample["share_obs"])
             global_obs = sample["observation_global"].flatten(0, 1)
         if self.obs_object:
-            sample_obs = sample["obs"]
-            obs = sample_obs.reshape(-1, *sample_obs.shape[4:], 1)
+            sample_obs = np.array(sample["obs"])
+            obs = sample_obs.reshape(-1, *sample_obs.shape[3:])
         else:
             obs = sample["obs"].flatten(0, 1)
         rnn_states_actor = sample["rnn_states_actor"].flatten(0, 1)
