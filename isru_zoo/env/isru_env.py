@@ -2315,6 +2315,10 @@ class parallel_env_graph_obs(parallel_env_map_obs):
             edge_attr = edge_features
         )
 
+        # Set various attributes.
+        graph.agent_idx = 0  # Ego agent is the first node
+        graph.node_type_idx = 0  # nodeType is the first feature
+
         # Set up the observation.
         obs = {
             "role": np.array([agent.role], dtype=np.int32),
