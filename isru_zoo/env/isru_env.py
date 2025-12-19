@@ -2177,23 +2177,29 @@ class parallel_env_partial_obs(parallel_env_map_obs):
 class parallel_env_graph_obs(parallel_env_map_obs):
     ''' A partial observation version of the ISRU environment. '''
 
+
+    class NODE_TYPE(IntEnum):
+        RESOURCE = len(AGENT_ROLE)
+        DEPOT = auto()
+
+
     @functools.cache
     def observation_space(self, agent):
         ''' Returns the observation space for the given agent. '''
 
         obs_space = spaces.Dict({
-            "role": spaces.Discrete(len(AGENT_ROLE)),
+            "role": spaces.Box(low=0, high=int(max(self.NODE_TYPE)), dtype=np.int32),
             "graph": spaces.Graph(
                 node_space = spaces.Box(
                     # nodeType, posX, posY, velX, velY
-                    low = np.array([0.0, -np.inf, -np.inf, -np.inf, -np.inf]),
-                    high = np.array([np.inf, np.inf, np.inf, np.inf, np.inf]),
+                    low = np.array([0.0, -np.inf, -np.inf, -np.inf, -np.inf], dtype=np.float32),
+                    high = np.array([np.inf, np.inf, np.inf, np.inf, np.inf], dtype=np.float32),
                     dtype=np.float32
                 ),
                 edge_space = spaces.Box(
                     # weight (distance)
-                    low = np.array([-np.inf]),
-                    high = np.array([np.inf]),
+                    low = np.array([-np.inf], dtype=np.float32),
+                    high = np.array([np.inf], dtype=np.float32),
                     dtype=np.float32
                 )
             )
@@ -2253,7 +2259,7 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                 if dist <= agent.observation_radius:
                     # Add node features: [nodeType, posX, posY, velX, velY]
                     node_features.append([
-                        -1,  # Resource node type
+                        self.NODE_TYPE.RESOURCE,
                         pos_float[0],
                         pos_float[1],
                         0.0,
@@ -2279,7 +2285,7 @@ class parallel_env_graph_obs(parallel_env_map_obs):
             if dist <= agent.observation_radius:
                 # Add node features: [nodeType, posX, posY, velX, velY]
                 node_features.append([
-                    -2,  # Depot node type
+                    self.NODE_TYPE.DEPOT,
                     pos_float[0],
                     pos_float[1],
                     0.0,
@@ -2299,7 +2305,7 @@ class parallel_env_graph_obs(parallel_env_map_obs):
     
         # Convert to tensors.
         node_features = torch.tensor(node_features, dtype=torch.float32)
-        edge_index = torch.tensor(edge_index, dtype=torch.int32)
+        edge_index = torch.tensor(edge_index, dtype=torch.long)
         edge_features = torch.tensor(edge_features, dtype=torch.float32)
 
         # Build the PyG graph of nearby entities.
@@ -2316,10 +2322,7 @@ class parallel_env_graph_obs(parallel_env_map_obs):
         }
 
         # Set up the fixed mask.
-        fixed_mask = {
-            "role": np.ones(len(AGENT_ROLE), dtype=bool),
-            # "local_map": np.zeros(map.shape, dtype=bool)
-        }
+        fixed_mask = np.array([True, True], dtype=bool)  # role and graph are always visible
         
         return obs, fixed_mask
 
