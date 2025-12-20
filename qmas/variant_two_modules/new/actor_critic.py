@@ -145,7 +145,7 @@ class QmasActor(Actor):
             use_orthogonal=args.use_orthogonal,
             device=device
         )
-        input_dim += args.state_encoder_output_dim
+        #input_dim += args.state_encoder_output_dim
 
         self.act = ACTLayer(action_space, input_dim, self._use_orthogonal, self._gain)
 
@@ -209,7 +209,7 @@ class QmasActor(Actor):
                     raise ValueError("Batch size of obs is not a multiple of batch size of share_obs.")
                 encoded_state = encoded_state.repeat_interleave(obs.shape[0] // encoded_state.shape[0], dim=0)
 
-        actor_features = torch.cat([actor_features, encoded_state], dim=-1)
+        #actor_features = torch.cat([actor_features, encoded_state], dim=-1)
 
         actions, action_log_probs = self.act(actor_features, available_actions, deterministic)
 
@@ -291,7 +291,7 @@ class QmasActor(Actor):
                     raise ValueError("Batch size of obs is not a multiple of batch size of share_obs.")
                 encoded_state = encoded_state.repeat_interleave(obs.shape[0] // encoded_state.shape[0], dim=0)
 
-        actor_features = torch.cat([actor_features, encoded_state], dim=-1)
+        #actor_features = torch.cat([actor_features, encoded_state], dim=-1)
 
         action_log_probs, dist_entropy = self.act.evaluate_actions(actor_features,
                                                                    action, available_actions,
