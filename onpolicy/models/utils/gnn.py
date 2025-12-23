@@ -15,10 +15,7 @@ from onpolicy.models.utils.mlp import MLPLayer
 class GNNBase(nn.Module):
     ''' Base GNN module. '''
 
-    def __init__(self, layers: int, node_dim: int, edge_dim: int, output_dim: int, hidden_dim: int, node_type_idx: int,
-                 node_type_dim: int = 1,
-                 node_type_embed_dim: int = 2,
-                 node_embedding_num: int = 2,
+    def __init__(self, layers: int, node_dim: int, edge_dim: int, output_dim: int, hidden_dim: int,
                  dropout_rate: float = 0.0,
                  jk = False,
                  aggr = "attention",
@@ -28,11 +25,7 @@ class GNNBase(nn.Module):
                  **kwargs):
         super(GNNBase, self).__init__(**kwargs)
 
-        self.node_type_idx = node_type_idx
-        features_channels = node_dim - node_type_dim + node_type_embed_dim + edge_dim
-
-        # Embedding for node types.
-        self.entity_embed = nn.Embedding(node_embedding_num, node_type_embed_dim)
+        features_channels = node_dim + edge_dim
 
         # Set up aggregation method.
         if aggr == "attention":
@@ -75,19 +68,13 @@ class GNNBase(nn.Module):
 
     def forward(self, x: torch.Tensor, edge_attr: torch.Tensor, edge_index: torch.Tensor, node_index=None) -> torch.Tensor:
 
-        all_idx = torch.arange(0, x.shape[1])
-        node_feat_idx = all_idx[all_idx != self.node_type_idx]
-        
-        # Extract node features and type for all nodes.
-        node_feat = x[:, node_feat_idx]
-        node_type = x[:, self.node_type_idx].int()
-        node_type_embed = self.entity_embed(node_type)
+        node_feat = x
 
         # Add dummy edge attributes for the first layer. In message passing, the edge attributes will be included as part of the node features.
         edge_feat = torch.zeros(node_feat.shape[0], edge_attr.shape[1], device=edge_attr.device)
 
         # Concatenate node features and type embeddings.
-        info = torch.cat([node_feat, node_type_embed, edge_feat], dim=1)
+        info = torch.cat([node_feat, edge_feat], dim=1)
         
         edge_index, edge_attr = sort_edge_index(edge_index, edge_attr, sort_by_row=False)
 

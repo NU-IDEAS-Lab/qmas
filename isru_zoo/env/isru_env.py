@@ -2191,21 +2191,22 @@ class parallel_env_graph_obs(parallel_env_map_obs):
             "role": spaces.Box(low=0, high=int(max(self.NODE_TYPE)), dtype=np.int32),
             "graph": spaces.Graph(
                 node_space = spaces.Box(
-                    # nodeType, posX, posY, velX, velY
-                    low = np.array([0.0, -np.inf, -np.inf, -np.inf, -np.inf], dtype=np.float32),
-                    high = np.array([np.inf, np.inf, np.inf, np.inf, np.inf], dtype=np.float32),
+                    # max(NODE_TYPE), posX, posY, velX, velY
+                    low = -np.inf,
+                    high = np.inf,
+                    shape = (int(max(self.NODE_TYPE)) + 1 + 4,),
                     dtype=np.float32
                 ),
                 edge_space = spaces.Box(
                     # weight (distance)
-                    low = np.array([-np.inf], dtype=np.float32),
-                    high = np.array([np.inf], dtype=np.float32),
+                    low = -np.inf,
+                    high = np.inf,
+                    shape = (1,),
                     dtype=np.float32
                 )
             )
         })
 
-        obs_space["graph"].node_type_idx = 0  # nodeType is the first feature
         return obs_space
 
 
@@ -2220,8 +2221,10 @@ class parallel_env_graph_obs(parallel_env_map_obs):
             return pos.astype(np.float32) - agent.grid_position.astype(np.float32)
 
         # Add ego agent as the root node.
+        role_mask = np.zeros(int(max(self.NODE_TYPE) + 1), dtype=np.float32)
+        role_mask[agent.role] = 1.0
         node_features.append([
-            AGENT_ROLE(agent.role).value,
+            *role_mask,
             0.0,
             0.0,
             agent.velocity[0],
@@ -2236,8 +2239,10 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                 pos /= dist + 1e-6  # Normalize position vector
                 if dist <= agent.observation_radius:
                     # Add node features: [nodeType, posX, posY, velX, velY]
+                    role_mask = np.zeros(int(max(self.NODE_TYPE) + 1), dtype=np.float32)
+                    role_mask[other_agent.role] = 1.0
                     node_features.append([
-                        AGENT_ROLE(other_agent.role).value,
+                        *role_mask,
                         pos[0],
                         pos[1],
                         other_agent.velocity[0],
@@ -2264,8 +2269,10 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                 pos_float /= dist + 1e-6  # Normalize position vector
                 if dist <= agent.observation_radius:
                     # Add node features: [nodeType, posX, posY, velX, velY]
+                    role_mask = np.zeros(int(max(self.NODE_TYPE) + 1), dtype=np.float32)
+                    role_mask[self.NODE_TYPE.RESOURCE] = 1.0
                     node_features.append([
-                        self.NODE_TYPE.RESOURCE,
+                        *role_mask,
                         pos_float[0],
                         pos_float[1],
                         0.0,
@@ -2277,7 +2284,7 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                     edge_index[0].append(0)  # From agent (index 0)
                     edge_index[1].append(node_idx)  # To resource
                     edge_features.append([dist])
-                    
+
                     # Add edge from resource to agent
                     edge_index[0].append(node_idx)  # From resource
                     edge_index[1].append(0)  # To agent (index 0)
@@ -2291,8 +2298,10 @@ class parallel_env_graph_obs(parallel_env_map_obs):
             pos_float /= dist + 1e-6  # Normalize position vector
             if dist <= agent.observation_radius:
                 # Add node features: [nodeType, posX, posY, velX, velY]
+                role_mask = np.zeros(int(max(self.NODE_TYPE) + 1), dtype=np.float32)
+                role_mask[self.NODE_TYPE.DEPOT] = 1.0
                 node_features.append([
-                    self.NODE_TYPE.DEPOT,
+                    *role_mask,
                     pos_float[0],
                     pos_float[1],
                     0.0,
@@ -2324,7 +2333,6 @@ class parallel_env_graph_obs(parallel_env_map_obs):
 
         # Set various attributes.
         graph.agent_idx = 0  # Ego agent is the first node
-        graph.node_type_idx = 0  # nodeType is the first feature
 
         # Set up the observation.
         obs = {
