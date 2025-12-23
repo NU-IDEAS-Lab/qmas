@@ -2216,11 +2216,14 @@ class parallel_env_graph_obs(parallel_env_map_obs):
         edge_index = [[], []]  # Edge connections
         edge_features = []  # Edge features
 
+        def relative_position(pos):
+            return pos.astype(np.float32) - agent.grid_position.astype(np.float32)
+
         # Add ego agent as the root node.
         node_features.append([
             AGENT_ROLE(agent.role).value,
-            agent.position[0],
-            agent.position[1],
+            0.0,
+            0.0,
             agent.velocity[0],
             agent.velocity[1]
         ])
@@ -2228,13 +2231,15 @@ class parallel_env_graph_obs(parallel_env_map_obs):
         # Add other agents.
         for other_agent in self.possible_agents:
             if other_agent != agent:
-                dist = np.linalg.norm(other_agent.position - agent.position)
+                pos = relative_position(other_agent.grid_position)
+                dist = np.linalg.norm(pos)
+                pos /= dist + 1e-6  # Normalize position vector
                 if dist <= agent.observation_radius:
                     # Add node features: [nodeType, posX, posY, velX, velY]
                     node_features.append([
                         AGENT_ROLE(other_agent.role).value,
-                        other_agent.position[0],
-                        other_agent.position[1],
+                        pos[0],
+                        pos[1],
                         other_agent.velocity[0],
                         other_agent.velocity[1]
                     ])
@@ -2254,8 +2259,9 @@ class parallel_env_graph_obs(parallel_env_map_obs):
         for r in self.possible_resources:
             resource_positions = np.argwhere(self.map_resources[r] > 0)
             for pos in resource_positions:
-                pos_float = pos.astype(np.float32)
-                dist = np.linalg.norm(pos_float - agent.position)
+                pos_float = relative_position(pos.astype(np.float32))
+                dist = np.linalg.norm(pos_float)
+                pos_float /= dist + 1e-6  # Normalize position vector
                 if dist <= agent.observation_radius:
                     # Add node features: [nodeType, posX, posY, velX, velY]
                     node_features.append([
@@ -2271,7 +2277,7 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                     edge_index[0].append(0)  # From agent (index 0)
                     edge_index[1].append(node_idx)  # To resource
                     edge_features.append([dist])
-
+y
                     # Add edge from resource to agent
                     edge_index[0].append(node_idx)  # From resource
                     edge_index[1].append(0)  # To agent (index 0)
@@ -2280,8 +2286,9 @@ class parallel_env_graph_obs(parallel_env_map_obs):
         # Add depots.
         depot_positions = np.argwhere(self.map_depots > 0)
         for pos in depot_positions:
-            pos_float = pos.astype(np.float32)
-            dist = np.linalg.norm(pos_float - agent.position)
+            pos_float = relative_position(pos.astype(np.float32))
+            dist = np.linalg.norm(pos_float)
+            pos_float /= dist + 1e-6  # Normalize position vector
             if dist <= agent.observation_radius:
                 # Add node features: [nodeType, posX, posY, velX, velY]
                 node_features.append([
