@@ -2277,7 +2277,7 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                     edge_index[0].append(0)  # From agent (index 0)
                     edge_index[1].append(node_idx)  # To resource
                     edge_features.append([dist])
-y
+                    
                     # Add edge from resource to agent
                     edge_index[0].append(node_idx)  # From resource
                     edge_index[1].append(0)  # To agent (index 0)
