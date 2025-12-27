@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-    "--experiment_name", "isru-graphObs-1superBot-e50-r5-h5-20x20-128x3-fullViz",
+    "--experiment_name", "isru-graphObs-1superBot-e50-r5-h5-20x20-512x3-fullViz-relUnitPos-actVel",
     "--project_name", "qmas",
     "--env_class", "isru_zoo.isru_v0.parallel_env_graph_obs",
     "--user_name", "ideas-mas",
@@ -16,20 +16,21 @@ args = [
 
     "--hauler_capacity", "5",
 
-    # "--world_no_reset", 
+    # "--world_no_reset",
     "--world_size", "20",
     "--num_obstacles", "0",
     "--num_resources", "5",
     # "--randomize_num_resources",
     # "--curriculum_num_resources",
 
-    "--noisy_memory",
+    # "--noisy_memory",
 
     "--observation_radius", "20",
     # "--observation_mask",
     # "--available_actions_mask",
 
     "--communication_mode", "full",
+    "--movement_mode", "velocity",
 
     "--num_env_steps", "5000000",
     "--episode_length", "50",

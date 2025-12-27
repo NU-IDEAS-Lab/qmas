@@ -49,6 +49,9 @@ def add_args(parser):
                         help="Max Euclidean distance (in grid units) a Hauler must be within of any Extractor to pick up resources.")
     parser.add_argument("--noisy_memory", action="store_true",
                         help="Whether to allow the agent to see areas which are explored but not currently visible, with added noise.")
+    parser.add_argument("--movement_mode", type=str, default="moore",
+                        choices=["moore", "velocity"],
+                        help="The movement mode for agents: 'moore' uses discrete Moore neighborhood movement, 'velocity' uses continuous velocity control.")
     parser.add_argument("--communication_mode", type=str, default="nearest",
                         choices=["nearest", "broadcast", "full"],
                         help="How communication requests are handled: 'nearest' queries one nearby agent, "
@@ -108,6 +111,7 @@ class parallel_env(ParallelEnv):
             hauler_pickup_threshold: float = 1.5,
             noisy_memory: bool = False,
             communication_mode: str = "nearest",
+            movement_mode: str = "moore",
             render_mode: str = "human",
         ):
         """
@@ -132,6 +136,7 @@ class parallel_env(ParallelEnv):
         self.hauler_pickup_threshold = hauler_pickup_threshold
         self.noisy_memory = noisy_memory
         self.communication_mode = communication_mode
+        self.movement_mode = movement_mode
 
         # Set up entities.
         self.possible_agents = \
@@ -665,6 +670,8 @@ class parallel_env(ParallelEnv):
     @functools.cache
     def action_space(self, agent):
         ''' Returns the action space for the given agent. '''
+
+        # Set up communication space.
         if self.communication_mode == "nearest":
             comm_space = spaces.Dict({
                 "request": spaces.Box(
@@ -686,10 +693,19 @@ class parallel_env(ParallelEnv):
         else:
             raise ValueError(f"Unsupported communication_mode: {self.communication_mode}")
 
-        action_space_dict = {
+        # Set up movement space.
+        if self.movement_mode == "moore":
             # Movement is specified in terms of the Moore neighborhood.
             # The agent can only move one space at a time.
-            "movement": spaces.Box(low=0, high=8, shape=(1,), dtype=np.int32),
+            movement_space = spaces.Box(low=0, high=8, shape=(1,), dtype=np.int32)
+        elif self.movement_mode == "velocity":
+            movement_space = spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32)
+        else:
+            raise ValueError(f"Unsupported movement_mode: {self.movement_mode}")
+
+        # Overall action space.
+        action_space_dict = {
+            "movement": movement_space,
 
             # Resource actions are represented as follows:
             # -1 = drop off all resources
@@ -699,6 +715,7 @@ class parallel_env(ParallelEnv):
         }
         if comm_space is not None:
             action_space_dict["communication"] = comm_space
+        
         return spaces.Dict(action_space_dict)
 
 
@@ -919,7 +936,12 @@ class parallel_env(ParallelEnv):
                 agent.last_action = action
                 
                 # Set agent velocity.
-                agent.velocity = self._moore_index_to_velocity(action["movement"][0])
+                if self.movement_mode == "moore":
+                    agent.velocity = self._moore_index_to_velocity(action["movement"][0])
+                elif self.movement_mode == "velocity":
+                    agent.velocity = action["movement"]
+                else:
+                    raise ValueError(f"Invalid movement mode: {self.movement_mode}")
                 agent.velocity = np.clip(agent.velocity, -1.0, 1.0)
 
                 # Move the agent.
