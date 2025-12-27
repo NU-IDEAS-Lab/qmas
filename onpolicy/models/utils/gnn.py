@@ -35,11 +35,10 @@ class GNNBase(nn.Module):
                     input_dim=features_channels,
                     output_dim=1,
                     hidden_size=32,
-                    layer_N=2,
+                    layer_N=1,
                     use_orthogonal=use_orthogonal,
                     use_ReLU=use_ReLU,
                     use_layer_norm=False,
-                    gain=nn.init.calculate_gain("relu")
                 )
             )
         else:
