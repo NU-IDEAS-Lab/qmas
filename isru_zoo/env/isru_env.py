@@ -2249,8 +2249,8 @@ class parallel_env_graph_obs(parallel_env_map_obs):
             *role_mask,
             0.0,
             0.0,
-            agent.velocity[0],
-            agent.velocity[1]
+            0.0,
+            0.0
         ])
 
         # Add other agents.
@@ -2267,8 +2267,8 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                         *role_mask,
                         pos[0],
                         pos[1],
-                        other_agent.velocity[0],
-                        other_agent.velocity[1]
+                        other_agent.velocity[0] - agent.velocity[0],
+                        other_agent.velocity[1] - agent.velocity[1]
                     ])
                     node_idx = len(node_features) - 1
 
@@ -2297,8 +2297,8 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                         *role_mask,
                         pos_float[0],
                         pos_float[1],
-                        0.0,
-                        0.0
+                        0.0 - agent.velocity[0],
+                        0.0 - agent.velocity[1]
                     ])
                     node_idx = len(node_features) - 1
 
@@ -2326,8 +2326,8 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                     *role_mask,
                     pos_float[0],
                     pos_float[1],
-                    0.0,
-                    0.0
+                    0.0 - agent.velocity[0],
+                    0.0 - agent.velocity[1]
                 ])
                 node_idx = len(node_features) - 1
 
