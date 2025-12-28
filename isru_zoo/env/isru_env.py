@@ -2211,9 +2211,6 @@ class parallel_env_graph_obs(parallel_env_map_obs):
 
         obs_space = spaces.Dict({
             "role": spaces.Box(low=0, high=int(max(self.NODE_TYPE)), dtype=np.int32),
-            "cargo": spaces.Box(low=0.0, high=np.inf, shape=(1,), dtype=np.float32),
-            "capacity": spaces.Box(low=0.0, high=np.inf, shape=(1,), dtype=np.float32),
-            "deposited": spaces.Box(low=0.0, high=np.inf, shape=(1,), dtype=np.float32),
             "graph": spaces.Graph(
                 node_space = spaces.Box(
                     # max(NODE_TYPE), posX, posY, velX, velY
@@ -2360,17 +2357,13 @@ class parallel_env_graph_obs(parallel_env_map_obs):
         graph.agent_idx = 0  # Ego agent is the first node
 
         # Set up the observation.
-        capacity = agent.capabilities[CAP.CARRY_CAPACITY] if agent.capabilities[CAP.CARRY] else 0.0
         obs = {
             "role": np.array([agent.role], dtype=np.int32),
-            "cargo": np.array([sum(agent.cargo.values())], dtype=np.float32),
-            "capacity": np.array([capacity], dtype=np.float32),
-            "deposited": np.array([sum(depot.stock for depot in self.possible_depots)], dtype=np.float32),
             "graph": graph,
         }
 
         # Set up the fixed mask.
-        fixed_mask = np.array([True] * len(obs), dtype=bool)  # role and graph are always visible
+        fixed_mask = np.array([True, True], dtype=bool)  # role and graph are always visible
         
         return obs, fixed_mask
 
