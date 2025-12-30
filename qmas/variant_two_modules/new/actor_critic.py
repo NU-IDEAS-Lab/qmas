@@ -176,7 +176,7 @@ class QmasActor(Actor):
             
             # Use the entire graph as the actor features.
             else:
-                actor_features = self.base.graphAggr(actor_features, aggr="max")
+                actor_features = self.base.graphAggr(actor_features, aggr="mean")
 
             # Concatenate the graph and non-graph features.
             actor_features = torch.cat([actor_features, obs_nongraph], dim=-1)
@@ -185,7 +185,14 @@ class QmasActor(Actor):
                 actor_features = self.mlp0(actor_features)
         else:
             obs = check(obs).to(**self.tpdv)
-            actor_features = self.base(obs)
+
+            actor_features = obs
+            if self._use_cnn:
+                actor_features = self.cnn(actor_features)
+            if self._use_attention:
+                actor_features = self.attention(actor_features)
+            if self._use_mlp:
+                actor_features = self.mlp(actor_features)
 
         # Recurrent network.
         if self._use_naive_recurrent_policy or self._use_recurrent_policy:
@@ -267,7 +274,14 @@ class QmasActor(Actor):
                 actor_features = self.mlp0(actor_features)
         else:
             obs = check(obs).to(**self.tpdv)
-            actor_features = self.base(obs)
+            
+            actor_features = obs
+            if self._use_cnn:
+                actor_features = self.cnn(actor_features)
+            if self._use_attention:
+                actor_features = self.attention(actor_features)
+            if self._use_mlp:
+                actor_features = self.mlp(actor_features)
 
         # Recurrent network.
         if self._use_naive_recurrent_policy or self._use_recurrent_policy:
