@@ -39,7 +39,16 @@ class GNNBase(nn.Module):
                     use_orthogonal=use_orthogonal,
                     use_ReLU=use_ReLU,
                     use_layer_norm=False,
-                )
+                ),
+                nn=MLPLayer(
+                    input_dim=features_channels,
+                    output_dim=hidden_dim,
+                    hidden_size=256,
+                    layer_N=2,
+                    use_orthogonal=use_orthogonal,
+                    use_ReLU=use_ReLU,
+                    use_layer_norm=False,
+                ),
             )
         else:
             self.aggr = aggr
