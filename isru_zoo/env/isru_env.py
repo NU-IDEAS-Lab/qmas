@@ -2240,106 +2240,76 @@ class parallel_env_graph_obs(parallel_env_map_obs):
         edge_features = []  # Edge features
 
         def relative_position(pos):
-            return pos.astype(np.float32) - agent.grid_position.astype(np.float32)
+            return pos.astype(np.float32) - agent.position.astype(np.float32)
+        
+        def relative_velocity(vel):
+            return vel.astype(np.float32) - agent.velocity.astype(np.float32)
+
+        def normalize(vec):
+            return vec / agent.observation_radius
+
+        def add_node(node_type, pos, vel):
+            role_mask = np.zeros(int(max(self.NODE_TYPE) + 1), dtype=np.float32)
+            role_mask[node_type] = 1.0
+            node_features.append([
+                *role_mask,
+                pos[0],
+                pos[1],
+                vel[0],
+                vel[1]
+            ])
+            return len(node_features) - 1  # Return index of the new node
+
+        def add_edge(node_from, node_to, distance):
+            edge_index[0].append(node_from)
+            edge_index[1].append(node_to)
+            edge_features.append([distance])
 
         # Add ego agent as the root node.
-        role_mask = np.zeros(int(max(self.NODE_TYPE) + 1), dtype=np.float32)
-        role_mask[agent.role] = 1.0
-        node_features.append([
-            *role_mask,
-            0.0,
-            0.0,
-            0.0,
-            0.0
-        ])
+        node_ego = add_node(
+            agent.role,
+            np.array([0.0, 0.0], dtype=np.float32),
+            agent.velocity
+        )
 
         # Add other agents.
         for other_agent in self.possible_agents:
             if other_agent != agent:
-                pos = relative_position(other_agent.grid_position)
+                pos = relative_position(other_agent.position)
                 dist = np.linalg.norm(pos)
-                pos /= dist + 1e-6  # Normalize position vector
                 if dist <= agent.observation_radius:
-                    # Add node features: [nodeType, posX, posY, velX, velY]
-                    role_mask = np.zeros(int(max(self.NODE_TYPE) + 1), dtype=np.float32)
-                    role_mask[other_agent.role] = 1.0
-                    node_features.append([
-                        *role_mask,
-                        pos[0],
-                        pos[1],
-                        other_agent.velocity[0] - agent.velocity[0],
-                        other_agent.velocity[1] - agent.velocity[1]
-                    ])
-                    node_idx = len(node_features) - 1
-
-                    # Add edge from agent to other_agent
-                    edge_index[0].append(0)  # From agent (index 0)
-                    edge_index[1].append(node_idx)  # To other_agent
-                    edge_features.append([dist])
-
-                    # Add edge from other_agent to agent
-                    edge_index[0].append(node_idx)  # From other_agent
-                    edge_index[1].append(0)  # To agent (index 0)
-                    edge_features.append([dist])
+                    node = add_node(
+                        other_agent.role,
+                        normalize(pos),
+                        normalize(relative_velocity(other_agent.velocity))
+                    )
+                    add_edge(node, node_ego, normalize(dist))
 
         # Add nearby resources.
         for r in self.possible_resources:
-            resource_positions = np.argwhere(self.map_resources[r] > 0)
+            resource_positions = np.argwhere(self.map_resources[r] > 0).astype(np.float32)
             for pos in resource_positions:
-                pos_float = relative_position(pos.astype(np.float32))
-                dist = np.linalg.norm(pos_float)
-                pos_float /= dist + 1e-6  # Normalize position vector
+                pos = relative_position(pos)
+                dist = np.linalg.norm(pos)
                 if dist <= agent.observation_radius:
-                    # Add node features: [nodeType, posX, posY, velX, velY]
-                    role_mask = np.zeros(int(max(self.NODE_TYPE) + 1), dtype=np.float32)
-                    role_mask[self.NODE_TYPE.RESOURCE] = 1.0
-                    node_features.append([
-                        *role_mask,
-                        pos_float[0],
-                        pos_float[1],
-                        0.0 - agent.velocity[0],
-                        0.0 - agent.velocity[1]
-                    ])
-                    node_idx = len(node_features) - 1
-
-                    # Add edge from agent to resource
-                    edge_index[0].append(0)  # From agent (index 0)
-                    edge_index[1].append(node_idx)  # To resource
-                    edge_features.append([dist])
-
-                    # Add edge from resource to agent
-                    edge_index[0].append(node_idx)  # From resource
-                    edge_index[1].append(0)  # To agent (index 0)
-                    edge_features.append([dist])
+                    node = add_node(
+                        self.NODE_TYPE.RESOURCE,
+                        normalize(pos),
+                        normalize(relative_velocity(np.array([0.0, 0.0], dtype=np.float32)))
+                    )
+                    add_edge(node, node_ego, normalize(dist))
 
         # Add depots.
-        depot_positions = np.argwhere(self.map_depots > 0)
+        depot_positions = np.argwhere(self.map_depots > 0).astype(np.float32)
         for pos in depot_positions:
-            pos_float = relative_position(pos.astype(np.float32))
-            dist = np.linalg.norm(pos_float)
-            pos_float /= dist + 1e-6  # Normalize position vector
-            if dist <= agent.observation_radius:
-                # Add node features: [nodeType, posX, posY, velX, velY]
-                role_mask = np.zeros(int(max(self.NODE_TYPE) + 1), dtype=np.float32)
-                role_mask[self.NODE_TYPE.DEPOT] = 1.0
-                node_features.append([
-                    *role_mask,
-                    pos_float[0],
-                    pos_float[1],
-                    0.0 - agent.velocity[0],
-                    0.0 - agent.velocity[1]
-                ])
-                node_idx = len(node_features) - 1
-
-                # Add edge from agent to depot
-                edge_index[0].append(0)  # From agent (index 0)
-                edge_index[1].append(node_idx)  # To depot
-                edge_features.append([dist])
-
-                # Add edge from depot to agent
-                edge_index[0].append(node_idx)  # From depot
-                edge_index[1].append(0)  # To agent (index 0)
-                edge_features.append([dist])
+            pos = relative_position(pos)
+            dist = np.linalg.norm(pos)
+            node = add_node(
+                self.NODE_TYPE.DEPOT,
+                normalize(pos),
+                normalize(relative_velocity(np.array([0.0, 0.0], dtype=np.float32)))
+            )
+            add_edge(node, node_ego, normalize(dist))
     
         # Convert to tensors.
         node_features = torch.tensor(node_features, dtype=torch.float32)
