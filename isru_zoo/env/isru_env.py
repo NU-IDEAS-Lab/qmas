@@ -2269,7 +2269,7 @@ class parallel_env_graph_obs(parallel_env_map_obs):
         node_ego = add_node(
             agent.role,
             np.array([0.0, 0.0], dtype=np.float32),
-            agent.velocity
+            np.array([0.0, 0.0], dtype=np.float32)
         )
 
         # Add other agents.
