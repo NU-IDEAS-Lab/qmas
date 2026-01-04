@@ -2269,7 +2269,7 @@ class parallel_env_graph_obs(parallel_env_map_obs):
         node_ego = add_node(
             agent.role,
             np.array([0.0, 0.0], dtype=np.float32),
-            np.array([0.0, 0.0], dtype=np.float32)
+            normalize(agent.velocity)
         )
 
         # Add other agents.
@@ -2281,7 +2281,7 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                     node = add_node(
                         other_agent.role,
                         normalize(pos),
-                        normalize(relative_velocity(other_agent.velocity))
+                        normalize(other_agent.velocity)
                     )
                     add_edge(node, node_ego, normalize(dist))
 
@@ -2295,7 +2295,7 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                     node = add_node(
                         self.NODE_TYPE.RESOURCE,
                         normalize(pos),
-                        normalize(relative_velocity(np.array([0.0, 0.0], dtype=np.float32)))
+                        np.array([0.0, 0.0], dtype=np.float32)
                     )
                     add_edge(node, node_ego, normalize(dist))
 
@@ -2307,7 +2307,7 @@ class parallel_env_graph_obs(parallel_env_map_obs):
             node = add_node(
                 self.NODE_TYPE.DEPOT,
                 normalize(pos),
-                normalize(relative_velocity(np.array([0.0, 0.0], dtype=np.float32)))
+                np.array([0.0, 0.0], dtype=np.float32)
             )
             add_edge(node, node_ego, normalize(dist))
     
