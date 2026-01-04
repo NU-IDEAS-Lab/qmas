@@ -49,6 +49,7 @@ args = [
 
 	"--use_gnn_policy",
     "--use_gnn_mlp_policy",
+    "--gnn_dropout_rate", "0.0",
 
     "--diffusion_model_type", "dit1d",
     "--prediction_disable",
