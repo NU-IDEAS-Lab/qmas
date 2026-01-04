@@ -84,7 +84,7 @@ class GNNBase(nn.Module):
         # Concatenate node features and type embeddings.
         info = torch.cat([node_feat, edge_feat], dim=1)
         
-        edge_index, edge_attr = sort_edge_index(edge_index, edge_attr, sort_by_row=False)
+        # edge_index, edge_attr = sort_edge_index(edge_index, edge_attr, sort_by_row=False)
 
         return self.sage(info, edge_index, edge_attr=edge_attr)
     
