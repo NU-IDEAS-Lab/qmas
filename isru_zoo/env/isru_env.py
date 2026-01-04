@@ -2246,7 +2246,7 @@ class parallel_env_graph_obs(parallel_env_map_obs):
             return vel.astype(np.float32) - agent.velocity.astype(np.float32)
 
         def normalize(vec):
-            return vec / agent.observation_radius
+            return vec / (np.linalg.norm(vec) + 1e-6)
 
         def add_node(node_type, pos, vel):
             role_mask = np.zeros(int(max(self.NODE_TYPE) + 1), dtype=np.float32)
