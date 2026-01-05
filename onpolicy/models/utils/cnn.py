@@ -41,7 +41,7 @@ class CNNLayer(nn.Module):
             init_(nn.Linear(hidden_size, hidden_size)), active_func)
 
     def forward(self, x):
-        x = x / 255.0
+        # x = x / 255.0
         x = self.cnn(x)
         return x
 
