@@ -56,7 +56,7 @@ args = [
 
     "--seed", "0",
 
-    "--n_rollout_threads", "50",
+    "--n_rollout_threads", "100",
     "--cuda",
     "--cuda_idx", "4",
 
