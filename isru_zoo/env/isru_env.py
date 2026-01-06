@@ -2248,9 +2248,6 @@ class parallel_env_graph_obs(parallel_env_map_obs):
         def normalize(vec):
             return vec / (np.linalg.norm(vec) + 1e-6)
 
-        def normalize_dist(dist):
-            return dist / agent.observation_radius
-
         def add_node(node_type, pos, vel):
             role_mask = np.zeros(int(max(self.NODE_TYPE) + 1), dtype=np.float32)
             role_mask[node_type] = 1.0
@@ -2281,12 +2278,14 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                 pos = relative_position(other_agent.position)
                 dist = np.linalg.norm(pos)
                 if dist <= agent.observation_radius:
+                    pos = normalize(pos)
+                    dist = np.linalg.norm(pos)
                     node = add_node(
                         other_agent.role,
-                        normalize(pos),
+                        pos,
                         normalize(other_agent.velocity)
                     )
-                    add_edge(node, node_ego, normalize_dist(dist))
+                    add_edge(node, node_ego, dist)
 
         # Add nearby resources.
         for r in self.possible_resources:
@@ -2295,24 +2294,26 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                 pos = relative_position(pos)
                 dist = np.linalg.norm(pos)
                 if dist <= agent.observation_radius:
+                    pos = normalize(pos)
+                    dist = np.linalg.norm(pos)
                     node = add_node(
                         self.NODE_TYPE.RESOURCE,
-                        normalize(pos),
+                        pos,
                         np.array([0.0, 0.0], dtype=np.float32)
                     )
-                    add_edge(node, node_ego, normalize_dist(dist))
+                    add_edge(node, node_ego, dist)
 
         # Add depots.
         depot_positions = np.argwhere(self.map_depots > 0).astype(np.float32)
         for pos in depot_positions:
-            pos = relative_position(pos)
+            pos = normalize(relative_position(pos))
             dist = np.linalg.norm(pos)
             node = add_node(
                 self.NODE_TYPE.DEPOT,
-                normalize(pos),
+                pos,
                 np.array([0.0, 0.0], dtype=np.float32)
             )
-            add_edge(node, node_ego, normalize_dist(dist))
+            add_edge(node, node_ego, dist)
     
         # Convert to tensors.
         node_features = torch.tensor(node_features, dtype=torch.float32)
