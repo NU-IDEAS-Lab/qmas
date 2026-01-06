@@ -43,7 +43,7 @@ class GNNBase(nn.Module):
                 nn=MLPLayer(
                     input_dim=features_channels,
                     output_dim=features_channels,
-                    hidden_size=256,
+                    hidden_size=512,
                     layer_N=2,
                     use_orthogonal=use_orthogonal,
                     use_ReLU=use_ReLU,
