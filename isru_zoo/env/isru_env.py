@@ -2248,6 +2248,9 @@ class parallel_env_graph_obs(parallel_env_map_obs):
         def normalize(vec):
             return vec / (np.linalg.norm(vec) + 1e-6)
 
+        def normalize_dist(dist):
+            return dist / agent.observation_radius
+
         def add_node(node_type, pos, vel):
             role_mask = np.zeros(int(max(self.NODE_TYPE) + 1), dtype=np.float32)
             role_mask[node_type] = 1.0
@@ -2283,7 +2286,7 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                         normalize(pos),
                         normalize(other_agent.velocity)
                     )
-                    add_edge(node, node_ego, normalize(dist))
+                    add_edge(node, node_ego, normalize_dist(dist))
 
         # Add nearby resources.
         for r in self.possible_resources:
@@ -2297,7 +2300,7 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                         normalize(pos),
                         np.array([0.0, 0.0], dtype=np.float32)
                     )
-                    add_edge(node, node_ego, normalize(dist))
+                    add_edge(node, node_ego, normalize_dist(dist))
 
         # Add depots.
         depot_positions = np.argwhere(self.map_depots > 0).astype(np.float32)
@@ -2309,7 +2312,7 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                 normalize(pos),
                 np.array([0.0, 0.0], dtype=np.float32)
             )
-            add_edge(node, node_ego, normalize(dist))
+            add_edge(node, node_ego, normalize_dist(dist))
     
         # Convert to tensors.
         node_features = torch.tensor(node_features, dtype=torch.float32)
