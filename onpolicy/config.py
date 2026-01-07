@@ -167,6 +167,8 @@ def get_config():
     parser.add_argument("--cuda", action=argparse.BooleanOptionalAction, default=True, help="by default True, will use GPU to train; or else will use CPU;")
     parser.add_argument("--cuda_deterministic",
                         action=argparse.BooleanOptionalAction, default=True, help="by default, make sure random seed effective. if set, bypass such function.")
+    parser.add_argument("--threaded_training", action='store_true',
+                        default=False, help="Whether to use multi-threaded training.")
     parser.add_argument("--n_training_threads", type=int,
                         default=1, help="Number of torch threads for training")
     parser.add_argument("--n_rollout_threads", type=int, default=32,
