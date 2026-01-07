@@ -2279,7 +2279,7 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                 dist = np.linalg.norm(pos)
                 if dist <= agent.observation_radius:
                     pos = normalize(pos)
-                    dist = np.linalg.norm(pos)
+                    # dist = np.linalg.norm(pos)
                     node = add_node(
                         other_agent.role,
                         pos,
@@ -2295,7 +2295,7 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                 dist = np.linalg.norm(pos)
                 if dist <= agent.observation_radius:
                     pos = normalize(pos)
-                    dist = np.linalg.norm(pos)
+                    # dist = np.linalg.norm(pos)
                     node = add_node(
                         self.NODE_TYPE.RESOURCE,
                         pos,
@@ -2306,8 +2306,9 @@ class parallel_env_graph_obs(parallel_env_map_obs):
         # Add depots.
         depot_positions = np.argwhere(self.map_depots > 0).astype(np.float32)
         for pos in depot_positions:
-            pos = normalize(relative_position(pos))
+            pos = relative_position(pos)
             dist = np.linalg.norm(pos)
+            pos = normalize(pos)
             node = add_node(
                 self.NODE_TYPE.DEPOT,
                 pos,
