@@ -1,11 +1,10 @@
 import torch
-import numpy as np
 import threading
 import einops
 
 from onpolicy.models.utils.util import check
 from onpolicy.utils.util import get_grad_norm
-from ..algorithm import QmasAlgorithm as Algorithm
+from onpolicy.algorithms.r_mappo.r_mappo import R_MAPPO as Algorithm
 
 
 class QmasAlgorithm(Algorithm):
