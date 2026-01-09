@@ -1,11 +1,10 @@
 import torch
-import numpy as np
 import threading
 import einops
 
 from onpolicy.models.utils.util import check
 from onpolicy.utils.util import get_grad_norm
-from ..algorithm import QmasAlgorithm as Algorithm
+from onpolicy.algorithms.r_mappo.r_mappo import R_MAPPO as Algorithm
 
 
 class QmasAlgorithm(Algorithm):
@@ -23,10 +22,13 @@ class QmasAlgorithm(Algorithm):
         super().__init__(args, policy, env, device)
 
         # Assume policy.predictors is a list of predictor modules (ensemble)
+        self.use_threads = args.threaded_training
         self.predictors = policy.predictors
         self.num_predictors = len(self.predictors)
         self.prediction_horizon = self.predictors[0].prediction_horizon  # Assume all predictors have same horizon
         self.predictor_2d_conv = args.diffusion_model_type == "unet2d"
+
+        print(f"Initialized QmasAlgorithm with {self.num_predictors} predictors. Threaded training: {self.use_threads}")
 
     def train(self, buffer, update_actor=True, update_critic=True, last_step=-1, episode=None, episodes=None):
         """
@@ -62,11 +64,11 @@ class QmasAlgorithm(Algorithm):
         policy_info = {}
         predictor_info = {'diffuser_loss': 0, 'guide_loss': 0}
 
-        def policy_train_thread():
+        def train_policy():
             nonlocal policy_info
             policy_info = super(QmasAlgorithm, self).train(buffer, update_actor, update_critic, last_step)
 
-        def predictor_train_thread():
+        def train_predictor():
             nonlocal predictor_info
             num_diffusion_updates = [0 for _ in range(self.num_predictors)]
             assert self.args.n_rollout_threads % self.args.prediction_ensemble_size == 0, "n_rollout_threads must be divisible by prediction_ensemble_size."
@@ -113,20 +115,28 @@ class QmasAlgorithm(Algorithm):
                 predictor_info['guide_loss'] /= total_updates
 
         threads = []
-        # Start policy training thread
-        t_policy = threading.Thread(target=policy_train_thread)
-        threads.append(t_policy)
-        t_policy.start()
 
-        # Start predictor training thread if enabled
+        if self.use_threads:
+            # Start policy training
+            t_policy = threading.Thread(target=train_policy)
+            threads.append(t_policy)
+            t_policy.start()
+        else:
+            train_policy()
+        
+        # Start predictor training if enabled
         if update_predictor:
-            t_predictor = threading.Thread(target=predictor_train_thread)
-            threads.append(t_predictor)
-            t_predictor.start()
+            if self.use_threads:
+                t_predictor = threading.Thread(target=train_predictor)
+                threads.append(t_predictor)
+                t_predictor.start()
+            else:
+                train_predictor()
 
         # Wait for all threads to finish
-        for t in threads:
-            t.join()
+        if self.use_threads:
+            for t in threads:
+                t.join()
 
         # Merge results
         train_info.update(policy_info)
