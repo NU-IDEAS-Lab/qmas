@@ -10,7 +10,7 @@ from torch_geometric.utils import to_dense_batch
 from onpolicy.models.utils.util import init, check
 from onpolicy.models.utils.cnn import CNNBase
 from onpolicy.models.utils.mlp import MLPBase, MLPLayer
-from onpolicy.models.utils.gnn import GNNBase
+from onpolicy.models.utils.gnn_gcbf import GNNBase
 from onpolicy.models.utils.rnn import RNNLayer
 from onpolicy.models.utils.act import ACTLayer
 from onpolicy.models.utils.attention import SelfAttention
