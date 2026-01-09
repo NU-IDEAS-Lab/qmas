@@ -12,11 +12,10 @@ from onpolicy.models.utils.cnn import CNNBase
 from onpolicy.models.utils.mlp import MLPBase, MLPLayer
 from onpolicy.models.utils.gnn import GNNBase
 from onpolicy.models.utils.rnn import RNNLayer
-from onpolicy.models.utils.rnn import RNNLayer
 from onpolicy.models.utils.act import ACTLayer
 from onpolicy.models.utils.attention import SelfAttention
 from onpolicy.utils.util import get_shape_from_obs_space, get_graph_obs_space, strip_graph_obs_space, get_graph_obs_space_idx
-from ..actor_critic import R_Actor as Actor, R_Critic as Critic
+from onpolicy.models.r_actor_critic import R_Actor as Actor, R_Critic as Critic
 
 class StateEncoder(nn.Module):
     ''' This class encodes the global state for communication purposes. '''
@@ -62,11 +61,11 @@ class StateEncoder(nn.Module):
         return x
 
 
-class QmasActor(Actor):
+class QmasActor(nn.Module):
     ''' This class modifies the original QMAS actor to include a state encoder. '''
     
     def __init__(self, args, obs_space, share_obs_space, action_space, device=torch.device("cpu")):
-        super(Actor, self).__init__()
+        super().__init__()
         self.hidden_size = args.hidden_size
 
         self._gain = args.gain
