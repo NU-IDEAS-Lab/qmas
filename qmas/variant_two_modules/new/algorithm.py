@@ -1,5 +1,6 @@
 import torch
 import threading
+import sys
 import einops
 
 from onpolicy.models.utils.util import check
@@ -50,6 +51,10 @@ class QmasAlgorithm(Algorithm):
         train_info = {}
         self.train_initialize_info(train_info)
 
+        # Thread exception capture: collect exceptions raised in any thread
+        thread_exceptions = []
+        thread_exceptions_lock = threading.Lock()
+
         # Determine what to update.
         update_predictor = not self.args.prediction_disable
         if episode is not None and episodes is not None:
@@ -66,53 +71,65 @@ class QmasAlgorithm(Algorithm):
 
         def train_policy():
             nonlocal policy_info
-            policy_info = super(QmasAlgorithm, self).train(buffer, update_actor, update_critic, last_step)
+            try:
+                policy_info = super(QmasAlgorithm, self).train(buffer, update_actor, update_critic, last_step)
+            except Exception:
+                with thread_exceptions_lock:
+                    thread_exceptions.append(sys.exc_info())
 
         def train_predictor():
             nonlocal predictor_info
-            num_diffusion_updates = [0 for _ in range(self.num_predictors)]
-            assert self.args.n_rollout_threads % self.args.prediction_ensemble_size == 0, "n_rollout_threads must be divisible by prediction_ensemble_size."
-            split_size = self.args.n_rollout_threads // self.args.prediction_ensemble_size
-            thread_indices = torch.arange(self.args.n_rollout_threads)
-            thread_splits = torch.split(thread_indices, split_size)
+            try:
+                num_diffusion_updates = [0 for _ in range(self.num_predictors)]
+                assert self.args.n_rollout_threads % self.args.prediction_ensemble_size == 0, "n_rollout_threads must be divisible by prediction_ensemble_size."
+                split_size = self.args.n_rollout_threads // self.args.prediction_ensemble_size
+                thread_indices = torch.arange(self.args.n_rollout_threads)
+                thread_splits = torch.split(thread_indices, split_size)
 
-            for e in range(self.args.diffusion_epoch):
-                data_generator = buffer.sample_trajectories(self.num_mini_batch, self.prediction_horizon)
-                for sample in data_generator:
-                    # For each sample, run each predictor's update in its own thread
-                    pred_threads = []
-                    pred_losses = [None] * self.num_predictors
-                    pred_guides = [None] * self.num_predictors
+                for e in range(self.args.diffusion_epoch):
+                    data_generator = buffer.sample_trajectories(self.num_mini_batch, self.prediction_horizon)
+                    for sample in data_generator:
+                        # For each sample, run each predictor's update in its own thread
+                        pred_threads = []
+                        pred_losses = [None] * self.num_predictors
+                        pred_guides = [None] * self.num_predictors
 
-                    def make_pred_thread(i, predictor):
-                        def run():
-                            # Use a local dict to accumulate losses for this predictor
-                            local_info = {'diffuser_loss': 0, 'guide_loss': 0}
-                            if len(thread_splits[i]) == 0:
-                                raise ValueError("Thread split is empty. Check prediction_ensemble_size and n_rollout_threads.")
-                            self.train_sample_diffuser(sample, local_info, predictor, thread_indices=thread_splits[i])
-                            pred_losses[i] = local_info['diffuser_loss']
-                            pred_guides[i] = local_info['guide_loss']
-                        return run
+                        def make_pred_thread(i, predictor):
+                            def run():
+                                try:
+                                    # Use a local dict to accumulate losses for this predictor
+                                    local_info = {'diffuser_loss': 0, 'guide_loss': 0}
+                                    if len(thread_splits[i]) == 0:
+                                        raise ValueError("Thread split is empty. Check prediction_ensemble_size and n_rollout_threads.")
+                                    self.train_sample_diffuser(sample, local_info, predictor, thread_indices=thread_splits[i])
+                                    pred_losses[i] = local_info['diffuser_loss']
+                                    pred_guides[i] = local_info['guide_loss']
+                                except Exception:
+                                    with thread_exceptions_lock:
+                                        thread_exceptions.append(sys.exc_info())
+                            return run
 
-                    for i, predictor in enumerate(self.predictors):
-                        t = threading.Thread(target=make_pred_thread(i, predictor))
-                        pred_threads.append(t)
-                        t.start()
+                        for i, predictor in enumerate(self.predictors):
+                            t = threading.Thread(target=make_pred_thread(i, predictor))
+                            pred_threads.append(t)
+                            t.start()
 
-                    for t in pred_threads:
-                        t.join()
+                        for t in pred_threads:
+                            t.join()
 
-                    for i in range(self.num_predictors):
-                        if pred_losses[i] is not None:
-                            predictor_info['diffuser_loss'] += pred_losses[i]
-                            predictor_info['guide_loss'] += pred_guides[i]
-                            num_diffusion_updates[i] += 1
+                        for i in range(self.num_predictors):
+                            if pred_losses[i] is not None:
+                                predictor_info['diffuser_loss'] += pred_losses[i]
+                                predictor_info['guide_loss'] += pred_guides[i]
+                                num_diffusion_updates[i] += 1
 
-            total_updates = sum(num_diffusion_updates)
-            if total_updates > 0:
-                predictor_info['diffuser_loss'] /= total_updates
-                predictor_info['guide_loss'] /= total_updates
+                total_updates = sum(num_diffusion_updates)
+                if total_updates > 0:
+                    predictor_info['diffuser_loss'] /= total_updates
+                    predictor_info['guide_loss'] /= total_updates
+            except Exception:
+                with thread_exceptions_lock:
+                    thread_exceptions.append(sys.exc_info())
 
         threads = []
 
@@ -137,6 +154,11 @@ class QmasAlgorithm(Algorithm):
         if self.use_threads:
             for t in threads:
                 t.join()
+
+        # If any thread captured an exception, re-raise the first one in the main thread
+        if thread_exceptions:
+            exc_type, exc_value, exc_tb = thread_exceptions[0]
+            raise exc_value.with_traceback(exc_tb)
 
         # Merge results
         train_info.update(policy_info)
