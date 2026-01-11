@@ -68,6 +68,7 @@ class QmasActor(nn.Module):
         super().__init__()
         self.hidden_size = args.hidden_size
 
+        self.args = args
         self._gain = args.gain
         self._use_orthogonal = args.use_orthogonal
         self._use_policy_active_masks = args.use_policy_active_masks
@@ -75,6 +76,7 @@ class QmasActor(nn.Module):
         self._use_recurrent_policy = args.use_recurrent_policy
         self._use_gnn = args.use_gnn_policy
         self._use_gnn_mlp = args.use_gnn_mlp_policy
+        self._use_state_encoder = args.state_encoder
         self._recurrent_N = args.recurrent_N
         self.tpdv = dict(dtype=torch.float32, device=device)
         self.device = device
@@ -125,22 +127,23 @@ class QmasActor(nn.Module):
                 self.mlp = MLPBase(args, input_dim)
                 input_dim = self.hidden_size
         
-        print(f"R_Actor: Use GNN: {self._use_gnn}, Use CNN: {self._use_cnn}, Use MLP: {self._use_mlp}")
+        print(f"R_Actor: Use GNN: {self._use_gnn}, Use CNN: {self._use_cnn}, Use MLP: {self._use_mlp}, Use Encoder: {self._use_state_encoder}")
 
         if self._use_naive_recurrent_policy or self._use_recurrent_policy:
             self.rnn = RNNLayer(input_dim, self.hidden_size, self._recurrent_N, self._use_orthogonal)
             input_dim = self.hidden_size
 
         # Create the state encoder
-        self.state_encoder = StateEncoder(
-            args,
-            share_obs_space,
-            output_dim=args.state_encoder_output_dim,
-            use_ReLU=args.use_ReLU,
-            use_orthogonal=args.use_orthogonal,
-            device=device
-        )
-        #input_dim += args.state_encoder_output_dim
+        if args.state_encoder:
+            self.state_encoder = StateEncoder(
+                args,
+                share_obs_space,
+                output_dim=args.state_encoder_output_dim,
+                use_ReLU=args.use_ReLU,
+                use_orthogonal=args.use_orthogonal,
+                device=device
+            )
+            input_dim += args.state_encoder_output_dim
 
         self.act = ACTLayer(action_space, input_dim, self._use_orthogonal, self._gain)
 
@@ -198,20 +201,20 @@ class QmasActor(nn.Module):
             actor_features, rnn_states = self.rnn(actor_features, rnn_states, masks)
 
         # Handle global observation.
-        if global_obs == None:
-            # If no global state is provided, use zeros.
-            batch_size = obs.shape[0]
-            encoded_state = torch.zeros((batch_size, self.args.state_encoder_output_dim), device=obs.device)
-        else:
-            # Encode the global state
-            encoded_state = self.state_encoder(global_obs)
-            # Repeat the encoded state for each agent if necessary.
-            if encoded_state.shape[0] < obs.shape[0]:
-                if obs.shape[0] % encoded_state.shape[0] != 0:
-                    raise ValueError("Batch size of obs is not a multiple of batch size of share_obs.")
-                encoded_state = encoded_state.repeat_interleave(obs.shape[0] // encoded_state.shape[0], dim=0)
-
-        #actor_features = torch.cat([actor_features, encoded_state], dim=-1)
+        if self._use_state_encoder:
+            if global_obs == None:
+                # If no global state is provided, use zeros.
+                batch_size = obs.shape[0]
+                encoded_state = torch.zeros((batch_size, self.args.state_encoder_output_dim), device=obs.device)
+            else:
+                # Encode the global state
+                encoded_state = self.state_encoder(global_obs)
+                # Repeat the encoded state for each agent if necessary.
+                if encoded_state.shape[0] < obs.shape[0]:
+                    if obs.shape[0] % encoded_state.shape[0] != 0:
+                        raise ValueError("Batch size of obs is not a multiple of batch size of share_obs.")
+                    encoded_state = encoded_state.repeat_interleave(obs.shape[0] // encoded_state.shape[0], dim=0)
+            actor_features = torch.cat([actor_features, encoded_state], dim=-1)
 
         actions, action_log_probs = self.act(actor_features, available_actions, deterministic)
 
@@ -287,20 +290,20 @@ class QmasActor(nn.Module):
             actor_features, rnn_states = self.rnn(actor_features, rnn_states, masks)
 
         # Handle global observation.
-        if global_obs == None:
-            # If no global state is provided, use zeros.
-            batch_size = obs.shape[0]
-            encoded_state = torch.zeros((batch_size, self.args.state_encoder_output_dim), device=obs.device)
-        else:
-            # Encode the global state
-            encoded_state = self.state_encoder(global_obs)
-            # Repeat the encoded state for each agent if necessary.
-            if encoded_state.shape[0] < obs.shape[0]:
-                if obs.shape[0] % encoded_state.shape[0] != 0:
-                    raise ValueError("Batch size of obs is not a multiple of batch size of share_obs.")
-                encoded_state = encoded_state.repeat_interleave(obs.shape[0] // encoded_state.shape[0], dim=0)
-
-        #actor_features = torch.cat([actor_features, encoded_state], dim=-1)
+        if self._use_state_encoder:
+            if global_obs == None:
+                # If no global state is provided, use zeros.
+                batch_size = obs.shape[0]
+                encoded_state = torch.zeros((batch_size, self.args.state_encoder_output_dim), device=obs.device)
+            else:
+                # Encode the global state
+                encoded_state = self.state_encoder(global_obs)
+                # Repeat the encoded state for each agent if necessary.
+                if encoded_state.shape[0] < obs.shape[0]:
+                    if obs.shape[0] % encoded_state.shape[0] != 0:
+                        raise ValueError("Batch size of obs is not a multiple of batch size of share_obs.")
+                    encoded_state = encoded_state.repeat_interleave(obs.shape[0] // encoded_state.shape[0], dim=0)
+            actor_features = torch.cat([actor_features, encoded_state], dim=-1)
 
         action_log_probs, dist_entropy = self.act.evaluate_actions(actor_features,
                                                                    action, available_actions,

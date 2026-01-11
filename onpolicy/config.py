@@ -350,6 +350,8 @@ def get_config():
     # State encoder parameters
     parser.add_argument("--state_encoder_output_dim", type=int, default=32,
                         help="Output dimension of the state encoder network")
+    parser.add_argument("--state_encoder", action=argparse.BooleanOptionalAction, default=False,
+                        help="Whether to use a state encoder network to process the global state information. This will be concatenated with the local observation.")
 
     # diffuser parameters
     parser.add_argument("--episode_fraction_start_prediction", type=float, default=0.0,
