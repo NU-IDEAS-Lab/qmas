@@ -57,8 +57,9 @@ args = [
     "--seed", "0",
 
     "--n_rollout_threads", "100",
+    "--threaded_training",
     "--cuda",
-    "--cuda_idx", "4",
+    "--cuda_idx", "2",
 
     "--save_interval", "200000",
     # "--save_checkpoints",

@@ -58,7 +58,7 @@ args = [
 
     "--n_rollout_threads", "100",
     "--cuda",
-    "--cuda_idx", "4",
+    "--cuda_idx", "3",
 
     "--save_interval", "200000",
     # "--save_checkpoints",
