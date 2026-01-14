@@ -2213,10 +2213,10 @@ class parallel_env_graph_obs(parallel_env_map_obs):
             "role": spaces.Box(low=0, high=int(max(self.NODE_TYPE)), dtype=np.int32),
             "graph": spaces.Graph(
                 node_space = spaces.Box(
-                    # max(NODE_TYPE), posX, posY, velX, velY
+                    # max(NODE_TYPE), posX, posY, velX, velY, cargo, capacity_remaining
                     low = -np.inf,
                     high = np.inf,
-                    shape = (int(max(self.NODE_TYPE)) + 1 + 4,),
+                    shape = (int(max(self.NODE_TYPE)) + 1 + 6,),
                     dtype=np.float32
                 ),
                 edge_space = spaces.Box(
@@ -2248,7 +2248,7 @@ class parallel_env_graph_obs(parallel_env_map_obs):
         def normalize(vec):
             return vec / (np.linalg.norm(vec) + 1e-6)
 
-        def add_node(node_type, pos, vel):
+        def add_node(node_type, pos, vel, cargo=0.0, capacity_remaining=0.0):
             role_mask = np.zeros(int(max(self.NODE_TYPE) + 1), dtype=np.float32)
             role_mask[node_type] = 1.0
             node_features.append([
@@ -2256,7 +2256,9 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                 pos[0],
                 pos[1],
                 vel[0],
-                vel[1]
+                vel[1],
+                cargo,
+                capacity_remaining
             ])
             return len(node_features) - 1  # Return index of the new node
 
@@ -2269,7 +2271,9 @@ class parallel_env_graph_obs(parallel_env_map_obs):
         node_ego = add_node(
             agent.role,
             np.array([0.0, 0.0], dtype=np.float32),
-            normalize(agent.velocity)
+            normalize(agent.velocity),
+            cargo=agent.cargo_total(),
+            capacity_remaining=agent.cargo_capacity_remaining()
         )
 
         # Add other agents.
@@ -2283,7 +2287,9 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                     node = add_node(
                         other_agent.role,
                         pos,
-                        normalize(other_agent.velocity)
+                        normalize(other_agent.velocity),
+                        cargo=other_agent.cargo_total(),
+                        capacity_remaining=other_agent.cargo_capacity_remaining()
                     )
                     add_edge(node, node_ego, dist)
 

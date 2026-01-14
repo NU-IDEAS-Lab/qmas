@@ -132,6 +132,19 @@ class Agent(Entity):
         self.last_observation = None
 
 
+    def cargo_total(self):
+        ''' Returns the total cargo carried by the agent. '''
+        return sum(self.cargo.values())
+
+
+    def cargo_capacity_remaining(self):
+        ''' Returns the remaining cargo capacity of the agent. '''
+        if self.capabilities[CAP.CARRY]:
+            return self.capabilities[CAP.CARRY_CAPACITY] - self.cargo_total()
+        else:
+            return 0.0
+
+
 # --- New agent Type subclasses ---
 class Prospector(Agent):
     """Prospector: observe resources.
