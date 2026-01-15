@@ -1,34 +1,30 @@
+import numpy as np
 import torch
-import os
-from onpolicy.models.r_actor_critic import R_Actor, R_Critic
-from onpolicy.utils.util import update_linear_schedule
+from ..policy import QmasPolicy as Policy
+from .actor_critic import QmasActor, QmasCritic
+from .predictor import Predictor
+
+from onpolicy.utils.util import get_shape_from_obs_space, get_shape_from_act_space
 
 
-class R_MAPPOPolicy:
-    """
-    MAPPO Policy  class. Wraps actor and critic networks to compute actions and value function predictions.
-
-    :param args: (argparse.Namespace) arguments containing relevant model and policy information.
-    :param obs_space: (gym.Space) observation space.
-    :param cent_obs_space: (gym.Space) value function input space (centralized input for MAPPO, decentralized for IPPO).
-    :param action_space: (gym.Space) action space.
-    :param device: (torch.device) specifies the device to run on (cpu/gpu).
-    """
+class QmasPolicy(Policy):
+    ''' This class implements the QMAS policy, including communication. '''
 
     def __init__(self, args, obs_space, cent_obs_space, act_space, device=torch.device("cpu")):
-        self.args = args
         self.device = device
         self.lr = args.lr
         self.critic_lr = args.critic_lr
         self.opti_eps = args.opti_eps
         self.weight_decay = args.weight_decay
+        self.args = args
 
         self.obs_space = obs_space
         self.share_obs_space = cent_obs_space
         self.act_space = act_space
 
-        self.actor = R_Actor(args, self.obs_space, self.act_space, self.device)
-        self.critic = R_Critic(args, self.share_obs_space, self.device)
+        # We use the QMAS actor, but the default MAPPO critic.
+        self.actor = QmasActor(args, self.obs_space, self.share_obs_space, self.act_space, self.device)
+        self.critic = QmasCritic(args, self.share_obs_space, self.device)
 
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(),
                                                 lr=self.lr, eps=self.opti_eps,
@@ -37,15 +33,36 @@ class R_MAPPOPolicy:
                                                  lr=self.critic_lr,
                                                  eps=self.opti_eps,
                                                  weight_decay=self.weight_decay)
+        
+        # Create the predictor / diffusion model.
+        share_obs_shape = get_shape_from_obs_space(self.share_obs_space, flatten_dicts=False)
+        share_obs_dim = np.prod(share_obs_shape) # observation space for one agent
+        action_dim = np.prod(get_shape_from_act_space(act_space)) # action space for one agent
 
-    def lr_decay(self, episode, episodes):
-        """
-        Decay the actor and critic learning rates.
-        :param episode: (int) current training episode.
-        :param episodes: (int) total number of training episodes.
-        """
-        update_linear_schedule(self.actor_optimizer, episode, episodes, self.lr)
-        update_linear_schedule(self.critic_optimizer, episode, episodes, self.critic_lr)
+        if args.prediction_ensemble_size > 1:
+            print(f"Creating ensemble of {args.prediction_ensemble_size} predictors.")
+        
+        self.predictors = []
+        for i in range(args.prediction_ensemble_size):
+            if args.cuda and torch.cuda.is_available():
+                if len(args.cuda_idx_predictor) > 1:
+                    device_predictor = torch.device(f"cuda:{args.cuda_idx_predictor[i]}")
+                elif len(args.cuda_idx_predictor) == 1:
+                    device_predictor = torch.device(f"cuda:{args.cuda_idx_predictor[0]}")
+                else:
+                    device_predictor = self.device
+            else:
+                device_predictor = self.device
+
+            predictor = Predictor(
+                share_obs_dim,
+                action_dim,
+                args,
+                obs_shape=share_obs_shape,
+                device=device_predictor
+            ).to(device_predictor)
+            self.predictors.append(predictor)
+
 
     def get_actions(self, cent_obs, obs, rnn_states_actor, rnn_states_critic, masks, available_actions=None,
                     deterministic=False, global_obs=None):
@@ -67,6 +84,7 @@ class R_MAPPOPolicy:
         :return rnn_states_critic: (torch.Tensor) updated critic network RNN states.
         """
         actions, action_log_probs, rnn_states_actor = self.actor(obs,
+                                                                 global_obs,
                                                                  rnn_states_actor,
                                                                  masks,
                                                                  available_actions,
@@ -75,32 +93,23 @@ class R_MAPPOPolicy:
         values, rnn_states_critic = self.critic(cent_obs, rnn_states_critic, masks)
         return values, actions, action_log_probs, rnn_states_actor, rnn_states_critic
 
-    def get_values(self, cent_obs, rnn_states_critic, masks):
+
+    def act(self, obs, rnn_states_actor, masks, available_actions=None, deterministic=False, global_obs=None):
         """
-        Get value function predictions.
-        :param cent_obs (np.ndarray): centralized input to the critic.
-        :param rnn_states_critic: (np.ndarray) if critic is RNN, RNN states for critic.
+        Compute actions using the given inputs.
+        :param obs (np.ndarray): local agent inputs to the actor.
+        :param rnn_states_actor: (np.ndarray) if actor is RNN, RNN states for actor.
         :param masks: (np.ndarray) denotes points at which RNN states should be reset.
-
-        :return values: (torch.Tensor) value function predictions.
+        :param available_actions: (np.ndarray) denotes which actions are available to agent
+                                  (if None, all actions available)
+        :param deterministic: (bool) whether the action should be mode of distribution or should be sampled.
         """
-        values, _ = self.critic(cent_obs, rnn_states_critic, masks)
-        return values
+        actions, _, rnn_states_actor = self.actor(obs, global_obs, rnn_states_actor, masks, available_actions, deterministic)
+        return actions, rnn_states_actor
 
-    def get_values_rnn_states(self, cent_obs, rnn_states_critic, masks):
-        """
-        Get value function predictions.
-        :param cent_obs (np.ndarray): centralized input to the critic.
-        :param rnn_states_critic: (np.ndarray) if critic is RNN, RNN states for critic.
-        :param masks: (np.ndarray) denotes points at which RNN states should be reset.
-
-        :return values: (torch.Tensor) value function predictions.
-        """
-        values, rsc = self.critic(cent_obs, rnn_states_critic, masks)
-        return values, rsc
 
     def evaluate_actions(self, cent_obs, obs, rnn_states_actor, rnn_states_critic, action, masks,
-                         available_actions=None, active_masks=None):
+                         available_actions=None, active_masks=None, global_obs=None):
         """
         Get action logprobs / entropy and value function predictions for actor update.
         :param cent_obs (np.ndarray): centralized input to the critic.
@@ -118,6 +127,7 @@ class R_MAPPOPolicy:
         :return dist_entropy: (torch.Tensor) action distribution entropy for the given inputs.
         """
         action_log_probs, dist_entropy = self.actor.evaluate_actions(obs,
+                                                                     global_obs,
                                                                      rnn_states_actor,
                                                                      action,
                                                                      masks,
@@ -126,37 +136,3 @@ class R_MAPPOPolicy:
 
         values, _ = self.critic(cent_obs, rnn_states_critic, masks)
         return values, action_log_probs, dist_entropy
-
-    def act(self, obs, rnn_states_actor, masks, available_actions=None, deterministic=False, global_obs=None):
-        """
-        Compute actions using the given inputs.
-        :param obs (np.ndarray): local agent inputs to the actor.
-        :param rnn_states_actor: (np.ndarray) if actor is RNN, RNN states for actor.
-        :param masks: (np.ndarray) denotes points at which RNN states should be reset.
-        :param available_actions: (np.ndarray) denotes which actions are available to agent
-                                  (if None, all actions available)
-        :param deterministic: (bool) whether the action should be mode of distribution or should be sampled.
-        """
-        actions, _, rnn_states_actor = self.actor(obs, rnn_states_actor, masks, available_actions, deterministic)
-        return actions, rnn_states_actor
-
-    def save(self, directory, episode):
-        """
-        Save actor and critic networks.
-        :param directory: (str) directory to save networks.
-        :param episode: (int) current training episode.
-        """
-        torch.save(self.actor.state_dict(), os.path.join(directory, "actor.pt"))
-        torch.save(self.critic.state_dict(), os.path.join(directory, "critic.pt"))
-
-    def restore(self, directory):
-        """
-        Restore actor and critic networks from a saved model.
-        :param directory: (str) directory to restore networks from.
-        """
-        actor_state_dict = torch.load(os.path.join(directory, 'actor.pt'), map_location=self.device)
-        self.actor.load_state_dict(actor_state_dict)
-
-        if not self.args.use_render:
-            critic_state_dict = torch.load(os.path.join(directory, 'critic.pt'), map_location=self.device)
-            self.critic.load_state_dict(critic_state_dict)

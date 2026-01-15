@@ -226,27 +226,42 @@ class PettingzooEnv(object):
         # Set up new location for the combined visibility mask.
         if "visibility_mask" not in info:
             all_viz = []
-        
-        for a in self.env.possible_agents:
-            i = info[a]
-            if "visibility_mask" in i:
-                viz = i["visibility_mask"]
-                if self.flatten_observations:
-                    viz = flatten_mask(self.env.observation_space(a), viz)
-                all_viz.append(viz)
-            else:
-                return info  # If visibility mask is not present, return the info as is.
-
-        if all_viz:
-            # Combine the visibility masks into a single tensor.
-            all_viz = np.array(all_viz, dtype=np.float32)
-            info["visibility_mask"] = all_viz
+            for a in self.env.possible_agents:
+                i = info[a]
+                if "visibility_mask" in i:
+                    viz = i["visibility_mask"]
+                    if self.flatten_observations:
+                        viz = flatten_mask(self.env.observation_space(a), viz)
+                    all_viz.append(viz)
+                else:
+                    break
+            if all_viz:
+                # Combine the visibility masks into a single tensor.
+                all_viz = np.array(all_viz, dtype=np.float32)
+                info["visibility_mask"] = all_viz
         
         # Flatten the state visibility mask if needed.
         if "state_visibility_mask" in info and self.flatten_observations_global:
             svm = info["state_visibility_mask"]
             svm = flatten_mask(self.env.state_space, svm)
             info["state_visibility_mask"] = svm.astype(np.float32)
+
+        # Combine the global observations into a single tensor if needed.
+        if "observation_global" not in info:
+            all_obs = []
+            for a in self.env.possible_agents:
+                i = info[a]
+                if "observation_global" in i:
+                    obs = i["observation_global"]
+                    if self.flatten_observations_global:
+                        obs = flatten(self.env.state_space, obs)
+                    all_obs.append(obs)
+                else:
+                    break
+            if all_obs:
+                # Combine the global observations into a single tensor.
+                all_obs = np.array(all_obs, dtype=np.float32)
+                info["observation_global"] = all_obs
         
         return info
 

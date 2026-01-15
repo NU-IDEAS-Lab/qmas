@@ -164,9 +164,11 @@ def get_config():
 
     parser.add_argument("--experiment_name", type=str, default="check", help="an identifier to distinguish different experiment.")
     parser.add_argument("--seed", type=int, default=1, help="Random seed for numpy/torch")
-    parser.add_argument("--cuda", action=argparse.BooleanOptionalAction, default=True, help="by default True, will use GPU to train; or else will use CPU;")
+    parser.add_argument("--cuda", action=argparse.BooleanOptionalAction, default=False, help="by default True, will use GPU to train; or else will use CPU;")
     parser.add_argument("--cuda_deterministic",
                         action=argparse.BooleanOptionalAction, default=True, help="by default, make sure random seed effective. if set, bypass such function.")
+    parser.add_argument("--threaded_training", action='store_true',
+                        default=False, help="Whether to use multi-threaded training.")
     parser.add_argument("--n_training_threads", type=int,
                         default=1, help="Number of torch threads for training")
     parser.add_argument("--n_rollout_threads", type=int, default=32,
@@ -215,29 +217,31 @@ def get_config():
                         help="The gain # of last action layer")
 
     # graph neural network parameters
-    parser.add_argument("--use_gnn_policy", action=argparse.BooleanOptionalAction,
+    parser.add_argument("--use_gnn_policy", action='store_true',
                         default=False, help='Whether to use a GNN-based policy')
-    parser.add_argument("--use_gnn_mlp_policy", action=argparse.BooleanOptionalAction,
-                        default=False,
-                        help='Whether to use an MLP to interpret the GNN output')    
-    parser.add_argument("--use_gnn_critic", action=argparse.BooleanOptionalAction,
-                        default=False,
-                        help='Whether to use a GNN-based critic')
-    parser.add_argument("--gnn_layer_N", type=int, default=2,
+    parser.add_argument("--use_gnn_mlp_policy", action='store_true',
+                        default=False, help='Whether to use an MLP to interpret the GNN output for the actor')    
+    parser.add_argument("--use_gnn_critic", action='store_true',
+                        default=False, help='Whether to use a GNN-based critic')
+    parser.add_argument("--use_gnn_mlp_critic", action='store_false',
+                        default=True, help='Whether to use an MLP to interpret the GNN output for the critic')    
+    parser.add_argument("--gnn_layer_N", type=int, default=1,
                         help="Number of GNN layers for actor/critic networks")
     parser.add_argument("--gnn_hidden_size", type=int, default=512,
                         help="Hidden size for GNN network")
     parser.add_argument("--gnn_dropout_rate", type=float, default=0.5,
                         help="Dropout rate for GNN layers")
-    parser.add_argument("--gnn_node_embedding_num", type=int, default=3,
+    parser.add_argument("--gnn_node_embedding_num", type=int, default=5,
                         help="Number of node types.")  
-    parser.add_argument("--gnn_skip_connections", action=argparse.BooleanOptionalAction,
-                        help='Whether to use a GNN-based critic',
-                        default=False)
+    parser.add_argument("--gnn_skip_connections", action='store_true',
+                        default=False, help='Whether to use a GNN-based critic')
     parser.add_argument("--gnn_max_nodes", type=int, default=50,
                         help="Maximum number of nodes that the GNN can support.")
     parser.add_argument("--gnn_max_neighbors", type=int, default=15,
                         help="Maximum number of neighbors that each node may have.")
+    parser.add_argument("--gnn_neighbor_scoring", action='store_true',
+                        default=False, help='Whether to use GNN-based neighbor scoring.')
+
     # recurrent parameters
     parser.add_argument("--use_naive_recurrent_policy", action=argparse.BooleanOptionalAction,
                         help='Whether to use a naive recurrent policy',
@@ -342,6 +346,12 @@ def get_config():
     # Visibility mask parameters
     parser.add_argument("--observation_mask", action="store_true",
                     help="Whether to apply visibility mask to observations during policy training")
+
+    # State encoder parameters
+    parser.add_argument("--state_encoder_output_dim", type=int, default=32,
+                        help="Output dimension of the state encoder network")
+    parser.add_argument("--state_encoder", action=argparse.BooleanOptionalAction, default=False,
+                        help="Whether to use a state encoder network to process the global state information. This will be concatenated with the local observation.")
 
     # diffuser parameters
     parser.add_argument("--episode_fraction_start_prediction", type=float, default=0.0,
