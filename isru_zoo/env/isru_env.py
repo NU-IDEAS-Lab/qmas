@@ -883,8 +883,8 @@ class parallel_env(ParallelEnv):
         REWARD_DEPOSIT = 0.0
         REWARD_EXTRACT = 100000.0
         REWARD_CLOSEST_RESOURCE = 0.2
-        REWARD_UNCERTAINTY_REDUCTION = 0.1
-        REWARD_DONE = 1000000.0
+        REWARD_UNCERTAINTY_REDUCTION = 0.0
+        REWARD_DONE = 0.0
 
         self.step_count += 1
 
@@ -1084,10 +1084,10 @@ class parallel_env(ParallelEnv):
                     comm_uncertainty = agent.uncertainty[visible]
 
                     # Provide reward based on the number of newly visible cells in that area.
-                    reward_dict[agent] += 1.0 * comm_newly_visible_cells / np.sum(visible)
+                    # reward_dict[agent] += 1.0 * comm_newly_visible_cells / np.sum(visible)
 
-                    # Provide reward based on the level of uncertainty of cells in that area.
-                    reward_dict[agent] += 0.1 * np.mean(comm_uncertainty)
+                    # # Provide reward based on the level of uncertainty of cells in that area.
+                    # reward_dict[agent] += 0.1 * np.mean(comm_uncertainty)
 
             # Perform observation.
             agent_observation, fixed_mask = self.observe(
@@ -1122,7 +1122,7 @@ class parallel_env(ParallelEnv):
             r_cargo = resources_held / total_resources
             r_deposited = resources_deposited / total_resources
 
-            r_intrinsic = 100.0 * r_deposited + 1.0 * r_cargo + 1.0 * r_exploration
+            r_intrinsic = 100.0 * r_deposited + 10.0 * r_cargo + 1.0 * r_exploration
             reward_dict[agent] += r_intrinsic
 
             # Provide uncertainty reduction reward.
