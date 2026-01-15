@@ -1122,7 +1122,15 @@ class parallel_env(ParallelEnv):
             r_cargo = resources_held / total_resources
             r_deposited = resources_deposited / total_resources
 
-            r_intrinsic = 100.0 * r_deposited + 10.0 * r_cargo + 1.0 * r_exploration
+            # Intrinsic reward for distance to nearest resource.
+            r_nearest_resource = 0.0
+            resource_pos = self._get_nearest_resource(agent.position)
+            if resource_pos is not None:
+                nearest_resource_dist = np.linalg.norm(agent.position - resource_pos)
+                dmax = np.linalg.norm(self.world_dims)
+                r_nearest_resource = 1.0 - (nearest_resource_dist / dmax)
+
+            r_intrinsic = 100.0 * r_deposited + 10.0 * r_cargo + 1.0 * r_exploration + 1.0 * r_nearest_resource
             reward_dict[agent] += r_intrinsic
 
             # Provide uncertainty reduction reward.
