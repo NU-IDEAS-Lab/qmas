@@ -222,7 +222,11 @@ class PettingzooEnv(object):
 
     def _info_wrapper(self, info):
         ''' Converts the info dictionary to a format that is compatible with the onpolicy algorithms. '''
-
+        def strip_agents_info(info):
+            for a in self.env.possible_agents:
+                if a in info:
+                    del info[a]
+            return info
         # Set up new location for the combined visibility mask.
         if "visibility_mask" not in info:
             all_viz = []
@@ -263,7 +267,7 @@ class PettingzooEnv(object):
                 all_obs = np.array(all_obs, dtype=np.float32)
                 info["observation_global"] = all_obs
         
-        return info
+        return strip_agents_info(info) 
 
     def _get_matching_arg_dict(self, fn, args_input):
         ''' Returns a dictionary of arguments that are in both the args_input Namespace and the fn signature. '''

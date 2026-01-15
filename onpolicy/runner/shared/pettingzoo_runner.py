@@ -444,9 +444,17 @@ class PettingzooRunner(Runner):
             for i in range(self.num_agents):
                 # transition = np.concatenate((np.zeros(act_size, dtype=np.float32), obs[0][i].flatten()), axis=0)
                 transition = obs[0][i]
+                # Get visibility mask from the underlying Hanabi environment
+                try:
+                    env_unwrapped = render_env.envs[0].env
+                    agent_name = env_unwrapped.possible_agents[i]
+                    visibility_mask = env_unwrapped._compute_visibility_mask(agent_name)
+                    visibility_mask = torch.from_numpy(visibility_mask.astype(np.float32)).to(self.device)
+                except:
+                    visibility_mask = torch.ones(transition.shape, dtype=torch.float32, device=self.device)
                 buffer[i].append({
                     "transition": torch.from_numpy(transition).to(self.device),
-                    "visibility_mask": torch.ones(transition.shape, dtype=torch.float32, device=self.device)
+                    "visibility_mask": visibility_mask
                 })
 
             if self.all_args.save_gifs:        
@@ -527,7 +535,7 @@ class PettingzooRunner(Runner):
 
                 # Take a step in the environment and get the results.
                 obs, share_obs, render_rewards, dones, infos, available_actions = render_env.step(actions_env)
-                viz_mask_obs = np.expand_dims(infos[0]["visibility_mask"], 0) if "visibility_mask" in infos[0] else np.ones_like(obs)
+                viz_mask_obs = np.expand_dims(infos[0]["state_visibility_mask"], 0) if "state_visibility_mask" in infos[0] else np.ones_like(obs)
 
                 # Apply the visibility mask to the observation.
                 if self.all_args.observation_mask:
@@ -540,7 +548,8 @@ class PettingzooRunner(Runner):
                 for i in range(self.num_agents):
                     # transition = np.concatenate((actions[0][i].float(), obs[0][i].flatten()), axis=0)
                     transition = obs[0][i]
-                    agent_viz_mask = viz_mask[0, i]
+                    # state_visibility_mask is shared across agents, use viz_mask[0] which is the 1D mask
+                    agent_viz_mask = viz_mask[0].astype(np.float32)
                     buffer[i].append({
                         "transition": torch.from_numpy(transition).to(self.device),
                         "visibility_mask": torch.from_numpy(agent_viz_mask).to(self.device)
@@ -551,10 +560,10 @@ class PettingzooRunner(Runner):
                 time_stop = time.time()
 
                 # Perform rendering.
-                if ipython_clear_output:
-                    clear_output(wait = True)
-                spf = prediction if use_prediction else None
-                render_env.envs[0].env.render(spf, history_length=HISTORY_LENGTH, uncertainty=uncertainty)
+                # if ipython_clear_output:
+                #     clear_output(wait = True)
+                # spf = prediction if use_prediction else None
+                # render_env.envs[0].env.render(spf, history_length=HISTORY_LENGTH, uncertainty=uncertainty)
 
                 # append frame
                 if self.all_args.save_gifs:        
