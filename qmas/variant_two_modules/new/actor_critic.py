@@ -133,7 +133,7 @@ class QmasActor(nn.Module):
             self.rnn = RNNLayer(input_dim, self.hidden_size, self._recurrent_N, self._use_orthogonal)
             input_dim = self.hidden_size
 
-        # Create the state encoder
+        # Create the state encoder.
         if args.state_encoder:
             self.state_encoder = StateEncoder(
                 args,

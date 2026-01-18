@@ -5,6 +5,43 @@ from cleandiffuser.classifier import OptimalityClassifier
 from cleandiffuser.nn_classifier import HalfDiT1d, HalfJannerUNet1d
 from cleandiffuser.nn_diffusion import DiT1d, JannerUNet1d, UNet2d
 
+from onpolicy.models.utils.mlp import MLPLayer
+
+
+class UncertaintyBoundsEstimator(torch.nn.Module):
+    ''' This class learns estimated bounds on independent variables. '''
+
+    def __init__(self, input_dim, hidden_size, layer_N, use_ReLU, use_orthogonal, device=torch.device("cpu"), gain=None):
+        super(UncertaintyBoundsEstimator, self).__init__()
+        self.device = device
+
+        self.mlp = MLPLayer(input_dim=input_dim, output_dim=2, hidden_size=hidden_size, layer_N=layer_N, use_orthogonal=use_orthogonal, use_ReLU=use_ReLU, gain=gain)
+
+        self.to(device)
+    
+    def forward(self, x):
+        x = self.mlp(x)
+        lower_bound = x[:, 0:1]
+        upper_bound = x[:, 1:2]
+        return lower_bound, upper_bound
+
+    def loss(self, prediction_loss, predicted_lower_bound, predicted_upper_bound):
+        ''' Calculate the loss for the uncertainty bounds estimator.
+            Args:
+                prediction_loss: A tensor of shape (batch_size, 1) containing the prediction loss.
+                predicted_lower_bound: A tensor of shape (batch_size, 1) containing the predicted lower bound.
+                predicted_upper_bound: A tensor of shape (batch_size, 1) containing the predicted upper bound.
+            Returns:
+                loss: A tensor containing the loss value.
+        '''
+
+        # Hinge loss to ensure prediction_loss is within bounds.
+        zero_tensor = torch.zeros_like(prediction_loss)
+        lower_hinge = torch.max(predicted_lower_bound - prediction_loss, zero_tensor)
+        upper_hinge = torch.max(prediction_loss - predicted_upper_bound, zero_tensor)
+        loss = torch.mean(lower_hinge ** 2 + upper_hinge ** 2)
+        return loss
+
 
 class Predictor(torch.nn.Module):
     def __init__(self, obs_dim, action_dim, args, device=None, obs_shape=None):
@@ -90,6 +127,19 @@ class Predictor(torch.nn.Module):
         self.diffuser.manual_optimizers = {}
         self.diffuser.configure_manual_optimizers()
 
+        # Create uncertainty bounds estimator if needed.
+        self.uncertainty_bounds_estimator = None
+        if args.prediction_estimate_uncertainty:
+            print("Creating uncertainty bounds estimator for predictor.")
+            self.uncertainty_bounds_estimator = UncertaintyBoundsEstimator(
+                input_dim=transition_dim * self.prediction_horizon,
+                hidden_size=256,
+                layer_N=2,
+                use_ReLU=True,
+                use_orthogonal=True,
+                device=device
+            )
+
 
     def get_prediction(self, trajectory, visibility_mask=None, prediction_prev=None):
         ''' Get a prediction from the diffuser.
@@ -139,3 +189,17 @@ class Predictor(torch.nn.Module):
             )
 
         return prediction
+
+
+    def get_uncertainty_bounds(self, trajectory):
+        ''' Get uncertainty bounds from the uncertainty bounds estimator.
+            Args:
+                trajectory: A tensor of shape (T, D), where T is the trajectory length and D is the transition dimension (action + observation).
+            Returns:
+                lower_bound: A tensor of shape (T, 1) containing the predicted lower bound.
+                upper_bound: A tensor of shape (T, 1) containing the predicted upper bound.
+        '''
+        assert self.uncertainty_bounds_estimator is not None, "Uncertainty bounds estimator is not defined."
+        trajectory_flat = trajectory.view(trajectory.shape[0], -1)  # Flatten the trajectory.
+        lower_bound, upper_bound = self.uncertainty_bounds_estimator(trajectory_flat)
+        return lower_bound, upper_bound

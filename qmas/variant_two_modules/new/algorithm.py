@@ -219,6 +219,17 @@ class QmasAlgorithm(Algorithm):
         )['diffusion_loss']
         train_info['diffuser_loss'] += diffuser_loss
 
+        # Calculate uncertainty estimation loss.
+        if self.args.prediction_estimate_uncertainty:
+            predicted_lb, predicted_ub = predictor.get_uncertainty_bounds(trajectories)
+            uncertainty_loss = predictor.uncertainty_bounds_estimator.loss(
+                diffuser_loss.detach(),
+                predicted_lb,
+                predicted_ub
+            )
+            #TODO: Need to backpropagate. Combine this with diffusion update?
+            train_info['diffuser_loss'] += uncertainty_loss
+
         # Update guide model.
         if predictor.diffuser.classifier is not None:
             guide_loss = predictor.diffuser.update_classifier(
