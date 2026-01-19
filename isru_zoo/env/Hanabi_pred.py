@@ -27,6 +27,7 @@ def add_args(parser):
         choices=["minimal", "card_knowledge", "seer"],
         default="seer")
     parser.add_argument("--hanabi_random_start_player", action="store_true")
+    parser.add_argument("--hanabi_log_file", type=str, default="")
     parser.add_argument("--render_mode", type=str, default="none",
         choices=parallel_env.metadata["render_modes"])
 
@@ -64,6 +65,7 @@ class parallel_env(ParallelEnv):
         max_life_tokens=3,
         hanabi_observation_type="seer",
         random_start_player=False,
+        hanabi_log_file="",
         max_cycles=-1,
         render_mode="none"
     ):
@@ -77,7 +79,7 @@ class parallel_env(ParallelEnv):
         self.ranks = ranks
         self.max_cycles = max_cycles
         self.render_mode = render_mode
-        self.log_file="hanabi_results1.txt"
+        self.log_file=hanabi_log_file
 
         # ---- base env with MINIMAL observation ----
         base = hanabi_v5.env(
@@ -106,8 +108,9 @@ class parallel_env(ParallelEnv):
         # Track previous score for reward calculation
         self._prev_score = 0
         self._cumulative_reward = 0
-        with open(self.log_file, 'w') as f:
-             f.write("Episode,Final_Score,Game_Lost,Total_Steps\n")
+        if self.log_file != "":
+            with open(self.log_file, 'w') as f:
+                f.write("Episode,Final_Score,Game_Lost,Total_Steps\n")
         # ============================
         # Determine OBS_SIZE SAFELY
         # ============================
@@ -340,8 +343,9 @@ class parallel_env(ParallelEnv):
             self.total += final_score
             # print(f"[Episode End Final Score = {final_score}, Game Lost = {game_lost}")
             # print(f"[Steps to finish the game] Total Steps = {self.step_count}")
-            with open(self.log_file, 'a') as f:
-                f.write(f"{self.count},{final_score},{game_lost},{self.step_count}\n")
+            if self.log_file != "":
+                with open(self.log_file, 'a') as f:
+                    f.write(f"{self.count},{final_score},{game_lost},{self.step_count}\n")
             self.agents = []
 
         # All agents get the same reward (cooperative game)
