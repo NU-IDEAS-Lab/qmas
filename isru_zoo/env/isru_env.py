@@ -2268,40 +2268,44 @@ class parallel_env_graph_obs(parallel_env_map_obs):
         # Add ego agent as the root node.
         node_ego = add_node(
             agent.role,
-            np.array([0.0, 0.0], dtype=np.float32),
+            normalize(agent.position),
             normalize(agent.velocity)
         )
 
         # Add other agents.
+        agent_node_idx = {}
         for other_agent in self.possible_agents:
             if other_agent != agent:
-                pos = relative_position(other_agent.position)
-                dist = np.linalg.norm(pos)
+                pos = other_agent.position
+                dist = np.linalg.norm(pos - agent.position)
                 if dist <= agent.observation_radius:
-                    pos = normalize(pos)
-                    # dist = np.linalg.norm(pos)
                     node = add_node(
                         other_agent.role,
-                        pos,
+                        normalize(pos),
                         normalize(other_agent.velocity)
                     )
                     add_edge(node, node_ego, dist)
+                    agent_node_idx[other_agent] = node
 
         # Add nearby resources.
         for r in self.possible_resources:
             resource_positions = np.argwhere(self.map_resources[r] > 0).astype(np.float32)
             for pos in resource_positions:
-                pos = relative_position(pos)
-                dist = np.linalg.norm(pos)
+                dist = np.linalg.norm(pos - agent.position)
                 if dist <= agent.observation_radius:
-                    pos = normalize(pos)
-                    # dist = np.linalg.norm(pos)
                     node = add_node(
                         self.NODE_TYPE.RESOURCE,
-                        pos,
+                        normalize(pos),
                         np.array([0.0, 0.0], dtype=np.float32)
                     )
                     add_edge(node, node_ego, dist)
+
+                    # Add edges to other agents as well.
+                    for other_agent, other_node in agent_node_idx.items():
+                        other_node = agent_node_idx[other_agent]
+                        other_pos = other_agent.position
+                        dist_oa = np.linalg.norm(pos - other_pos)
+                        add_edge(node, other_node, dist_oa)
 
         # Add depots.
         depot_positions = np.argwhere(self.map_depots > 0).astype(np.float32)
