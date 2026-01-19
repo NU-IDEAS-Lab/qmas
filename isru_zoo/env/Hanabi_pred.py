@@ -121,8 +121,8 @@ class parallel_env(ParallelEnv):
         # ---- Gym spaces ----
         self.observation_spaces = {
             agent: spaces.Box(
-                low=0.0,
-                high=1.0,
+                low=-np.inf,
+                high=np.inf,
                 shape=(self.OBS_SIZE,),
                 dtype=np.float32
             )
