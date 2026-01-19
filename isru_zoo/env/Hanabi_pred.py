@@ -168,7 +168,12 @@ class parallel_env(ParallelEnv):
         # Own cards' true identity bits are firs
 
         # Mask index 308-657 as False
-        mask[308:658] = False
+        # This includes revealed knowledge about own cards and others' cards
+        # mask[308:658] = False
+
+        # Mask index 308-482 as False
+        # This includes revealed knowledge about own cards only
+        mask[308:483] = False
 
         return mask 
 
