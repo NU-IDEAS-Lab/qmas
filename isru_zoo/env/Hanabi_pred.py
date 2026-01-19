@@ -99,18 +99,13 @@ class parallel_env(ParallelEnv):
 
         self.possible_agents = base.possible_agents[:]
         self.agents = []
-        self.count = 0
-        self.total = 0
         self.step_count = 0
         self._last_obs: Optional[Dict[str, Any]] = None
         self.dones = {a: False for a in self.possible_agents}
         
-        # Track previous score for reward calculation
-        self._prev_score = 0
-        self._cumulative_reward = 0
         if self.log_file != "":
             with open(self.log_file, 'w') as f:
-                f.write("Episode,Final_Score,Game_Lost,Total_Steps\n")
+                f.write("Final_Score,Game_Lost,Total_Steps\n")
         # ============================
         # Determine OBS_SIZE SAFELY
         # ============================
@@ -193,13 +188,12 @@ class parallel_env(ParallelEnv):
 
     def reset(self, seed=None, options=None):
         self.step_count = 0
-        self._prev_score = 0
-        self._cumulative_reward = 0
 
         obs, _ = self._base_env.reset(seed=seed, options=options)
         self._last_obs = obs
         self.agents = list(obs.keys())
         self.dones = {a: False for a in self.possible_agents}
+        self.score = {a: 0 for a in self.possible_agents}
         
         clean = self._strip_action_mask(obs)
         
@@ -300,13 +294,16 @@ class parallel_env(ParallelEnv):
             else:
                 converted_actions[agent] = action
 
-        obs, rew, term, trunc, _ = self._base_env.step(converted_actions)
+        obs, reward_dict, term, trunc, _ = self._base_env.step(converted_actions)
         self._last_obs = obs
         self.agents = list(obs.keys())
 
         for a in self.possible_agents:
             if term.get(a, False):
                 self.dones[a] = True
+            
+            # Increment score.
+            self.score[a] += reward_dict.get(a, 0)
 
         force_trunc = lastStep or (
             self.max_cycles >= 0 and self.step_count >= self.max_cycles
@@ -325,43 +322,32 @@ class parallel_env(ParallelEnv):
 
         clean = self._strip_action_mask(obs)
 
-        # Calculate reward as change in firework score
-        current_score = self._compute_firework_score()
-        step_reward = current_score - self._prev_score
-        self._cumulative_reward += step_reward
-        self._prev_score = current_score
-
         # Check if game is lost
         game_lost = self._is_game_lost()
-        
-        final_score = current_score
-        final_reward = step_reward
-        
+
+        # Compute average score.
+        score_np = np.array([self.score[a] for a in self.possible_agents])
+        score_avg = np.mean(score_np)
+
+        assert np.all(score_np == score_avg) , "Scores across agents should be identical in Hanabi."
+        assert np.all(score_np >= 0) , "Scores should be non-negative in Hanabi."
+        assert np.all(score_np <= self.colors * self.ranks) , "Scores should not exceed maximum possible in Hanabi."
+
         if episode_end:
             if game_lost:
-                # If game is lost, final score is 0
-                # Final reward is negation of all rewards received so far
-                final_score = 0
-                final_reward = -self._cumulative_reward + step_reward  # Negate previous rewards
-            
-            
-            self.total += final_score
+                assert np.all(score_np == 0) , "If game is lost, scores across agents should be zero in Hanabi."
             # print(f"[Episode End Final Score = {final_score}, Game Lost = {game_lost}")
             # print(f"[Steps to finish the game] Total Steps = {self.step_count}")
             if self.log_file != "":
                 with open(self.log_file, 'a') as f:
-                    f.write(f"{self.count},{final_score},{game_lost},{self.step_count}\n")
+                    f.write(f"{score_avg},{game_lost},{self.step_count}\n")
             self.agents = []
 
-        # All agents get the same reward (cooperative game)
-        reward_dict = {a: float(final_reward) for a in self.possible_agents}
-
-        info = {a: [reward_dict[a]] for a in self.possible_agents}
+        info = {}
         
         mask = self._compute_visibility_mask(self.possible_agents[0])
         info["state_visibility_mask"] = mask
-        info["score"] = final_score
-        info["num of steps"] = self.step_count
+        info["score"] = score_avg
 
         return clean, reward_dict, done_dict, trunc_dict, info
 
