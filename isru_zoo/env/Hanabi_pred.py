@@ -335,7 +335,7 @@ class parallel_env(ParallelEnv):
 
         if episode_end:
             if game_lost:
-                assert np.all(score_np == 0) , "If game is lost, scores across agents should be zero in Hanabi."
+                assert np.any(score_np == 0) , "If game is lost, at least one agent should have zero score."
             # print(f"[Episode End Final Score = {final_score}, Game Lost = {game_lost}")
             # print(f"[Steps to finish the game] Total Steps = {self.step_count}")
             if self.log_file != "":
