@@ -231,6 +231,8 @@ class PettingzooEnv(object):
         if "visibility_mask" not in info:
             all_viz = []
             for a in self.env.possible_agents:
+                if a not in info:
+                    continue
                 i = info[a]
                 if "visibility_mask" in i:
                     viz = i["visibility_mask"]
@@ -254,6 +256,8 @@ class PettingzooEnv(object):
         if "observation_global" not in info:
             all_obs = []
             for a in self.env.possible_agents:
+                if a not in info:
+                    continue
                 i = info[a]
                 if "observation_global" in i:
                     obs = i["observation_global"]
