@@ -27,7 +27,7 @@ def add_args(parser):
         choices=["minimal", "card_knowledge", "seer"],
         default="seer")
     parser.add_argument("--hanabi_random_start_player", action="store_true")
-    parser.add_argument("--render_mode", type=str, default="human",
+    parser.add_argument("--render_mode", type=str, default="none",
         choices=parallel_env.metadata["render_modes"])
 
 
@@ -51,7 +51,7 @@ class parallel_env(ParallelEnv):
 
     metadata = {
         "name": "hanabi_v5_minimal_obs",
-        "render_modes": ["human", "ansi"],
+        "render_modes": ["human", "ansi", "none"],
     }
 
     def __init__(
@@ -65,7 +65,7 @@ class parallel_env(ParallelEnv):
         hanabi_observation_type="seer",
         random_start_player=False,
         max_cycles=-1,
-        render_mode="human"
+        render_mode="none"
     ):
         super().__init__()
 
@@ -89,7 +89,7 @@ class parallel_env(ParallelEnv):
             max_life_tokens=max_life_tokens,
             observation_type= hanabi_observation_type,
             random_start_player=random_start_player,
-            render_mode=render_mode,
+            render_mode=render_mode if render_mode != "none" else None,
         )
 
         # Convert AEC → Parallel
@@ -338,8 +338,8 @@ class parallel_env(ParallelEnv):
             
             
             self.total += final_score
-            print(f"[Episode End Final Score = {final_score}, Game Lost = {game_lost}")
-            print(f"[Steps to finish the game] Total Steps = {self.step_count}")
+            # print(f"[Episode End Final Score = {final_score}, Game Lost = {game_lost}")
+            # print(f"[Steps to finish the game] Total Steps = {self.step_count}")
             with open(self.log_file, 'a') as f:
                 f.write(f"{self.count},{final_score},{game_lost},{self.step_count}\n")
             self.agents = []
