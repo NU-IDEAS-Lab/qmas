@@ -26,32 +26,6 @@ class GNNBase(nn.Module):
         super(GNNBase, self).__init__(**kwargs)
 
         features_channels = node_dim + edge_dim
-
-        # Set up aggregation method.
-        if aggr == "attention":
-            # Attentional aggregation.
-            self.aggr = AttentionalAggregation(
-                gate_nn=MLPLayer(
-                    input_dim=features_channels,
-                    output_dim=1,
-                    hidden_size=256,
-                    layer_N=2,
-                    use_orthogonal=use_orthogonal,
-                    use_ReLU=use_ReLU,
-                    use_layer_norm=False,
-                ),
-                nn=MLPLayer(
-                    input_dim=features_channels,
-                    output_dim=features_channels,
-                    hidden_size=256,
-                    layer_N=2,
-                    use_orthogonal=use_orthogonal,
-                    use_ReLU=use_ReLU,
-                    use_layer_norm=False,
-                ),
-            )
-        else:
-            self.aggr = aggr
         
         # Create the GNN itself.
         self.sage = GraphSAGEWithEdges(
@@ -62,7 +36,9 @@ class GNNBase(nn.Module):
             dropout=dropout_rate,
             edge_channels=edge_dim,
             jk="cat" if jk else None,
-            aggr=self.aggr,
+            use_orthogonal=use_orthogonal,
+            use_ReLU=use_ReLU,
+            aggr=aggr,
         )
         if concat_k > 0:
             # Modify the size of the last layer to account for the connection back to hidden size.
@@ -195,7 +171,49 @@ class GraphSAGEWithEdges(GraphSAGE):
     supports_edge_weight: Final[bool] = False # we just consider weight an edge attribute...
     supports_edge_attr: Final[bool] = True
 
+    def __init__(self, *args, edge_channels: int = 0, use_orthogonal: bool = True, use_ReLU: bool = True, aggr=None, **kwargs):
+        # Store settings for constructing per-layer aggregation modules.
+        self._edge_channels = edge_channels
+        self._use_orthogonal = use_orthogonal
+        self._use_ReLU = use_ReLU
+        super().__init__(*args, aggr=aggr, **kwargs)
+
     def init_conv(self, in_channels: Union[int, Tuple[int, int]],
                   out_channels: int, **kwargs) -> MessagePassing:
-        
-        return SAGEConvWithEdges(in_channels, out_channels, **kwargs)
+        """
+        Construct a SAGEConvWithEdges for a given layer. If an
+        `AttentionalAggregation` was supplied as the base aggregator,
+        create a new `AttentionalAggregation` instance tailored to the
+        input channel size of this layer so the internal MLPs receive
+        correctly-sized inputs.
+        """
+        aggr = kwargs.pop('aggr', None)
+        # Determine the incoming feature dimension for this conv
+        ic = in_channels[0] if isinstance(in_channels, tuple) else in_channels
+
+        if aggr == "attention" or isinstance(aggr, AttentionalAggregation):
+            gate_nn = MLPLayer(
+                input_dim=ic,
+                output_dim=1,
+                hidden_size=256,
+                layer_N=2,
+                use_orthogonal=self._use_orthogonal,
+                use_ReLU=self._use_ReLU,
+                use_layer_norm=False,
+            )
+            nn_mlp = MLPLayer(
+                input_dim=ic,
+                output_dim=ic,
+                hidden_size=256,
+                layer_N=2,
+                use_orthogonal=self._use_orthogonal,
+                use_ReLU=self._use_ReLU,
+                use_layer_norm=False,
+            )
+            aggr_module = AttentionalAggregation(gate_nn=gate_nn, nn=nn_mlp)
+        else:
+            aggr_module = aggr
+
+        # Ensure edge_channels is passed so SAGEConvWithEdges can handle edge_attr
+        kwargs['edge_channels'] = kwargs.get('edge_channels', self._edge_channels)
+        return SAGEConvWithEdges(in_channels, out_channels, aggr=aggr_module, **kwargs)
