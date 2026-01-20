@@ -3,7 +3,7 @@ from onpolicy.scripts.train.train_pettingzoo import main
 import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 args = [
-    "--experiment_name", "hanabi-othersVisible-noObsMasking-rwdInternal",
+    "--experiment_name", "hanabi-othersVisible-noObsMasking-rwdInternal-512x2",
     "--project_name", "qmas",
     "--env_class", "isru_zoo.env.Hanabi_pred.parallel_env",
     "--user_name", "ideas-mas",
@@ -22,13 +22,18 @@ args = [
     "--use_gae",
     "--share_policy",
     "--use_ReLU",
-    "--hidden_size", "128",
-    "--layer_N", "3",
+    "--hidden_size", "512",
+    "--layer_N", "2",
+
+    "--lr", "7e-4",
+    "--critic_lr", "1e-3",
+    "--entropy_coef", "0.015",
+    "--ppo_epoch", "15",
 
     "--diffusion_model_type", "dit1d",
     "--prediction_ensemble_size", "1",
     "--prediction_history_window", "4",
-    # "--prediction_disable",
+    "--prediction_disable",
 
     "--seed", "0",
 
