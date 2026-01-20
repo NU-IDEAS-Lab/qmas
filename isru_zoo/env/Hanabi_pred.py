@@ -283,6 +283,7 @@ class parallel_env(ParallelEnv):
         score_np = np.array([self.score[a] for a in self.possible_agents])
         score_avg = np.mean(score_np)
 
+        assert np.all(score_np == self._base_env.unwrapped.hanabi_env.game_state.returns()) , "Internal score representation mismatch."
         assert np.all(score_np == score_avg) , "Scores across agents should be identical in Hanabi."
         assert np.all(score_np >= 0) , "Scores should be non-negative in Hanabi."
         assert np.all(score_np <= self.colors * self.ranks) , "Scores should not exceed maximum possible in Hanabi."
