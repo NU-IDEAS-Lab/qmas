@@ -3,13 +3,13 @@ from onpolicy.scripts.train.train_pettingzoo import main
 import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 args = [
-    "--experiment_name", "hanabi",
+    "--experiment_name", "hanabi-othersVisible-noObsMasking-rwdInternal",
     "--project_name", "qmas",
     "--env_class", "isru_zoo.env.Hanabi_pred.parallel_env",
     "--user_name", "ideas-mas",
 
     "--hanabi_observation_type", "seer",
-    "--observation_mask",
+    # "--observation_mask",
     "--num_env_steps", "80000000",
     "--episode_length", "100",
     "--max_cycles", "100",
