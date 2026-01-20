@@ -228,51 +228,8 @@ class parallel_env(ParallelEnv):
     # ----------------------------------------------------------------------
 
     def observe(self, agent):
-        return self.state(), self._compute_visibility_mask(agent)
-
-    # ----------------------------------------------------------------------
-    # compute firework score (sum of highest rank in each color's firework)
-    # ----------------------------------------------------------------------
-
-    def _compute_firework_score(self):
-        """
-        Compute the current firework score.
-        The score is the sum of values in each constructed firework.
-        For example, if Blue has cards 1,2 played, Red has 1, Green has 1,2,3:
-        Score = 2 + 1 + 3 = 6
-        """
-        obs0 = self._last_obs[self.possible_agents[0]]["observation"]
-        # Firework encoding starts at index 175 for default settings
-        # Each color has 'ranks' bits indicating which ranks have been played
-        base = 175
-        score = 0
-        for i in range(self.colors):
-            seg = obs0[base + self.ranks * i : base + self.ranks * i + self.ranks]
-            if seg.sum() > 0:
-                # The highest rank played is the firework value for this color
-                highest = np.where(seg == 1)[0].max() + 1
-                score += highest
-        return score
-
-    # ----------------------------------------------------------------------
-    # check if game is lost (all life tokens depleted)
-    # ----------------------------------------------------------------------
-
-    def _is_game_lost(self):
-        """
-        Check if the game is lost by examining life tokens.
-        Game is lost when all life tokens are depleted.
-        """
-        obs0 = self._last_obs[self.possible_agents[0]]["observation"]
-        # Life tokens are encoded after information tokens in the observation
-        # For default settings: info tokens at 200-207, life tokens at 208-210
-        # Calculate positions based on settings
-        life_token_start = 175 + (self.colors * self.ranks) + self.max_information_tokens
-        life_token_end = life_token_start + self.max_life_tokens
-        life_tokens = obs0[life_token_start:life_token_end]
-        
-        # If all life token bits are 0, game is lost
-        return life_tokens.sum() == 0
+        obs = self._last_obs[agent]["observation"].astype(np.float32)
+        return obs, self._compute_visibility_mask(agent)
 
     # ----------------------------------------------------------------------
     # step()
@@ -322,9 +279,6 @@ class parallel_env(ParallelEnv):
 
         clean = self._strip_action_mask(obs)
 
-        # Check if game is lost
-        game_lost = self._is_game_lost()
-
         # Compute average score.
         score_np = np.array([self.score[a] for a in self.possible_agents])
         score_avg = np.mean(score_np)
@@ -334,13 +288,11 @@ class parallel_env(ParallelEnv):
         assert np.all(score_np <= self.colors * self.ranks) , "Scores should not exceed maximum possible in Hanabi."
 
         if episode_end:
-            if game_lost:
-                assert np.any(score_np == 0) , "If game is lost, at least one agent should have zero score."
             # print(f"[Episode End Final Score = {final_score}, Game Lost = {game_lost}")
             # print(f"[Steps to finish the game] Total Steps = {self.step_count}")
             if self.log_file != "":
                 with open(self.log_file, 'a') as f:
-                    f.write(f"{score_avg},{game_lost},{self.step_count}\n")
+                    f.write(f"{score_avg},{self.step_count}\n")
             self.agents = []
 
         info = {}
