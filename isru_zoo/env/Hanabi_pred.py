@@ -300,6 +300,7 @@ class parallel_env(ParallelEnv):
         mask = self._compute_visibility_mask(self.possible_agents[0])
         info["state_visibility_mask"] = mask
         info["score"] = score_avg
+        info["steps_to_finish"] = self.step_count # only final value is meaningful
 
         return clean, reward_dict, done_dict, trunc_dict, info
 
