@@ -514,9 +514,9 @@ class parallel_env(ParallelEnv):
             ax_hr.scatter(positions[:, 1], positions[:, 0], label="Self", marker="s", s=150, facecolors='none', edgecolors='black', linewidths=2)
 
             if last_action is not None:
-                if last_action["communication"]["request"][0] > 0.5:
-                    # Plot a line from the agent to the requested position.
-                    rel_pos = last_action["communication"]["relative_position"]
+                if last_action["communication"]["push"][0] > 0.5:
+                    # Plot a line from the agent to the pushed position.
+                    rel_pos = last_action["communication"].get("relative_position", [0.0, 0.0])
                     ax_hr.arrow(
                         positions[0, 1], positions[0, 0],
                         rel_pos[1], rel_pos[0],
@@ -662,9 +662,9 @@ class parallel_env(ParallelEnv):
     @functools.cache
     def action_space(self, agent):
         ''' Returns the action space for the given agent. '''
-        if self.communication_mode == "nearest":
+        if self.communication_mode == "nearest" or self.communication_mode == "push":
             comm_space = spaces.Dict({
-                "request": spaces.Box(
+                "push": spaces.Box(
                     low=0, high=1, shape=(1,), dtype=np.int32
                 ),
                 "relative_position": spaces.Box(
@@ -672,9 +672,9 @@ class parallel_env(ParallelEnv):
                 ),
             })
         elif self.communication_mode == "broadcast":
-            # Broadcast does not need relative position — only a request flag
+            # Broadcast does not need relative position — only a push flag
             comm_space = spaces.Dict({
-                "request": spaces.Box(
+                "push": spaces.Box(
                     low=0, high=1, shape=(1,), dtype=np.int32
                 ),
             })
@@ -763,8 +763,8 @@ class parallel_env(ParallelEnv):
             else:
                 result["movement"][move] = 1
 
-        # Communication is always available.
-        result["communication"]["request"] = np.ones_like(result["communication"]["request"])
+        # Communication (push) is always available.
+        result["communication"]["push"] = np.ones_like(result["communication"]["push"])
 
         # if agent.capabilities[CAP.CARRY]:
         #     for i, r in enumerate(self.possible_resources):
@@ -936,20 +936,63 @@ class parallel_env(ParallelEnv):
                 else:
                     agent.steps_stationary = 1
 
-                # Handle communication (request-based).
-                comms_request = bool(action["communication"]["request"][0] == 1)
-                if comms_request and len(self.possible_agents) > 1:
+                # Handle communication (push-based): agents initiate pushes to intended recipients.
+                push_flag = bool(action["communication"]["push"][0] == 1)
+                if push_flag and len(self.possible_agents) > 1:
+                    # For broadcast pushes, add this agent as a sender for every other agent.
                     if self.communication_mode == "broadcast":
-                        senders = {other for other in self.possible_agents if other is not agent}
-                        if senders:
-                            comms_requests_explicit[agent] = senders
+                        for other in self.possible_agents:
+                            if other is not agent:
+                                comms_requests_explicit.setdefault(other, set()).add(agent)
+
+                    # For nearest/push mode, sender provides a relative_position indicating target.
                     else:
-                        comms_position_relative = action["communication"]["relative_position"]
-                        comms_requests_relative[agent] = comms_position_relative
+                        comms_position_relative = action["communication"].get("relative_position", np.array([0.0, 0.0], dtype=np.float32))
+                        absolute_pos = agent.position + np.asarray(comms_position_relative, dtype=np.float32)
+
+                        # Prospector pushes observed resource locations to Extractors.
+                        if agent.capabilities.get(CAP.PROSPECT, False):
+                            # Find nearest extractor to the reported absolute position.
+                            recipient = None
+                            dmin = np.inf
+                            for a in self.agents:
+                                if a is agent:
+                                    continue
+                                if a.capabilities.get(CAP.EXTRACT, False):
+                                    d = np.linalg.norm(a.position - absolute_pos)
+                                    if d < dmin:
+                                        dmin = d
+                                        recipient = a
+                            if recipient is not None:
+                                # store sender for recipient and pass relative vector (recipient-centric)
+                                comms_requests_explicit.setdefault(recipient, set()).add(agent)
+                                comms_requests_relative[recipient] = absolute_pos - recipient.position
+
+                        # Extractor pushes extracted-resource notifications to Haulers when no hauler assigned.
+                        elif agent.capabilities.get(CAP.EXTRACT, False):
+                            px, py = agent.grid_position
+                            extractor_on_resource = any(
+                                self.map_resources[r][px, py] > 0 for r in self.possible_resources
+                            )
+                            # Check whether any hauler is already within pickup threshold
+                            hauler_assigned = False
+                            for h in self.agents:
+                                if h.capabilities.get(CAP.CARRY, False):
+                                    dist = np.linalg.norm(h.position - agent.position)
+                                    if dist <= self.hauler_pickup_threshold:
+                                        hauler_assigned = True
+                                        break
+
+                            if extractor_on_resource and not hauler_assigned:
+                                # notify nearest hauler(s) — add sender to each hauler's incoming set
+                                for h in self.possible_agents:
+                                    if h is agent:
+                                        continue
+                                    if h.capabilities.get(CAP.CARRY, False):
+                                        comms_requests_explicit.setdefault(h, set()).add(agent)
+                                        comms_requests_relative[h] = absolute_pos - h.position
+
                     info_dict["communication/requests_made"] += 1
-                    # reward_dict[agent] += REWARD_COMMUNICATION
-                else:
-                    reward_dict[agent] += REWARD_NO_COMMUNICATION
 
                 # Corrected resource handling for Hauler agents
                 if agent.capabilities[CAP.CARRY]:

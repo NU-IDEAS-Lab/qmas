@@ -128,53 +128,64 @@ def _get_action_heuristic_pemo(args, action_space, observation):
     action = action_space.sample()
     action["movement"] = moore_index
 
-    # ----- communication heuristic -----
+    # ----- communication heuristic (role/event-driven push) -----
+    # Push rules:
+    # - Prospectors: if they observe a resource, push the nearest observed resource position to Extractors
+    # - Extractors: if on a resource and no Hauler nearby, push the extractor/resource position to Haulers
+    # - Broadcast/nearest modes only affect delivery semantics in the env; heuristic decides pushes purely by role/events
+
     communication_mode = getattr(args, "communication_mode", "nearest")
-    uncertainty_layer = observation[pemo.MAP_LAYERS.UNCERTAINTY]
+    push_flag = 0
 
-    request_flag = 0
+    # Helper: find nearest observed resource relative to agent
+    resources = observation[pemo.MAP_LAYERS.RESOURCES_EXTANT]
+    observed_mask = observation[pemo.MAP_LAYERS.MASK_RESOURCES_OBSERVED] > 0.5
+    obs_resources_mask = (resources > 0.5) & observed_mask
 
-    if communication_mode == "broadcast":
-        mean_uncertainty = float(torch.mean(uncertainty_layer))
-        if mean_uncertainty > args.broadcast_uncertainty_threshold:
-            request_flag = 1
-
-    elif communication_mode == "nearest":
-        H, W = uncertainty_layer.shape
-        region_size = int(args.nearest_region_size)
-        threshold = args.nearest_uncertainty_threshold
-
-        best_cell, best_val = None, float("-inf")
-
-        for i in range(0, H, region_size):
-            for j in range(0, W, region_size):
-                sub = uncertainty_layer[i:i + region_size, j:j + region_size]
-                if sub.numel() == 0:
-                    continue
-                mean_val = float(torch.mean(sub))
-                if mean_val > threshold and mean_val > best_val:
-                    best_val = mean_val
-                    best_cell = (i + sub.shape[0] // 2, j + sub.shape[1] // 2)
-
-        if best_cell is not None:
-            request_flag = 1
-            bi, bj = best_cell
+    if capabilities.get(CAP.PROSPECT, False):
+        # If prospector has observed any resource that has no agent standing on it, push the nearest such resource
+        agent_present_mask = (
+            (observation[pemo.MAP_LAYERS.AGENTS_PROSPECTOR] > 0.5) |
+            (observation[pemo.MAP_LAYERS.AGENTS_EXTRACTOR] > 0.5) |
+            (observation[pemo.MAP_LAYERS.AGENTS_HAULER] > 0.5)
+        )
+        candidate_mask = obs_resources_mask & ~agent_present_mask
+        positions = torch.argwhere(candidate_mask).float()
+        if positions.numel() > 0:
+            # compute nearest to agent_pos
+            dists = torch.linalg.norm(positions - agent_pos.float(), dim=1)
+            nearest = positions[torch.argmin(dists)]
+            bi, bj = int(nearest[0].item()), int(nearest[1].item())
+            push_flag = 1
             if "relative_position" in action["communication"]:
                 rx = float(observation[pemo.MAP_LAYERS.RELATIVE_POS_X, bi, bj])
                 ry = float(observation[pemo.MAP_LAYERS.RELATIVE_POS_Y, bi, bj])
                 action["communication"]["relative_position"] = [rx, ry]
 
-    else:
-        raise ValueError(f"Unknown communication mode: {communication_mode}")
+    elif capabilities.get(CAP.EXTRACT, False):
+        # If extractor is sitting on a resource and no hauler is within pickup threshold, push its location
+        if on_resource:
+            # find haulers in observation
+            hauler_layer = observation[pemo.MAP_LAYERS.AGENTS_HAULER]
+            hauler_positions = torch.argwhere(hauler_layer > 0.5).float()
+            hauler_near = False
+            if hauler_positions.numel() > 0:
+                # compute distances in grid units
+                dists = torch.linalg.norm(hauler_positions - agent_pos.float(), dim=1)
+                # use provided threshold if available
+                thresh = float(getattr(args, "hauler_pickup_threshold", 1.5))
+                if torch.min(dists) <= thresh:
+                    hauler_near = True
 
-    # ----- NEW RULE -----
-    # Extractors do NOT request communication while extracting
-    if capabilities.get(CAP.EXTRACT, False) and on_resource:
-        request_flag = 0
-        if "relative_position" in action["communication"]:
-            action["communication"]["relative_position"] = [0.0, 0.0]
+            if not hauler_near:
+                push_flag = 1
+                # push extractor (resource) position — for recipient haulers this will be interpreted relative to their position
+                if "relative_position" in action["communication"]:
+                    # set relative_position to zero so env computes absolute_pos = extractor.position
+                    action["communication"]["relative_position"] = [0.0, 0.0]
 
-    action["communication"]["request"][0] = request_flag
+    # Otherwise do not push
+    action["communication"]["push"][0] = int(push_flag)
     action_flat = torch.from_numpy(spaces.flatten(action_space, action))
     return action_flat
 
