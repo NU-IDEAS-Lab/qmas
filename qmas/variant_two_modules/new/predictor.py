@@ -15,30 +15,33 @@ class UncertaintyBoundsEstimator(torch.nn.Module):
         super(UncertaintyBoundsEstimator, self).__init__()
         self.device = device
 
-        self.mlp = MLPLayer(input_dim=input_dim, output_dim=2, hidden_size=hidden_size, layer_N=layer_N, use_orthogonal=use_orthogonal, use_ReLU=use_ReLU, gain=gain)
+        # Output two values per input element (lower and upper bounds), so output_dim = 2 * input_dim
+        self.input_dim = input_dim
+        self.mlp = MLPLayer(input_dim=input_dim, output_dim=2 * input_dim, hidden_size=hidden_size, layer_N=layer_N, use_orthogonal=use_orthogonal, use_ReLU=use_ReLU, gain=gain)
 
         self.to(device)
     
     def forward(self, x):
         x = self.mlp(x)
-        lower_bound = x[:, 0:1]
-        upper_bound = x[:, 1:2]
+        # Split the output into lower and upper bounds for every input element.
+        lower_bound = x[:, :self.input_dim]
+        upper_bound = x[:, self.input_dim:2 * self.input_dim]
         return lower_bound, upper_bound
 
-    def loss(self, prediction_loss, predicted_lower_bound, predicted_upper_bound):
+    def loss(self, predicted_value, predicted_lower_bound, predicted_upper_bound):
         ''' Calculate the loss for the uncertainty bounds estimator.
             Args:
-                prediction_loss: A tensor of shape (batch_size, 1) containing the prediction loss.
-                predicted_lower_bound: A tensor of shape (batch_size, 1) containing the predicted lower bound.
-                predicted_upper_bound: A tensor of shape (batch_size, 1) containing the predicted upper bound.
+                predicted_value: A tensor of shape (batch_size, ...) containing the predicted values.
+                predicted_lower_bound: A tensor of shape (batch_size, ...) containing the predicted lower bound.
+                predicted_upper_bound: A tensor of shape (batch_size, ...) containing the predicted upper bound.
             Returns:
                 loss: A tensor containing the loss value.
         '''
 
-        # Hinge loss to ensure prediction_loss is within bounds.
-        zero_tensor = torch.zeros_like(prediction_loss)
-        lower_hinge = torch.max(predicted_lower_bound - prediction_loss, zero_tensor)
-        upper_hinge = torch.max(prediction_loss - predicted_upper_bound, zero_tensor)
+        # Hinge loss to ensure predicted_value is within bounds.
+        zero_tensor = torch.zeros_like(predicted_value)
+        lower_hinge = torch.max(predicted_lower_bound - predicted_value, zero_tensor)
+        upper_hinge = torch.max(predicted_value - predicted_upper_bound, zero_tensor)
         loss = torch.mean(lower_hinge ** 2 + upper_hinge ** 2)
         return loss
 
@@ -132,13 +135,16 @@ class Predictor(torch.nn.Module):
         if args.prediction_estimate_uncertainty:
             print("Creating uncertainty bounds estimator for predictor.")
             self.uncertainty_bounds_estimator = UncertaintyBoundsEstimator(
-                input_dim=transition_dim * self.prediction_horizon,
-                hidden_size=256,
-                layer_N=2,
-                use_ReLU=True,
-                use_orthogonal=True,
+                input_dim=self.prediction_horizon * transition_dim,
+                hidden_size=args.hidden_size,
+                layer_N=args.layer_N,
+                use_ReLU=args.use_ReLU,
+                use_orthogonal=args.use_orthogonal,
                 device=device
             )
+            # Create an optimizer for the uncertainty bounds estimator.
+            lr = args.lr
+            self.uncertainty_optimizer = torch.optim.Adam(self.uncertainty_bounds_estimator.parameters(), lr=lr)
 
 
     def get_prediction(self, trajectory, visibility_mask=None, prediction_prev=None):
@@ -200,6 +206,7 @@ class Predictor(torch.nn.Module):
                 upper_bound: A tensor of shape (T, 1) containing the predicted upper bound.
         '''
         assert self.uncertainty_bounds_estimator is not None, "Uncertainty bounds estimator is not defined."
-        trajectory_flat = trajectory.view(trajectory.shape[0], -1)  # Flatten the trajectory.
-        lower_bound, upper_bound = self.uncertainty_bounds_estimator(trajectory_flat)
+        # trajectory_flat = trajectory.view(trajectory.shape[0], -1)  # Flatten the trajectory.
+        # lower_bound, upper_bound = self.uncertainty_bounds_estimator(trajectory_flat)
+        lower_bound, upper_bound = self.uncertainty_bounds_estimator(trajectory.flatten(start_dim=1))
         return lower_bound, upper_bound
