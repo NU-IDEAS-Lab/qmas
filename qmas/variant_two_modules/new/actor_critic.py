@@ -153,7 +153,8 @@ class QmasActor(nn.Module):
     def forward(self, obs, global_obs, rnn_states, masks, available_actions=None, deterministic=False):
         rnn_states = check(rnn_states).to(**self.tpdv)
         masks = check(masks).to(**self.tpdv)
-        global_obs = check(global_obs).to(**self.tpdv)
+        if global_obs is not None:
+            global_obs = check(global_obs).to(**self.tpdv)
         if available_actions is not None:
             available_actions = check(available_actions).to(**self.tpdv)
 
@@ -239,7 +240,8 @@ class QmasActor(nn.Module):
         rnn_states = check(rnn_states).to(**self.tpdv)
         action = check(action).to(**self.tpdv)
         masks = check(masks).to(**self.tpdv)
-        global_obs = check(global_obs).to(**self.tpdv)
+        if global_obs is not None:
+            global_obs = check(global_obs).to(**self.tpdv)
         if available_actions is not None:
             available_actions = check(available_actions).to(**self.tpdv)
 

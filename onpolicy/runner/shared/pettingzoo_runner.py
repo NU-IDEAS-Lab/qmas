@@ -442,8 +442,12 @@ class PettingzooRunner(Runner):
             masks = np.ones((self.n_render_rollout_threads, self.num_agents, 1), dtype=np.float32)
 
             for i in range(self.num_agents):
-                # transition = np.concatenate((np.zeros(act_size, dtype=np.float32), obs[0][i].flatten()), axis=0)
-                transition = obs[0][i]
+                # Use centralized/global observation for predictor (matches training).
+                # Fall back to local observation if share_obs is not available.
+                if share_obs is not None:
+                    transition = share_obs[0]
+                else:
+                    transition = obs[0][i]
                 buffer[i].append({
                     "transition": torch.from_numpy(transition).to(self.device),
                     "visibility_mask": torch.ones(transition.shape, dtype=torch.float32, device=self.device)
@@ -498,18 +502,20 @@ class PettingzooRunner(Runner):
                         # Inject the uncertainty into the prediction.
                         MAP_LAYERS = pemo.MAP_LAYERS
                         # Use the mean uncertainty across all observation channels as the uncertainty value.
-                        prediction[:, agentIdx, MAP_LAYERS.UNCERTAINTY] = torch.mean(uncertainty[:, agentIdx, :], axis=1)
+                        # prediction[:, agentIdx, MAP_LAYERS.UNCERTAINTY] = torch.mean(uncertainty[:, agentIdx, :], axis=1)
                 else:
                     prediction.zero_()
                     prediction[-1] = torch.from_numpy(obs[0])
                     uncertainty.zero_()
                 
                 actions, rnn_states = self.trainer.policy.act(
-                    prediction[-1], # Use the final timestep of the prediction.
+                    # prediction[-1], # Use the final timestep of the prediction.
+                    torch.from_numpy(obs[0]),
                     np.concatenate(rnn_states if isinstance(rnn_states, (list, tuple)) else [rnn_states]),
                     np.concatenate(masks),
                     deterministic=False,
-                    available_actions=aa
+                    available_actions=aa,
+                    global_obs=prediction
                 )
 
                 # Calculate prediction error.
@@ -537,9 +543,18 @@ class PettingzooRunner(Runner):
                 # viz_mask = np.concatenate([viz_mask_actions, viz_mask_obs.reshape(self.n_render_rollout_threads, self.num_agents, -1)], axis=-1)
                 # viz_mask = viz_mask_obs.reshape(self.n_render_rollout_threads, self.num_agents, -1)
                 viz_mask = viz_mask_obs
+                # Prefer observation_global (if env provides it), then share_obs, then local obs
+                observation_global = None
+                if "observation_global" in infos[0]:
+                    observation_global = np.array([info["observation_global"] for info in infos])
+
                 for i in range(self.num_agents):
-                    # transition = np.concatenate((actions[0][i].float(), obs[0][i].flatten()), axis=0)
-                    transition = obs[0][i]
+                    if observation_global is not None:
+                        transition = observation_global[0][i]
+                    elif share_obs is not None:
+                        transition = share_obs[0]
+                    else:
+                        transition = obs[0][i]
                     agent_viz_mask = viz_mask[0, i]
                     buffer[i].append({
                         "transition": torch.from_numpy(transition).to(self.device),
