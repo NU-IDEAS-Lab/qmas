@@ -147,7 +147,7 @@ class Predictor(torch.nn.Module):
             self.uncertainty_optimizer = torch.optim.Adam(self.uncertainty_bounds_estimator.parameters(), lr=lr)
 
 
-    def get_prediction(self, trajectory, visibility_mask=None, prediction_prev=None):
+    def get_prediction(self, trajectory, visibility_mask=None, prediction_prev=None, has_sample_dim=False):
         ''' Get a prediction from the diffuser.
             Args:
                 trajectory: A tensor of shape (T, D), where T is the trajectory length and D is the transition dimension (action + observation).
@@ -158,10 +158,11 @@ class Predictor(torch.nn.Module):
         '''
 
         # Set up trajectory and visibility mask.
-        trajectory = trajectory.unsqueeze(0)  # Add sample dimension.
+        if not has_sample_dim:
+            trajectory = trajectory.unsqueeze(0)  # Add sample dimension.
         if visibility_mask == None:
             visibility_mask = torch.ones_like(trajectory)  # Default to all visible.
-        else:
+        elif not has_sample_dim:
             visibility_mask = visibility_mask.unsqueeze(0) # Add sample dimension.
 
         # Apply the visibility mask to the trajectory.

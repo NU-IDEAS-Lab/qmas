@@ -224,12 +224,19 @@ class QmasAlgorithm(Algorithm):
         )['diffusion_loss']
         train_info['diffuser_loss'] += diffuser_loss
 
+        # Get prediction.
+        predictions = predictor.get_prediction(
+            trajectories,
+            visibility_mask=fix_mask_batch,
+            has_sample_dim=True,
+        ).detach()
+        predictions_sqerror = (predictions - trajectories) ** 2
+
         # Calculate uncertainty estimation loss.
         if self.args.prediction_estimate_uncertainty:
             predicted_lb, predicted_ub = predictor.get_uncertainty_bounds(trajectories)
-            traj_flat = trajectories.flatten(start_dim=1)
             uncertainty_loss = predictor.uncertainty_bounds_estimator.loss(
-                traj_flat,
+                predictions_sqerror.flatten(start_dim=1),
                 predicted_lb,
                 predicted_ub
             )
