@@ -1,7 +1,9 @@
 from enum import IntEnum, auto
 from pettingzoo import ParallelEnv
 from pettingzoo.utils import parallel_to_aec
+from torch_geometric.data import Data
 
+import torch
 import functools
 from gymnasium import spaces
 import random
@@ -47,10 +49,14 @@ def add_args(parser):
                         help="Max Euclidean distance (in grid units) a Hauler must be within of any Extractor to pick up resources.")
     parser.add_argument("--noisy_memory", action="store_true",
                         help="Whether to allow the agent to see areas which are explored but not currently visible, with added noise.")
+    parser.add_argument("--movement_mode", type=str, default="moore",
+                        choices=["moore", "velocity"],
+                        help="The movement mode for agents: 'moore' uses discrete Moore neighborhood movement, 'velocity' uses continuous velocity control.")
     parser.add_argument("--communication_mode", type=str, default="nearest",
-                        choices=["nearest", "broadcast"],
+                        choices=["nearest", "broadcast", "full"],
                         help="How communication requests are handled: 'nearest' queries one nearby agent, "
-                             "'broadcast' queries all other agents.")
+                             "'broadcast' queries all other agents, "
+                             "'full' provides all agents' observations.")
     parser.add_argument("--render_mode", type=str, default="human",
                         choices=parallel_env.metadata["render_modes"],
                         help="The rendering mode for the environment.")
@@ -105,6 +111,7 @@ class parallel_env(ParallelEnv):
             hauler_pickup_threshold: float = 1.5,
             noisy_memory: bool = False,
             communication_mode: str = "nearest",
+            movement_mode: str = "moore",
             render_mode: str = "human",
         ):
         """
@@ -129,6 +136,7 @@ class parallel_env(ParallelEnv):
         self.hauler_pickup_threshold = hauler_pickup_threshold
         self.noisy_memory = noisy_memory
         self.communication_mode = communication_mode
+        self.movement_mode = movement_mode
 
         # Set up entities.
         self.possible_agents = \
@@ -392,6 +400,67 @@ class parallel_env(ParallelEnv):
         reward = sum(self.last_rewards.values())
         resources_deposited = sum(depot.stock for depot in self.possible_depots)
         resources_held = sum(sum(agent.cargo.values()) for agent in self.agents if agent.capabilities[CAP.CARRY])
+        # Draw arrows for any agents that pushed a communication target this step.
+        for ag in self.agents:
+            try:
+                comm = getattr(ag, "last_action", None)
+                comm = comm.get("communication", None) if comm is not None else None
+            except Exception:
+                comm = None
+
+            pushed = False
+            rel_pos = None
+            if comm is not None:
+                if "request" in comm and comm["request"] is not None:
+                    try:
+                        pushed = bool(comm["request"][0] > 0.5)
+                    except Exception:
+                        pushed = bool(comm["request"])
+                if not pushed and "push" in comm and comm["push"] is not None:
+                    try:
+                        pushed = bool(comm["push"][0] > 0.5)
+                    except Exception:
+                        pushed = bool(comm["push"])
+                if pushed and "relative_position" in comm and comm["relative_position"] is not None:
+                    try:
+                        rel_pos = np.array(comm["relative_position"]).astype(np.float32)
+                    except Exception:
+                        rel_pos = None
+
+            # Prefer explicit receivers recorded during step
+            receivers = getattr(ag, "last_comm_receivers", None)
+            if receivers:
+                for r in receivers:
+                    try:
+                        start_x, start_y = float(ag.position[1]), float(ag.position[0])
+                        target_x, target_y = float(r.position[1]), float(r.position[0])
+                        ax_hr.annotate(
+                            '', xy=(target_x, target_y), xytext=(start_x, start_y),
+                            arrowprops=dict(arrowstyle='->', color='blue', lw=1.5, linestyle='--', alpha=0.8, shrinkA=0, shrinkB=0)
+                        )
+                    except Exception:
+                        pass
+                continue
+
+            # Fallback to recorded absolute target if available
+            if (rel_pos is None or np.allclose(rel_pos, 0.0)):
+                abs_t = getattr(ag, "last_comm_target_abs", None)
+                if abs_t is not None:
+                    rel_pos = np.array(abs_t) - np.array(ag.position)
+
+            if pushed and rel_pos is not None:
+                try:
+                    start_x, start_y = float(ag.position[1]), float(ag.position[0])
+                    target_abs = np.array(ag.position) + np.array(rel_pos)
+                    target_x, target_y = float(target_abs[1]), float(target_abs[0])
+                    ax_hr.annotate(
+                        '', xy=(target_x, target_y), xytext=(start_x, start_y),
+                        arrowprops=dict(arrowstyle='->', color='blue', lw=1.5, linestyle='--', alpha=0.8, shrinkA=0, shrinkB=0)
+                    )
+                except Exception:
+                    pass
+
+
         plt.figtext(0.5, 0.01, f"Step: {self.step_count}, Combined Step Reward: {reward:.2f}, Resources Deposited: {resources_deposited}, Resources Held: {resources_held}", ha="center", fontsize=8)
 
         plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
@@ -514,15 +583,64 @@ class parallel_env(ParallelEnv):
             ax_hr.scatter(positions[:, 1], positions[:, 0], label="Self", marker="s", s=150, facecolors='none', edgecolors='black', linewidths=2)
 
             if last_action is not None:
-                if last_action["communication"]["push"][0] > 0.5:
-                    # Plot a line from the agent to the pushed position.
-                    rel_pos = last_action["communication"].get("relative_position", [0.0, 0.0])
-                    ax_hr.arrow(
-                        positions[0, 1], positions[0, 0],
-                        rel_pos[1], rel_pos[0],
-                        head_width=0.5, head_length=0.5,
-                        fc='blue', ec='blue', linestyle='--', alpha=0.5
-                    )
+                comm = last_action.get("communication", None)
+                comm_requested = False
+                if comm is not None:
+                    # Support both legacy `request` field and `push` field used by wrappers.
+                    if "request" in comm and comm["request"] is not None:
+                        try:
+                            comm_requested = bool(comm["request"][0] > 0.5)
+                        except Exception:
+                            comm_requested = bool(comm["request"])
+                    if not comm_requested and "push" in comm and comm["push"] is not None:
+                        try:
+                            comm_requested = bool(comm["push"][0] > 0.5)
+                        except Exception:
+                            comm_requested = bool(comm["push"])
+
+                if comm_requested:
+                    # Prefer drawing arrows to explicit receivers recorded during the step by the sender.
+                    sender = self.agents[0]
+                    receivers = getattr(sender, "last_comm_receivers", None)
+                    drawn = False
+                    if receivers:
+                        for r in receivers:
+                            try:
+                                start_x, start_y = float(sender.position[1]), float(sender.position[0])
+                                target_x, target_y = float(r.position[1]), float(r.position[0])
+                                ax_hr.annotate(
+                                    '', xy=(target_x, target_y), xytext=(start_x, start_y),
+                                    arrowprops=dict(arrowstyle='->', color='blue', lw=1.5, linestyle='--', alpha=0.8, shrinkA=0, shrinkB=0)
+                                )
+                                drawn = True
+                            except Exception:
+                                pass
+
+                    if not drawn:
+                        # Determine the relative position to draw the arrow toward the pushed location.
+                        rel_pos = None
+                        if comm is not None and "relative_position" in comm and comm["relative_position"] is not None:
+                            rel_pos = np.array(comm["relative_position"]).astype(np.float32)
+
+                        # Fallback: if the sender recorded an absolute target during the step, use that.
+                        if rel_pos is None or (isinstance(rel_pos, np.ndarray) and np.allclose(rel_pos, 0.0)):
+                            abs_target = getattr(sender, "last_comm_target_abs", None)
+                            if abs_target is not None:
+                                rel_pos = np.array(abs_target) - np.array(sender.position)
+
+                        if rel_pos is None:
+                            rel_pos = np.array([0.0, 0.0])
+
+                        try:
+                            start_x, start_y = float(sender.position[1]), float(sender.position[0])
+                            target_abs = np.array(sender.position) + np.array(rel_pos)
+                            target_x, target_y = float(target_abs[1]), float(target_abs[0])
+                            ax_hr.annotate(
+                                '', xy=(target_x, target_y), xytext=(start_x, start_y),
+                                arrowprops=dict(arrowstyle='->', color='blue', lw=1.5, linestyle='--', alpha=0.8, shrinkA=0, shrinkB=0)
+                            )
+                        except Exception:
+                            pass
 
 
         # Plot a partially-completed ring around the haulers to indicate their cargo.
@@ -662,9 +780,11 @@ class parallel_env(ParallelEnv):
     @functools.cache
     def action_space(self, agent):
         ''' Returns the action space for the given agent. '''
-        if self.communication_mode == "nearest" or self.communication_mode == "push":
+
+        # Set up communication space.
+        if self.communication_mode == "nearest":
             comm_space = spaces.Dict({
-                "push": spaces.Box(
+                "request": spaces.Box(
                     low=0, high=1, shape=(1,), dtype=np.int32
                 ),
                 "relative_position": spaces.Box(
@@ -672,29 +792,41 @@ class parallel_env(ParallelEnv):
                 ),
             })
         elif self.communication_mode == "broadcast":
-            # Broadcast does not need relative position — only a push flag
+            # Broadcast does not need relative position — only a request flag
             comm_space = spaces.Dict({
-                "push": spaces.Box(
+                "request": spaces.Box(
                     low=0, high=1, shape=(1,), dtype=np.int32
                 ),
             })
+        elif self.communication_mode == "full":
+            comm_space = None  # Full communication does not require an action component
         else:
             raise ValueError(f"Unsupported communication_mode: {self.communication_mode}")
 
-        return spaces.Dict({
+        # Set up movement space.
+        if self.movement_mode == "moore":
             # Movement is specified in terms of the Moore neighborhood.
             # The agent can only move one space at a time.
-            "movement": spaces.Box(low=0, high=8, shape=(1,), dtype=np.int32),
+            movement_space = spaces.Box(low=0, high=8, shape=(1,), dtype=np.int32)
+        elif self.movement_mode == "velocity":
+            movement_space = spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32)
+        else:
+            raise ValueError(f"Unsupported movement_mode: {self.movement_mode}")
 
-            # Communication encodes a flag and optionally a relative coordinate.
-            "communication": comm_space,
+        # Overall action space.
+        action_space_dict = {
+            "movement": movement_space,
 
             # Resource actions are represented as follows:
             # -1 = drop off all resources
             # 0 = do nothing
             # 1 = pick up resources until full or no more available
             # "resources": spaces.Box(low=-1, high=1, shape=(len(self.possible_resources),), dtype=np.int32),
-        })
+        }
+        if comm_space is not None:
+            action_space_dict["communication"] = comm_space
+        
+        return spaces.Dict(action_space_dict)
 
 
     @functools.cache
@@ -763,8 +895,8 @@ class parallel_env(ParallelEnv):
             else:
                 result["movement"][move] = 1
 
-        # Communication (push) is always available.
-        result["communication"]["push"] = np.ones_like(result["communication"]["push"])
+        # Communication is always available.
+        result["communication"]["request"] = np.ones_like(result["communication"]["request"])
 
         # if agent.capabilities[CAP.CARRY]:
         #     for i, r in enumerate(self.possible_resources):
@@ -856,7 +988,7 @@ class parallel_env(ParallelEnv):
         REWARD_COLLISION = -2.0
         REWARD_NO_EXPLORATION = -1.0
         REWARD_COMMUNICATION = -5.0
-        REWARD_NO_COMMUNICATION = 5.0
+        REWARD_NO_COMMUNICATION = 0.0
         REWARD_EXTRACTOR_ON_RESOURCE = 20.0
         REWARD_DEPOSIT = 0.0
         REWARD_EXTRACT = 100000.0
@@ -914,7 +1046,12 @@ class parallel_env(ParallelEnv):
                 agent.last_action = action
                 
                 # Set agent velocity.
-                agent.velocity = self._moore_index_to_velocity(action["movement"][0])
+                if self.movement_mode == "moore":
+                    agent.velocity = self._moore_index_to_velocity(action["movement"][0])
+                elif self.movement_mode == "velocity":
+                    agent.velocity = action["movement"]
+                else:
+                    raise ValueError(f"Invalid movement mode: {self.movement_mode}")
                 agent.velocity = np.clip(agent.velocity, -1.0, 1.0)
 
                 # Move the agent.
@@ -936,63 +1073,59 @@ class parallel_env(ParallelEnv):
                 else:
                     agent.steps_stationary = 1
 
-                # Handle communication (push-based): agents initiate pushes to intended recipients.
-                push_flag = bool(action["communication"]["push"][0] == 1)
-                if push_flag and len(self.possible_agents) > 1:
-                    # For broadcast pushes, add this agent as a sender for every other agent.
-                    if self.communication_mode == "broadcast":
-                        for other in self.possible_agents:
-                            if other is not agent:
-                                comms_requests_explicit.setdefault(other, set()).add(agent)
+                # Handle communication as push (sender-driven) while keeping the
+                # original `communication` action shape (`request` + `relative_position`).
+                # When `request`==1 we treat it as a push from this agent to others.
+                comms_request = False
+                # Guard against missing communication action (env may not expose it).
+                if "communication" in action and action["communication"] is not None:
+                    comms_request = bool(action["communication"]["request"][0] == 1)
 
-                    # For nearest/push mode, sender provides a relative_position indicating target.
+                if comms_request and len(self.possible_agents) > 1:
+                    # Determine receivers based on communication mode.
+                    if self.communication_mode == "broadcast" or self.communication_mode == "full":
+                        receivers = {other for other in self.possible_agents if other is not agent}
+                        for r in receivers:
+                            comms_requests_explicit.setdefault(r, set()).add(agent)
+                        # Record the receiver list for rendering (so arrows point to actual recipients).
+                        try:
+                            agent.last_comm_receivers = list(receivers)
+                        except Exception:
+                            agent.last_comm_receivers = []
                     else:
-                        comms_position_relative = action["communication"].get("relative_position", np.array([0.0, 0.0], dtype=np.float32))
-                        absolute_pos = agent.position + np.asarray(comms_position_relative, dtype=np.float32)
+                        # 'nearest' mode: use relative_position to pick a receiver
+                        comms_position_relative = action["communication"]["relative_position"]
+                        absolute_target_position = agent.position + comms_position_relative
+                        # Prefer role-appropriate recipients: prospectors -> extractors, extractors -> haulers
+                        capability_filter = None
+                        if getattr(agent, "capabilities", None) is not None:
+                            try:
+                                if agent.capabilities[CAP.PROSPECT]:
+                                    capability_filter = CAP.EXTRACT
+                                elif agent.capabilities[CAP.EXTRACT]:
+                                    capability_filter = CAP.CARRY
+                            except Exception:
+                                capability_filter = None
 
-                        # Prospector pushes observed resource locations to Extractors.
-                        if agent.capabilities.get(CAP.PROSPECT, False):
-                            # Find nearest extractor to the reported absolute position.
-                            recipient = None
-                            dmin = np.inf
-                            for a in self.agents:
-                                if a is agent:
-                                    continue
-                                if a.capabilities.get(CAP.EXTRACT, False):
-                                    d = np.linalg.norm(a.position - absolute_pos)
-                                    if d < dmin:
-                                        dmin = d
-                                        recipient = a
-                            if recipient is not None:
-                                # store sender for recipient and pass relative vector (recipient-centric)
-                                comms_requests_explicit.setdefault(recipient, set()).add(agent)
-                                comms_requests_relative[recipient] = absolute_pos - recipient.position
-
-                        # Extractor pushes extracted-resource notifications to Haulers when no hauler assigned.
-                        elif agent.capabilities.get(CAP.EXTRACT, False):
-                            px, py = agent.grid_position
-                            extractor_on_resource = any(
-                                self.map_resources[r][px, py] > 0 for r in self.possible_resources
-                            )
-                            # Check whether any hauler is already within pickup threshold
-                            hauler_assigned = False
-                            for h in self.agents:
-                                if h.capabilities.get(CAP.CARRY, False):
-                                    dist = np.linalg.norm(h.position - agent.position)
-                                    if dist <= self.hauler_pickup_threshold:
-                                        hauler_assigned = True
-                                        break
-
-                            if extractor_on_resource and not hauler_assigned:
-                                # notify nearest hauler(s) — add sender to each hauler's incoming set
-                                for h in self.possible_agents:
-                                    if h is agent:
-                                        continue
-                                    if h.capabilities.get(CAP.CARRY, False):
-                                        comms_requests_explicit.setdefault(h, set()).add(agent)
-                                        comms_requests_relative[h] = absolute_pos - h.position
+                        receiver = self._get_nearest_entity(
+                            absolute_target_position,
+                            entity_type=ENTITY_TYPE.AGENT,
+                            capability=capability_filter,
+                            exclude={agent}
+                        )
+                        if receiver is not None:
+                            comms_requests_explicit.setdefault(receiver, set()).add(agent)
+                            # Record receiver for rendering
+                            agent.last_comm_receivers = [receiver]
+                        else:
+                            agent.last_comm_receivers = []
+                        # Also record the absolute target used for this push so the renderer can point to it as a fallback.
+                        agent.last_comm_target_abs = absolute_target_position
 
                     info_dict["communication/requests_made"] += 1
+                    # reward_dict[agent] += REWARD_COMMUNICATION
+                else:
+                    reward_dict[agent] += REWARD_NO_COMMUNICATION
 
                 # Corrected resource handling for Hauler agents
                 if agent.capabilities[CAP.CARRY]:
@@ -1083,37 +1216,7 @@ class parallel_env(ParallelEnv):
                     exclude={agent}
                 )
                 if sender is not None:
-
-                    # Case 1: Prospector responding to Extractor
-                    if sender.capabilities[CAP.PROSPECT] and agent.capabilities[CAP.EXTRACT]:
-                        # Prospector should respond only if it has actually observed resources
-                        prospector_obs = sender.mask_resources_observed
-                        prospector_has_seen_resource = np.any(prospector_obs)
-
-                        if prospector_has_seen_resource:
-                            senders_set.add(sender)
-
-                    # Case 2: Extractor responding to Hauler
-                    elif sender.capabilities[CAP.EXTRACT] and agent.capabilities[CAP.CARRY]:
-                        # Extractor should respond only if it is on a resource AND hauler has no assigned extractor
-                        px, py = sender.grid_position
-
-                        extractor_on_resource = any(
-                            self.map_resources[r][px, py] > 0 for r in self.possible_resources
-                        )
-
-                        # Find whether any hauler is assigned within pickup range
-                        hauler_assigned = False
-                        for h in self.agents:
-                            if h.capabilities[CAP.CARRY]:
-                                dist = np.linalg.norm(h.position - sender.position)
-                                if dist <= self.hauler_pickup_threshold:
-                                    hauler_assigned = True
-                                    break
-
-                        if extractor_on_resource and not hauler_assigned:
-                            senders_set.add(sender)
-
+                    senders_set.add(sender)
                 
                 # Determine the visible cells around the requested position.
                 visible = self._get_observation_radius_mask(absolute_request_position, self.default_observation_radius)
@@ -1138,6 +1241,15 @@ class parallel_env(ParallelEnv):
             agent.last_observation = agent_observation, fixed_mask
             obs_dict[agent] = agent_observation
             info_dict[agent]["visibility_mask"] = fixed_mask
+
+            # Provide the globally situated observation.
+            if hasattr(self, "get_observation_and_comms_situated"):
+                agent_observation_global, fixed_mask_global = self.get_observation_and_comms_situated(
+                    agent,
+                    senders=senders_set
+                )
+                info_dict[agent]["observation_global"] = agent_observation_global
+                # info_dict[agent]["visibility_mask_global"] = fixed_mask_global
 
             # Check whether anything new was explored.
             # visible_cells = self._get_visible_cell_count(agent)
@@ -1663,11 +1775,7 @@ class parallel_env_map_obs(parallel_env):
         '''
 
         if pred is not None:
-            self.render_state(
-                pred[-1, 0].numpy(),
-                figsize=figsize,
-                last_action=self.agents[0].last_action,
-            )
+            self.render_state(pred[-1, 0].numpy(), figsize=figsize)
 
         agent = self.agents[0]
         if agent.last_observation != None:
@@ -2094,3 +2202,306 @@ class parallel_env_flat_map_obs(parallel_env):
         )
         
         return combined_obs, updated_mask
+
+
+class parallel_env_partial_obs(parallel_env_map_obs):
+    ''' A partial observation version of the ISRU environment. '''
+
+    class MAP_MASKS(IntEnum):
+        EMPTY = 0
+        OBSTACLE = 0b1
+        # UNEXPLORED = 0b1
+        RESOURCE = 0b100
+        AGENT_PROSPECTOR = 0b1000
+        AGENT_EXTRACTOR = 0b10000
+        AGENT_HAULER = 0b100000
+        DEPOT = 0b1000000
+
+
+    @functools.cache
+    def observation_space(self, agent):
+        ''' Returns the observation space for the given agent. '''
+
+        map_width = 2 * agent.observation_radius + 1
+        return spaces.Dict({
+            "role": spaces.Discrete(len(AGENT_ROLE)),
+            "local_map": spaces.Box(
+                low=-np.inf,
+                high=np.inf,
+                shape=(1, map_width, map_width),
+                dtype=np.float32
+            ),
+        })
+
+
+    def observe(self, agent, senders=set()):
+        ''' Fills in the state/observation space for the given agent. '''
+
+        # Set up the padded observation.
+        map_center = agent.grid_position
+        map_diameter = 2 * agent.observation_radius + 1
+        map = np.zeros((1, map_diameter, map_diameter), dtype=np.int32)
+
+        # Fill in agent data.
+        for a in self.possible_agents:
+            if a != agent:
+                pos = a.grid_position - map_center + agent.observation_radius
+                if np.all(pos < map_diameter) and np.all(pos >= 0):
+                    map[0, pos[0], pos[1]] |= {
+                        AGENT_ROLE.PROSPECTOR: self.MAP_MASKS.AGENT_PROSPECTOR,
+                        AGENT_ROLE.EXTRACTOR: self.MAP_MASKS.AGENT_EXTRACTOR,
+                        AGENT_ROLE.HAULER: self.MAP_MASKS.AGENT_HAULER
+                    }[a.role]
+        
+        # Calculate slice information.
+        pos_x_min = max(0, map_center[0] - agent.observation_radius)
+        pos_x_max = min(self.world_dims[0], map_center[0] + agent.observation_radius + 1)
+        pos_y_min = max(0, map_center[1] - agent.observation_radius)
+        pos_y_max = min(self.world_dims[1], map_center[1] + agent.observation_radius + 1)
+        map_x_min = pos_x_min - (map_center[0] - agent.observation_radius)
+        map_x_max = map_x_min + (pos_x_max - pos_x_min)
+        map_y_min = pos_y_min - (map_center[1] - agent.observation_radius)
+        map_y_max = map_y_min + (pos_y_max - pos_y_min)
+
+        # Fill in resource data.
+        for r in self.possible_resources:
+            map_slice = self.map_resources[r][pos_x_min:pos_x_max, pos_y_min:pos_y_max] > 0
+            map[0, map_x_min:map_x_max, map_y_min:map_y_max][map_slice] |= self.MAP_MASKS.RESOURCE
+        
+        # Fill in depot data.
+        depot_slice = self.map_depots[pos_x_min:pos_x_max, pos_y_min:pos_y_max] > 0
+        map[0, map_x_min:map_x_max, map_y_min:map_y_max][depot_slice] |= self.MAP_MASKS.DEPOT
+
+        # Fill in obstacle data.
+        obstacle_slice = self.map_obstacles[pos_x_min:pos_x_max, pos_y_min:pos_y_max] > 0
+        map[0, map_x_min:map_x_max, map_y_min:map_y_max][obstacle_slice] |= self.MAP_MASKS.OBSTACLE
+
+        # Set up the observation.
+        obs = {
+            "role": np.array([agent.role], dtype=np.int32),
+            "local_map": map.astype(np.float32),
+        }
+
+        # Set up the fixed mask.
+        fixed_mask = {
+            "role": np.ones(len(AGENT_ROLE), dtype=bool),
+            "local_map": np.zeros(map.shape, dtype=bool)
+        }
+        
+        return obs, fixed_mask
+
+
+    @property
+    @functools.cache
+    def state_space(self):
+        ''' Returns the global state space. '''
+
+        return parallel_env_map_obs.observation_space(self, self.possible_agents[0])
+
+
+    def _state(self):
+        ''' Returns the global state and mask of the environment.'''
+
+        return parallel_env_map_obs._observe(self, self.possible_agents[0], global_state=True)
+
+
+    def get_observation_and_comms_situated(self, agent, senders=set()):
+        ''' Returns a globally situated observation for the given agent. '''
+
+        return parallel_env_map_obs.observe(self, agent, senders=senders)
+
+
+    def render_observation(self, obs):
+        ''' Renders the given observation.
+            
+            Args:
+                obs (np.ndarray): The observation to render.
+                
+            Returns:
+                None or np.ndarray: None if render_mode is "human", otherwise an RGB array.
+        '''
+
+        # Need to write a customer renderer here using matplotlib.
+        fig = plt.figure(figsize=(6, 6))
+        ax = fig.add_subplot(1, 1, 1)
+
+        map = obs["local_map"][0]
+        ax.imshow(map, cmap='plasma', interpolation='nearest')
+        ax.set_title("Agent Observation")
+        ax.axis('off')
+
+        if self.render_mode == "human":
+            plt.show()
+        else:
+            fig.canvas.draw()
+            width, height = fig.canvas.get_width_height()
+            image = np.frombuffer(fig.canvas.tostring_rgb(), dtype='uint8').reshape(height, width, 3)
+            plt.close(fig)
+            return image
+
+
+class parallel_env_graph_obs(parallel_env_map_obs):
+    ''' A partial observation version of the ISRU environment. '''
+
+
+    class NODE_TYPE(IntEnum):
+        RESOURCE = len(AGENT_ROLE)
+        DEPOT = auto()
+
+
+    @functools.cache
+    def observation_space(self, agent):
+        ''' Returns the observation space for the given agent. '''
+
+        obs_space = spaces.Dict({
+            "role": spaces.Box(low=0, high=int(max(self.NODE_TYPE)), dtype=np.int32),
+            "graph": spaces.Graph(
+                node_space = spaces.Box(
+                    # max(NODE_TYPE), posX, posY, velX, velY
+                    low = -np.inf,
+                    high = np.inf,
+                    shape = (int(max(self.NODE_TYPE)) + 1 + 4,),
+                    dtype=np.float32
+                ),
+                edge_space = spaces.Box(
+                    # weight (distance)
+                    low = -np.inf,
+                    high = np.inf,
+                    shape = (1,),
+                    dtype=np.float32
+                )
+            )
+        })
+
+        return obs_space
+
+
+    def observe(self, agent, senders=set()):
+        ''' Fills in the state/observation space for the given agent. '''
+
+        node_features = []  # Node features
+        edge_index = [[], []]  # Edge connections
+        edge_features = []  # Edge features
+
+        def relative_position(pos):
+            return pos.astype(np.float32) - agent.position.astype(np.float32)
+        
+        def relative_velocity(vel):
+            return vel.astype(np.float32) - agent.velocity.astype(np.float32)
+
+        def normalize(vec):
+            return vec / (np.linalg.norm(vec) + 1e-6)
+
+        def add_node(node_type, pos, vel):
+            role_mask = np.zeros(int(max(self.NODE_TYPE) + 1), dtype=np.float32)
+            role_mask[node_type] = 1.0
+            node_features.append([
+                *role_mask,
+                pos[0],
+                pos[1],
+                vel[0],
+                vel[1]
+            ])
+            return len(node_features) - 1  # Return index of the new node
+
+        def add_edge(node_from, node_to, distance):
+            edge_index[0].append(node_from)
+            edge_index[1].append(node_to)
+            edge_features.append([distance])
+
+        # Add ego agent as the root node.
+        node_ego = add_node(
+            agent.role,
+            np.array([0.0, 0.0], dtype=np.float32),
+            normalize(agent.velocity)
+        )
+
+        # Add other agents.
+        for other_agent in self.possible_agents:
+            if other_agent != agent:
+                pos = relative_position(other_agent.position)
+                dist = np.linalg.norm(pos)
+                if dist <= agent.observation_radius:
+                    pos = normalize(pos)
+                    # dist = np.linalg.norm(pos)
+                    node = add_node(
+                        other_agent.role,
+                        pos,
+                        normalize(other_agent.velocity)
+                    )
+                    add_edge(node, node_ego, dist)
+
+        # Add nearby resources.
+        for r in self.possible_resources:
+            resource_positions = np.argwhere(self.map_resources[r] > 0).astype(np.float32)
+            for pos in resource_positions:
+                pos = relative_position(pos)
+                dist = np.linalg.norm(pos)
+                if dist <= agent.observation_radius:
+                    pos = normalize(pos)
+                    # dist = np.linalg.norm(pos)
+                    node = add_node(
+                        self.NODE_TYPE.RESOURCE,
+                        pos,
+                        np.array([0.0, 0.0], dtype=np.float32)
+                    )
+                    add_edge(node, node_ego, dist)
+
+        # Add depots.
+        depot_positions = np.argwhere(self.map_depots > 0).astype(np.float32)
+        for pos in depot_positions:
+            pos = relative_position(pos)
+            dist = np.linalg.norm(pos)
+            pos = normalize(pos)
+            node = add_node(
+                self.NODE_TYPE.DEPOT,
+                pos,
+                np.array([0.0, 0.0], dtype=np.float32)
+            )
+            add_edge(node, node_ego, dist)
+    
+        # Convert to tensors.
+        node_features = torch.tensor(node_features, dtype=torch.float32)
+        edge_index = torch.tensor(edge_index, dtype=torch.long)
+        edge_features = torch.tensor(edge_features, dtype=torch.float32)
+
+        # Build the PyG graph of nearby entities.
+        graph = Data(
+            x = node_features,
+            edge_index = edge_index,
+            edge_attr = edge_features
+        )
+
+        # Set various attributes.
+        graph.agent_idx = 0  # Ego agent is the first node
+
+        # Set up the observation.
+        obs = {
+            "role": np.array([agent.role], dtype=np.int32),
+            "graph": graph,
+        }
+
+        # Set up the fixed mask.
+        fixed_mask = np.array([True, True], dtype=bool)  # role and graph are always visible
+        
+        return obs, fixed_mask
+
+
+    @property
+    @functools.cache
+    def state_space(self):
+        ''' Returns the global state space. '''
+
+        return parallel_env_map_obs.observation_space(self, self.possible_agents[0])
+
+
+    def _state(self):
+        ''' Returns the global state and mask of the environment.'''
+
+        return parallel_env_map_obs._observe(self, self.possible_agents[0], global_state=True)
+
+
+    def get_observation_and_comms_situated(self, agent, senders=set()):
+        ''' Returns a globally situated observation for the given agent. '''
+
+        return parallel_env_map_obs.observe(self, agent, senders=senders)
