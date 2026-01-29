@@ -234,7 +234,8 @@ class QmasAlgorithm(Algorithm):
 
         # Calculate uncertainty estimation loss.
         if self.args.prediction_estimate_uncertainty:
-            predicted_lb, predicted_ub = predictor.get_uncertainty_bounds(predictions)
+            predictions_masked = predictions * fix_mask_batch
+            predicted_lb, predicted_ub = predictor.get_uncertainty_bounds(predictions_masked)
             uncertainty_loss = predictor.uncertainty_bounds_estimator.loss(
                 predictions_error.flatten(start_dim=1),
                 predicted_lb,
