@@ -230,13 +230,13 @@ class QmasAlgorithm(Algorithm):
             visibility_mask=fix_mask_batch,
             has_sample_dim=True,
         ).detach()
-        predictions_sqerror = (predictions - trajectories) ** 2
+        predictions_error = predictions - trajectories
 
         # Calculate uncertainty estimation loss.
         if self.args.prediction_estimate_uncertainty:
-            predicted_lb, predicted_ub = predictor.get_uncertainty_bounds(trajectories)
+            predicted_lb, predicted_ub = predictor.get_uncertainty_bounds(predictions)
             uncertainty_loss = predictor.uncertainty_bounds_estimator.loss(
-                predictions_sqerror.flatten(start_dim=1),
+                predictions_error.flatten(start_dim=1),
                 predicted_lb,
                 predicted_ub
             )
