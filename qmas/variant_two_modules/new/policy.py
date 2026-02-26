@@ -84,11 +84,11 @@ class QmasPolicy(Policy):
         :return rnn_states_critic: (torch.Tensor) updated critic network RNN states.
         """
         actions, action_log_probs, rnn_states_actor = self.actor(obs,
-                                                                 global_obs,
                                                                  rnn_states_actor,
                                                                  masks,
                                                                  available_actions,
-                                                                 deterministic)
+                                                                 deterministic,
+                                                                 global_obs=global_obs)
 
         values, rnn_states_critic = self.critic(cent_obs, rnn_states_critic, masks)
         return values, actions, action_log_probs, rnn_states_actor, rnn_states_critic
@@ -104,7 +104,7 @@ class QmasPolicy(Policy):
                                   (if None, all actions available)
         :param deterministic: (bool) whether the action should be mode of distribution or should be sampled.
         """
-        actions, _, rnn_states_actor = self.actor(obs, global_obs, rnn_states_actor, masks, available_actions, deterministic)
+        actions, _, rnn_states_actor = self.actor(obs, rnn_states_actor, masks, available_actions, deterministic, global_obs=global_obs)
         return actions, rnn_states_actor
 
 
