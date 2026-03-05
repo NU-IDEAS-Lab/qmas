@@ -533,11 +533,6 @@ class PettingzooRunner(Runner):
 
                 # Take a step in the environment and get the results.
                 obs, share_obs, render_rewards, dones, infos, available_actions = render_env.step(actions_env)
-                comms_requests_total += float(infos[0].get("communication/requests_made", 0.0))
-                comms_steps += 1
-
-                # Take a step in the environment and get the results.
-                obs, share_obs, render_rewards, dones, infos, available_actions = render_env.step(actions_env)
                 viz_mask_obs = np.expand_dims(infos[0]["visibility_mask"], 0) if "visibility_mask" in infos[0] else np.ones_like(obs)
 
                 # Apply the visibility mask to the observation.
