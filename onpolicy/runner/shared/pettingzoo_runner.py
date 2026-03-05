@@ -575,17 +575,6 @@ class PettingzooRunner(Runner):
                 # Print the FPS information.
                 print(f"Step {render_env.envs[0].env.step_count} - FPS: {1 / (time_stop - time_start):.2f} (excluding render) - Reward Total: {reward_total:.2f}")
 
-            episode_mean = comms_requests_total / max(1, comms_steps)
-            episode_comm_means.append(episode_mean)
-            print(
-                f"Episode {i_episode} done - Comms Requests Total: {comms_requests_total:.0f}"
-            )
-            print(
-                f"Episode {i_episode} done - Comms Requests Mean (avg/step): {episode_mean:.3f}"
-            )
-            if i_episode == self.all_args.render_episodes - 1:
-                overall_mean = float(np.mean(episode_comm_means))
-                print(f"Comms Requests Mean (avg over episodes and steps): {overall_mean:.3f}")
             # save gif
             if self.all_args.save_gifs:
                 imageio.mimsave(
