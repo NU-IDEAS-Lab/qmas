@@ -13,6 +13,7 @@ args = [
     "--num_adversaries", "1",
     "--num_dimensions", "2",
     "--observation_probability", "0.2",
+    "--observation_mask",
     "--random_start_positions",
 
     "--num_env_steps", "3000000",
