@@ -307,7 +307,6 @@ class PettingzooRunner(Runner):
         uncertainty = torch.zeros_like(prediction)
         
         prediction_prev = None  # For autoregression
-        episode_comm_means = []
         for i_episode in range(self.all_args.eval_episodes):
             for i in range(self.num_agents):
                 buffer[i].clear()
