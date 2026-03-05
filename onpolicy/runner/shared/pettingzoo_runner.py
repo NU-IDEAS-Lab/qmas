@@ -496,9 +496,9 @@ class PettingzooRunner(Runner):
                         uncertainty[:, agentIdx, :] = variance[0].reshape(uncertainty[:, agentIdx, :].shape)
 
                         # Inject the uncertainty into the prediction.
-                        MAP_LAYERS = pemo.MAP_LAYERS
-                        # Use the mean uncertainty across all observation channels as the uncertainty value.
-                        prediction[:, agentIdx, MAP_LAYERS.UNCERTAINTY] = torch.mean(uncertainty[:, agentIdx, :], axis=1)
+                        # MAP_LAYERS = pemo.MAP_LAYERS
+                        # # Use the mean uncertainty across all observation channels as the uncertainty value.
+                        # prediction[:, agentIdx, MAP_LAYERS.UNCERTAINTY] = torch.mean(uncertainty[:, agentIdx, :], axis=1)
                 else:
                     prediction.zero_()
                     prediction[-1] = torch.from_numpy(obs[0])
