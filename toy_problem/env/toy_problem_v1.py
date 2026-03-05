@@ -387,7 +387,7 @@ class parallel_env(ParallelEnv):
                 return True
             if entity == agent:
                 return True
-            if random.random() < self.observation_probability:
+            if np.random.random() < self.observation_probability:
                 return True
             return False
         obs_mask = {
