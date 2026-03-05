@@ -82,8 +82,10 @@ class PettingzooRunner(Runner):
             # Get certain stats.
             avg_episode_rewards = self.buffer.rewards.mean().item() * self.episode_length
 
-            # compute return and update network
-            self.compute()
+            # compute return
+            if self.policy.IS_TRAINABLE:
+                self.compute()
+
             if self.all_args.torch_compile:
                 train_infos = self.train_compiled()
             else:
@@ -131,7 +133,10 @@ class PettingzooRunner(Runner):
             actions_shape = (self.n_rollout_threads, self.num_agents, act_shape)
         
         # Get the shape of action log probabilities from the policy.
-        action_log_prob_shape = (self.n_rollout_threads, self.num_agents, self.policy.actor.act.log_prob_dim)
+        if self.policy.IS_TRAINABLE:
+            action_log_prob_shape = (self.n_rollout_threads, self.num_agents, self.policy.actor.act.log_prob_dim)
+        else:
+            action_log_prob_shape = (self.n_rollout_threads, self.num_agents, 1)
 
         # Initialize buffer.
         self.buffer.insert(
@@ -308,8 +313,8 @@ class PettingzooRunner(Runner):
 
             # Reset the environment and get the initial observations.
             obs, share_obs, available_actions = eval_env.reset()
-            rnn_states = np.zeros((self.n_eval_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=np.float32)
-            masks = np.ones((self.n_eval_rollout_threads, self.num_agents, 1), dtype=np.float32)
+            rnn_states = torch.zeros((self.n_eval_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=torch.float32)
+            masks = torch.ones((self.n_eval_rollout_threads, self.num_agents, 1), dtype=torch.float32)
 
             for i in range(self.num_agents):
                 # transition = np.concatenate((np.zeros(act_size, dtype=np.float32), obs[0][i].flatten()), axis=0)
@@ -359,15 +364,15 @@ class PettingzooRunner(Runner):
 
                 actions, rnn_states = self.trainer.policy.act(
                     prediction[-1], # Use the final timestep of the prediction.
-                    np.concatenate(rnn_states if isinstance(rnn_states, (list, tuple)) else [rnn_states]),
-                    np.concatenate(masks),
+                    rnn_states,
+                    masks,
                     deterministic=False,
                     available_actions=aa
                 )
 
                 # [n_envs*n_agents, ...] -> [n_envs, n_agents, ...]
                 actions = actions.detach().cpu().reshape((self.n_eval_rollout_threads, self.num_agents, *actions.shape[1:]))
-                rnn_states = rnn_states.detach().cpu().reshape((self.n_eval_rollout_threads, *rnn_states.shape[1:]))
+                rnn_states = rnn_states.detach()
                 actions_env = [actions[idx, :, :].numpy() for idx in range(self.n_eval_rollout_threads)]
 
                 # Take a step in the environment.
@@ -438,8 +443,8 @@ class PettingzooRunner(Runner):
 
             # Reset the environment and get the initial observations.
             obs, share_obs, available_actions = render_env.reset()
-            rnn_states = np.zeros((self.n_render_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=np.float32)
-            masks = np.ones((self.n_render_rollout_threads, self.num_agents, 1), dtype=np.float32)
+            rnn_states = torch.zeros((self.n_render_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=torch.float32)
+            masks = torch.ones((self.n_render_rollout_threads, self.num_agents, 1), dtype=torch.float32)
 
             for i in range(self.num_agents):
                 # transition = np.concatenate((np.zeros(act_size, dtype=np.float32), obs[0][i].flatten()), axis=0)
@@ -506,8 +511,8 @@ class PettingzooRunner(Runner):
                 
                 actions, rnn_states = self.trainer.policy.act(
                     prediction[-1], # Use the final timestep of the prediction.
-                    np.concatenate(rnn_states if isinstance(rnn_states, (list, tuple)) else [rnn_states]),
-                    np.concatenate(masks),
+                    rnn_states,
+                    masks,
                     deterministic=False,
                     available_actions=aa
                 )
@@ -519,7 +524,7 @@ class PettingzooRunner(Runner):
                 # Prepare the actions for the environment.
                 # [n_envs*n_agents, ...] -> [n_envs, n_agents, ...]
                 actions = actions.detach().cpu().reshape((self.n_render_rollout_threads, self.num_agents, *actions.shape[1:]))
-                rnn_states = rnn_states.detach().cpu().reshape((self.n_render_rollout_threads, *rnn_states.shape[1:]))
+                rnn_states = rnn_states.detach()
                 actions_env = [actions[idx, :, :].numpy() for idx in range(self.n_render_rollout_threads)]
 
                 if render_env.envs[0].env.step_count == 24:
