@@ -28,7 +28,6 @@ args = [
     "--use_gae_amadm",
     "--skip_steps",
     "--share_policy",
-    "--no-share_reward",
     "--use_ReLU",
     "--hidden_size", "512",
     "--layer_N", "4",
@@ -40,7 +39,7 @@ args = [
 
     "--n_rollout_threads", "300",
     "--cuda",
-    "--cuda_idx", "4",
+    "--cuda_idx", "3",
 
     "--save_interval", "1000",
     "--results_dir", "/data/group/mas/qmas/results",

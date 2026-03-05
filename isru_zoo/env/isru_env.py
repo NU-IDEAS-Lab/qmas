@@ -2,7 +2,9 @@ from enum import IntEnum, auto
 from pettingzoo import ParallelEnv
 from pettingzoo.utils import parallel_to_aec
 from torch_geometric.data import Data
+from torch_geometric.data import Data
 
+import torch
 import torch
 import functools
 from gymnasium import spaces

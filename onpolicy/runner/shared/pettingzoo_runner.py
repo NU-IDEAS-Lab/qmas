@@ -161,7 +161,7 @@ class PettingzooRunner(Runner):
 
     @torch.no_grad()
     def collect(self, step):
-        share_obs, obs, rnn_states, rnn_states_critic, masks, available_actions = self.buffer.compatibility_get_policy_input(step)
+        share_obs, obs, global_obs, rnn_states, rnn_states_critic, masks, available_actions = self.buffer.compatibility_get_policy_input(step)
 
         values, action, action_log_prob, rnn_states, rnn_states_critic = self.trainer.policy.get_actions(
             share_obs,
@@ -169,7 +169,8 @@ class PettingzooRunner(Runner):
             rnn_states,
             rnn_states_critic,
             masks,
-            available_actions=available_actions
+            available_actions=available_actions,
+            global_obs=global_obs
         )
 
         # The value function predictions are made once over the entire share_obs.
@@ -182,10 +183,11 @@ class PettingzooRunner(Runner):
         rnn_states = rnn_states.detach().cpu().reshape((self.n_rollout_threads, self.num_agents, *rnn_states.shape[1:]))
         rnn_states_critic = rnn_states_critic.detach().cpu().reshape((self.n_rollout_threads, self.num_agents, *rnn_states_critic.shape[1:]))
 
-        if actions.shape[-1] == 1:
-            actions_env = [actions[idx, :, 0].numpy() for idx in range(self.n_rollout_threads)]
-        else:
-            actions_env = [actions[idx, :, :].numpy() for idx in range(self.n_rollout_threads)]
+        # if actions.shape[-1] == 1:
+        #     actions_env = [actions[idx, :, 0].numpy() for idx in range(self.n_rollout_threads)]
+        # else:
+        #     actions_env = [actions[idx, :, :].numpy() for idx in range(self.n_rollout_threads)]
+        actions_env = [actions[idx, :, :].numpy() for idx in range(self.n_rollout_threads)]
         
 
         return values, actions, action_log_probs, rnn_states, rnn_states_critic, actions_env
@@ -201,6 +203,10 @@ class PettingzooRunner(Runner):
         if "visibility_mask" in infos[0]:
             visibility_mask = np.array([info["visibility_mask"] for info in infos])
         
+        observation_global = None
+        if "observation_global" in infos[0]:
+            observation_global = np.array([info["observation_global"] for info in infos])
+
         # Get extra state information from infos.
         state_visibility_mask = None
         if "state_visibility_mask" in infos[0]:
@@ -233,7 +239,8 @@ class PettingzooRunner(Runner):
             delta_steps=delta_steps,
             available_actions=available_actions,
             visibility_mask=visibility_mask,
-            state_visibility_mask=state_visibility_mask
+            state_visibility_mask=state_visibility_mask,
+            observation_global=observation_global,
         )
 
 
@@ -241,7 +248,7 @@ class PettingzooRunner(Runner):
     def compute(self):
         """Calculate returns for the collected data."""
 
-        share_obs, obs, rnn_states, rnn_states_critic, masks, available_actions = self.buffer.compatibility_get_policy_input(-1)
+        share_obs, obs, global_obs, rnn_states, rnn_states_critic, masks, available_actions = self.buffer.compatibility_get_policy_input(-1)
 
         if self.algorithm_name == "mat" or self.algorithm_name == "mat_dec":
             next_values = self.trainer.policy.get_values(share_obs,
