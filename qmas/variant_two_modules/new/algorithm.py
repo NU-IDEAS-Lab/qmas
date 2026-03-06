@@ -209,6 +209,10 @@ class QmasAlgorithm(Algorithm):
         returns_batch = returns_batch.to(predictor.device)
         fix_mask_batch = fix_mask_batch.to(predictor.device)
 
+        # Update running stats from training trajectories and train in normalized space.
+        predictor.update_normalization_stats(trajectories)
+        trajectories = predictor.normalize_trajectory(trajectories)
+
         # Update the fix_mask. This determines which parts of the trajectory are fixed and which are predicted.
         # This applies to both update_diffusion and update_classifier.
         predictor.diffuser.fix_mask = torch.nn.Parameter(fix_mask_batch, requires_grad=False)
