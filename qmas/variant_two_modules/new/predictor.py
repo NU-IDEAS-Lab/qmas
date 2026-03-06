@@ -144,7 +144,7 @@ class Predictor(torch.nn.Module):
                 prior=trajectory,
                 solver="ddpm",
                 n_samples=5,
-                sample_steps=5,
+                sample_steps=20,
                 condition_cg=trajectory,
                 condition_cg_mask=visibility_mask,
                 w_cg=0.0,
