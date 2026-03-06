@@ -121,9 +121,9 @@ class Predictor(torch.nn.Module):
         if prediction_prev is not None and self.args.diffusion_autoregression_steps > 0:
             k = self.args.diffusion_autoregression_steps
             trajectory[:, :k] = torch.where(
-                visibility_mask[:, :k] == 0,
-                prediction_prev[:, -k:],
-                trajectory[:, :k]
+                visibility_mask[:, :k] == 1,
+                trajectory[:, :k],
+                prediction_prev[:, -k:]
             )
             visibility_mask[:, :k] = 1
 
