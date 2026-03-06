@@ -111,6 +111,12 @@ class Predictor(torch.nn.Module):
         # Apply the visibility mask to the trajectory.
         trajectory = trajectory * visibility_mask
 
+        # Set up the warm start based on previous prediction if provided.
+        warm_start_reference = None
+        # if prediction_prev is not None:
+        #     prediction_prev_normalized = self.normalize_trajectory(prediction_prev)
+        #     warm_start_reference = torch.cat([prediction_prev_normalized[:, 1:], torch.randn_like(prediction_prev[:, :1])], dim=1)
+
         # Autoregression
         if prediction_prev is not None and self.args.diffusion_autoregression_steps > 0:
             k = self.args.diffusion_autoregression_steps
@@ -120,6 +126,13 @@ class Predictor(torch.nn.Module):
                 trajectory[:, :k]
             )
             visibility_mask[:, :k] = 1
+
+        if warm_start_reference is not None:
+            warm_start_reference = torch.where(
+                visibility_mask == 1,
+                trajectory,
+                warm_start_reference
+            )
 
         # The trajectory and visibility_mask represent the known data and are applied as described by Janner et al.
         # We set the fix_mask manually here as a workaround for CleanDiffuser not taking it as an input.
@@ -134,6 +147,12 @@ class Predictor(torch.nn.Module):
                 sample_steps=5,
                 condition_cg=trajectory,
                 condition_cg_mask=visibility_mask,
+                w_cg=0.0,
+                w_cfg=0.0,
+                warm_start_reference=warm_start_reference,
+                # warm_start_forward_level=0.99
+            )
+
         # Take the mean over the samples and map back to the original observation scale.
         prediction = prediction.mean(dim=0, keepdim=True)
         prediction = self.denormalize_trajectory(prediction)
