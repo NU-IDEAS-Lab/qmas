@@ -90,6 +90,70 @@ class Predictor(torch.nn.Module):
         self.diffuser.manual_optimizers = {}
         self.diffuser.configure_manual_optimizers()
 
+        # Running normalization statistics for predictor inputs.
+        self.norm_eps = 1e-6
+        self.register_buffer("obs_running_mean", torch.zeros_like(fix_mask, dtype=torch.float32))
+        self.register_buffer("obs_running_var", torch.ones_like(fix_mask, dtype=torch.float32))
+        self.register_buffer("obs_running_count", torch.full_like(fix_mask, self.norm_eps, dtype=torch.float32))
+
+
+    def _ensure_norm_shape(self, x: torch.Tensor):
+        """Ensure normalization buffers match current trajectory feature shape."""
+        feature_shape = x.shape[1:]
+        if tuple(self.obs_running_mean.shape) != tuple(feature_shape):
+            self.obs_running_mean = torch.zeros(feature_shape, dtype=torch.float32, device=x.device)
+            self.obs_running_var = torch.ones(feature_shape, dtype=torch.float32, device=x.device)
+            self.obs_running_count = torch.full(feature_shape, self.norm_eps, dtype=torch.float32, device=x.device)
+
+
+    @torch.no_grad()
+    def update_normalization_stats(self, x: torch.Tensor, visibility_mask: torch.Tensor = None):
+        """Update running mean/variance using visible trajectory entries only."""
+        self._ensure_norm_shape(x)
+
+        if visibility_mask is None:
+            valid = torch.ones_like(x, dtype=torch.float32)
+        else:
+            valid = visibility_mask.to(dtype=torch.float32)
+
+        x_float = x.to(dtype=torch.float32)
+        raw_count = valid.sum(dim=0)
+        has_obs = raw_count > 0
+        safe_count = torch.where(has_obs, raw_count, torch.ones_like(raw_count))
+
+        batch_mean = (x_float * valid).sum(dim=0) / safe_count
+        centered = x_float - batch_mean.unsqueeze(0)
+        batch_var = (centered.pow(2) * valid).sum(dim=0) / safe_count
+
+        total = self.obs_running_count + raw_count
+        delta = batch_mean - self.obs_running_mean
+
+        new_mean = self.obs_running_mean + delta * raw_count / total.clamp_min(self.norm_eps)
+        m_a = self.obs_running_var * self.obs_running_count
+        m_b = batch_var * raw_count
+        m2 = m_a + m_b + delta.pow(2) * self.obs_running_count * raw_count / total.clamp_min(self.norm_eps)
+        new_var = m2 / total.clamp_min(self.norm_eps)
+
+        self.obs_running_mean = torch.where(has_obs, new_mean, self.obs_running_mean)
+        self.obs_running_var = torch.where(has_obs, new_var.clamp_min(self.norm_eps), self.obs_running_var)
+        self.obs_running_count = torch.where(has_obs, total, self.obs_running_count)
+
+
+    def normalize_trajectory(self, x: torch.Tensor):
+        """Normalize trajectories using running statistics."""
+        self._ensure_norm_shape(x)
+        mean = self.obs_running_mean.to(device=x.device, dtype=x.dtype)
+        std = torch.sqrt(self.obs_running_var.to(device=x.device, dtype=x.dtype).clamp_min(self.norm_eps))
+        return (x - mean) / std
+
+
+    def denormalize_trajectory(self, x: torch.Tensor):
+        """Invert predictor trajectory normalization."""
+        self._ensure_norm_shape(x)
+        mean = self.obs_running_mean.to(device=x.device, dtype=x.dtype)
+        std = torch.sqrt(self.obs_running_var.to(device=x.device, dtype=x.dtype).clamp_min(self.norm_eps))
+        return x * std + mean
+
 
     def get_prediction(self, trajectory, visibility_mask=None, prediction_prev=None):
         ''' Get a prediction from the diffuser.
@@ -108,7 +172,8 @@ class Predictor(torch.nn.Module):
         else:
             visibility_mask = visibility_mask.unsqueeze(0) # Add sample dimension.
 
-        # Apply the visibility mask to the trajectory.
+        # Normalize first, then apply visibility mask so unknown entries remain neutralized.
+        trajectory = self.normalize_trajectory(trajectory)
         trajectory = trajectory * visibility_mask
 
         # Set up the warm start based on previous prediction if provided.
@@ -120,6 +185,7 @@ class Predictor(torch.nn.Module):
         # Autoregression
         if prediction_prev is not None and self.args.diffusion_autoregression_steps > 0:
             k = self.args.diffusion_autoregression_steps
+            prediction_prev = self.normalize_trajectory(prediction_prev)
             trajectory[:, :k] = torch.where(
                 visibility_mask[:, :k] == 1,
                 trajectory[:, :k],
