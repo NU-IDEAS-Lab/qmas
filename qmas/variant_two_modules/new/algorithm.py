@@ -171,15 +171,22 @@ class QmasAlgorithm(Algorithm):
     def train_sample_diffuser(self, sample, train_info, predictor, thread_indices=None):
         ''' Performs update for a single sample for a given predictor. '''
         
+        if "state_visibility_mask" in sample:
+            key_obs = "share_obs"
+            key_visibility = "state_visibility_mask"
+        else:
+            key_obs = "obs"
+            key_visibility = "visibility_mask"
+
         # If thread indices given, use only data from those threads.
         if thread_indices is None:
-            obs_batch = sample["share_obs"]
+            obs_batch = sample[key_obs]
             rewards_batch = sample["rewards"]
-            fix_mask_batch = sample["state_visibility_mask"]
+            fix_mask_batch = sample[key_visibility]
         else:
-            obs_batch = sample["share_obs"][:, :, thread_indices]
+            obs_batch = sample[key_obs][:, :, thread_indices]
             rewards_batch = sample["rewards"][:, :, thread_indices]
-            fix_mask_batch = sample["state_visibility_mask"][:, :, thread_indices]
+            fix_mask_batch = sample[key_visibility][:, :, thread_indices]
 
         if self.predictor_2d_conv:
             # Set up batches for 2D convolution.
