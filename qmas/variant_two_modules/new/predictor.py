@@ -130,12 +130,12 @@ class Predictor(torch.nn.Module):
             prediction, log = self.diffuser.sample(
                 prior=trajectory,
                 solver="ddpm",
-                n_samples=1,
+                n_samples=5,
                 sample_steps=5,
                 condition_cg=trajectory,
                 condition_cg_mask=visibility_mask,
-                w_cg=0.1,
-                w_cfg=0.0
-            )
+        # Take the mean over the samples and map back to the original observation scale.
+        prediction = prediction.mean(dim=0, keepdim=True)
+        prediction = self.denormalize_trajectory(prediction)
 
         return prediction

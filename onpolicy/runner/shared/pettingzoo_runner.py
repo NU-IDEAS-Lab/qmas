@@ -345,10 +345,8 @@ class PettingzooRunner(Runner):
                         # Store as the previous prediction.
                         prediction_prev = pred.detach().clone()
 
-                        # Only take the first sample (n_samples is 1 anyway).
-                        # Strip the action part of the prediction.
-                        prediction[:, agentIdx, :] = pred[0].reshape(prediction[:, agentIdx, :].shape)
-                        uncertainty[:, agentIdx, :] = variance[0].reshape(uncertainty[:, agentIdx, :].shape)
+                        prediction[:, agentIdx, :] = pred.reshape(prediction[:, agentIdx, :].shape)
+                        uncertainty[:, agentIdx, :] = variance.reshape(uncertainty[:, agentIdx, :].shape)
                 else:
                     prediction.zero_()
                     prediction[-1] = torch.from_numpy(obs[0])
@@ -490,15 +488,17 @@ class PettingzooRunner(Runner):
                         # Store as the previous prediction.
                         prediction_prev = pred.detach().clone()
 
-                        # Only take the first sample (n_samples is 1 anyway).
-                        # Strip the action part of the prediction.
-                        prediction[:, agentIdx, :] = pred[0].reshape(prediction[:, agentIdx, :].shape)
-                        uncertainty[:, agentIdx, :] = variance[0].reshape(uncertainty[:, agentIdx, :].shape)
+                        prediction[:, agentIdx, :] = pred.reshape(prediction[:, agentIdx, :].shape)
+                        uncertainty[:, agentIdx, :] = variance.reshape(uncertainty[:, agentIdx, :].shape)
 
                         # Inject the uncertainty into the prediction.
                         # MAP_LAYERS = pemo.MAP_LAYERS
                         # # Use the mean uncertainty across all observation channels as the uncertainty value.
                         # prediction[:, agentIdx, MAP_LAYERS.UNCERTAINTY] = torch.mean(uncertainty[:, agentIdx, :], axis=1)
+
+                        # Calculate prediction error.
+                        prediction_error = torch.abs(prediction[-1] - torch.from_numpy(obs[0]))
+                        print(f"Mean Prediction Error ({agentIdx}): {prediction_error.mean():.2f}")
                 else:
                     prediction.zero_()
                     prediction[-1] = torch.from_numpy(obs[0])
@@ -511,10 +511,6 @@ class PettingzooRunner(Runner):
                     deterministic=False,
                     available_actions=aa
                 )
-
-                # Calculate prediction error.
-                prediction_error = torch.abs(prediction[-1] - torch.from_numpy(obs[0]))
-                print(f"Mean Prediction Error: {prediction_error.mean():.2f}")
 
                 # Prepare the actions for the environment.
                 # [n_envs*n_agents, ...] -> [n_envs, n_agents, ...]
