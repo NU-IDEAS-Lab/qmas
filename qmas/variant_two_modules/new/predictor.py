@@ -213,7 +213,7 @@ class Predictor(torch.nn.Module):
                 sample_steps=20,
                 condition_cg=trajectory,
                 condition_cg_mask=visibility_mask,
-                w_cg=0.0,
+                w_cg=0.1,
                 w_cfg=0.0,
                 warm_start_reference=warm_start_reference,
                 # warm_start_forward_level=0.99
