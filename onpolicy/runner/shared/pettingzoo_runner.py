@@ -312,8 +312,10 @@ class PettingzooRunner(Runner):
             masks = np.ones((self.n_eval_rollout_threads, self.num_agents, 1), dtype=np.float32)
 
             for i in range(self.num_agents):
-                # transition = np.concatenate((np.zeros(act_size, dtype=np.float32), obs[0][i].flatten()), axis=0)
-                transition = obs[0][i].flatten()
+                if self.all_args.prediction_history_include_actions:
+                    transition = np.concatenate((np.zeros(act_size, dtype=np.float32), obs[0][i].flatten()), axis=0)
+                else:
+                    transition = obs[0][i].flatten()
                 buffer[i].append({
                     "transition": torch.from_numpy(transition).to(self.device),
                     "visibility_mask": torch.ones(transition.shape, dtype=torch.float32, device=self.device)
@@ -376,9 +378,16 @@ class PettingzooRunner(Runner):
                 if self.all_args.observation_mask:
                     obs[0] = obs[0] * viz_mask_obs[0]
 
-                viz_mask = viz_mask_obs.reshape(self.n_eval_rollout_threads, self.num_agents, -1)
+                if self.all_args.prediction_history_include_actions:
+                    viz_mask_actions = np.ones(actions.shape, dtype=np.float32)  # Assuming actions are fully visible.
+                    viz_mask = np.concatenate([viz_mask_actions, viz_mask_obs.reshape(self.n_eval_rollout_threads, self.num_agents, -1)], axis=-1)
+                else:
+                    viz_mask = viz_mask_obs.reshape(self.n_eval_rollout_threads, self.num_agents, -1)
                 for i in range(self.num_agents):
-                    transition = obs[0][i].flatten()
+                    if self.all_args.prediction_history_include_actions:
+                        transition = np.concatenate((actions[0][i].flatten(), obs[0][i].flatten()), axis=0)
+                    else:
+                        transition = obs[0][i].flatten()
                     agent_viz_mask = viz_mask[0, i]
                     buffer[i].append({
                         "transition": torch.from_numpy(transition).to(self.device),
@@ -440,8 +449,10 @@ class PettingzooRunner(Runner):
             masks = np.ones((self.n_render_rollout_threads, self.num_agents, 1), dtype=np.float32)
 
             for i in range(self.num_agents):
-                # transition = np.concatenate((np.zeros(act_size, dtype=np.float32), obs[0][i].flatten()), axis=0)
-                transition = obs[0][i]
+                if self.all_args.prediction_history_include_actions:
+                    transition = np.concatenate((np.zeros(act_size, dtype=np.float32), obs[0][i].flatten()), axis=0)
+                else:
+                    transition = obs[0][i]
                 buffer[i].append({
                     "transition": torch.from_numpy(transition).to(self.device),
                     "visibility_mask": torch.ones(transition.shape, dtype=torch.float32, device=self.device)
@@ -529,13 +540,17 @@ class PettingzooRunner(Runner):
                 if self.all_args.observation_mask:
                     obs[0] = obs[0] * viz_mask_obs[0]
 
-                # viz_mask_actions = np.ones(actions.shape, dtype=np.float32)  # Assuming actions are fully visible.
-                # viz_mask = np.concatenate([viz_mask_actions, viz_mask_obs.reshape(self.n_render_rollout_threads, self.num_agents, -1)], axis=-1)
-                # viz_mask = viz_mask_obs.reshape(self.n_render_rollout_threads, self.num_agents, -1)
-                viz_mask = viz_mask_obs
+                if self.all_args.prediction_history_include_actions:
+                    viz_mask_actions = np.ones(actions.shape, dtype=np.float32)  # Assuming actions are fully visible.
+                    viz_mask = np.concatenate([viz_mask_actions, viz_mask_obs.reshape(self.n_render_rollout_threads, self.num_agents, -1)], axis=-1)
+                    # viz_mask = viz_mask_obs.reshape(self.n_render_rollout_threads, self.num_agents, -1)
+                else:
+                    viz_mask = viz_mask_obs
                 for i in range(self.num_agents):
-                    # transition = np.concatenate((actions[0][i].float(), obs[0][i].flatten()), axis=0)
-                    transition = obs[0][i]
+                    if self.all_args.prediction_history_include_actions:
+                        transition = np.concatenate((actions[0][i].float(), obs[0][i].flatten()), axis=0)
+                    else:
+                        transition = obs[0][i]
                     agent_viz_mask = viz_mask[0, i]
                     buffer[i].append({
                         "transition": torch.from_numpy(transition).to(self.device),
