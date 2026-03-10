@@ -175,7 +175,7 @@ class QmasAlgorithm(Algorithm):
             key_obs = "share_obs"
             key_visibility = "state_visibility_mask"
         else:
-            key_obs = "obs"
+            key_obs = "obs_full"
             key_visibility = "visibility_mask"
 
         # If thread indices given, use only data from those threads.
