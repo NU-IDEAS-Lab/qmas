@@ -360,6 +360,8 @@ def get_config():
                         help="The fraction of episodes at which to stop training the policy.")
     parser.add_argument("--prediction_ensemble_size", type=int, default=1)
     parser.add_argument("--prediction_history_window", type=int, default=8)
+    parser.add_argument("--prediction_warm_start", action=argparse.BooleanOptionalAction, default=False,
+                        help="Whether to warm start the diffusion model with the previous prediction.")
     parser.add_argument("--prediction_history_include_actions", action=argparse.BooleanOptionalAction, default=False,
                         help="Whether to include past actions in the input to the prediction model.")
     parser.add_argument("--prediction_disable", action=argparse.BooleanOptionalAction, default=False)

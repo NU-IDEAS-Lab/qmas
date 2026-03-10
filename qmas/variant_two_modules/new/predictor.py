@@ -178,9 +178,9 @@ class Predictor(torch.nn.Module):
 
         # Set up the warm start based on previous prediction if provided.
         warm_start_reference = None
-        # if prediction_prev is not None:
-        #     prediction_prev_normalized = self.normalize_trajectory(prediction_prev)
-        #     warm_start_reference = torch.cat([prediction_prev_normalized[:, 1:], torch.randn_like(prediction_prev[:, :1])], dim=1)
+        if prediction_prev is not None and self.args.prediction_warm_start:
+            prediction_prev_normalized = self.normalize_trajectory(prediction_prev)
+            warm_start_reference = torch.cat([prediction_prev_normalized[:, 1:], torch.randn_like(prediction_prev[:, :1])], dim=1)
 
         # Autoregression
         if prediction_prev is not None and self.args.diffusion_autoregression_steps > 0:
