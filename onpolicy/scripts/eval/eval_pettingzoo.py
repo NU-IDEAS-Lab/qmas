@@ -9,6 +9,7 @@ import socket
 import numpy as np
 import setproctitle
 import torch
+import random
 
 # code repository sub-packages
 from onpolicy.config import get_config
@@ -21,6 +22,8 @@ def validateArgs(all_args):
     ''' Validates the arguments. '''
     train_validateArgs(all_args)
 
+    assert all_args.use_eval, ("u need to set use_eval be True")
+    assert not (all_args.model_dir == None or all_args.model_dir == ""), ("set model_dir first")
     assert all_args.n_eval_rollout_threads==1, ("only support to use 1 env to eval.")
 
 
@@ -54,17 +57,26 @@ def main(args):
     all_args = parse_args(args, parser)
     validateArgs(all_args)
 
-    assert all_args.use_eval, ("u need to set use_eval be True")
-    assert not (all_args.model_dir == None or all_args.model_dir == ""), ("set model_dir first")
+    # Torch configuration.
+    # This is equivalent to torch.backends.cuda.matmul.allow_tf32 = True
+    torch.set_float32_matmul_precision('high')
+    torch._dynamo.config.compiled_autograd = True
+    torch.backends.cudnn.benchmark = True
 
     # cuda
     if all_args.cuda and torch.cuda.is_available():
-        print("choose to use gpu...")
-        device = torch.device("cuda:0")
+        device = torch.device(f"cuda:{all_args.cuda_idx}")
         torch.set_num_threads(all_args.n_training_threads)
         if all_args.cuda_deterministic:
             torch.backends.cudnn.benchmark = False
             torch.backends.cudnn.deterministic = True
+
+            # Set CUBLAS_WORKSPACE_CONFIG for reproducibility:
+            # https://docs.nvidia.com/cuda/cublas/index.html#results-reproducibility
+            os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
+
+            # Set PyTorch flags for reproducibility:
+            torch.use_deterministic_algorithms(True)
     else:
         print("choose to use cpu...")
         device = torch.device("cpu")
@@ -95,6 +107,7 @@ def main(args):
     torch.manual_seed(all_args.seed)
     torch.cuda.manual_seed_all(all_args.seed)
     np.random.seed(all_args.seed)
+    random.seed(all_args.seed)
 
     # env init
     envs = make_eval_env(all_args)
