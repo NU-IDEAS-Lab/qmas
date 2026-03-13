@@ -26,6 +26,8 @@ def add_args(parser):
                         help="The number of adversaries in the environment.")
     parser.add_argument("--num_dimensions", type=int, default=2,
                         help="The number of dimensions in the environment.")
+    parser.add_argument("--world_size", type=float, default=60.0,
+                        help="The size of each dimension of the world.")
     parser.add_argument("--random_start_positions", action=argparse.BooleanOptionalAction, default=False,
                         help="If true, agents will start at random positions in the world. If false, they will start at [0,0].")
     parser.add_argument("--state_per_agent", action=argparse.BooleanOptionalAction, default=False,
@@ -236,49 +238,86 @@ class parallel_env(ParallelEnv):
         if uncertainty is not None:
             uncertainty_unflattened = spaces.unflatten(self.observation_spaces, uncertainty[-1].flatten())
 
-        # Plot as a line graph using matplotlib.
-        plt.figure(figsize=figsize)
+        # Plot on an explicit axes instead of relying on pyplot global state.
+        is_3d = self.num_dimensions > 2
+        fig = plt.figure(figsize=figsize)
+        ax = fig.add_subplot(111, projection='3d' if is_3d else None)
 
         # Set the axis limits.
-        plt.xlim(-self.world_dims[0], self.world_dims[0])
-        plt.ylim(-self.world_dims[1], self.world_dims[1])
-        if self.num_dimensions > 2:
-            plt.zlim(-self.world_dims[2], self.world_dims[2])
-        plt.gca().set_aspect('equal', adjustable='box')
-        plt.axhline(0, color='black', lw=0.5)
-        plt.axvline(0, color='black', lw=0.5)
+        ax.set_xlim(-self.world_dims[0], self.world_dims[0])
+        ax.set_ylim(-self.world_dims[1], self.world_dims[1])
+        if is_3d:
+            ax.set_zlim(-self.world_dims[2], self.world_dims[2])
+            ax.set_zlabel('Z')
+        else:
+            ax.set_aspect('equal', adjustable='box')
+            ax.axhline(0, color='black', lw=0.5)
+            ax.axvline(0, color='black', lw=0.5)
         obs_percentage = int(self.observation_probability * 100)
-        plt.title(f"Leader-Follower: {obs_percentage}% Observations")
-        plt.grid()
+        ax.set_title(f"Leader-Follower: {obs_percentage}% Observations")
+        ax.set_xlabel('X')
+        ax.set_ylabel('Y')
+        ax.grid(True)
+
+        def plot_points(positions, *args, **plot_kwargs):
+            if is_3d:
+                ax.plot(
+                    [p[0] for p in positions],
+                    [p[1] for p in positions],
+                    [p[2] for p in positions],
+                    *args,
+                    **plot_kwargs,
+                )
+            else:
+                ax.plot(
+                    [p[0] for p in positions],
+                    [p[1] for p in positions],
+                    *args,
+                    **plot_kwargs,
+                )
+
+        def plot_path(positions, *args, **plot_kwargs):
+            if is_3d:
+                ax.plot(
+                    [p[0] for p in positions],
+                    [p[1] for p in positions],
+                    [p[2] for p in positions],
+                    *args,
+                    **plot_kwargs,
+                )
+            else:
+                ax.plot(
+                    [p[0] for p in positions],
+                    [p[1] for p in positions],
+                    *args,
+                    **plot_kwargs,
+                )
+
+        def scatter_point(position, *args, **plot_kwargs):
+            if is_3d:
+                ax.scatter([position[0]], [position[1]], [position[2]], *args, **plot_kwargs)
+            else:
+                ax.scatter([position[0]], [position[1]], *args, **plot_kwargs)
         
         # Plot the agent positions.
         positions = [a.position for a in self.possible_agents]
-        plt.plot([p[0] for p in positions], [p[1] for p in positions], 'bo', label='Followers')
+        plot_points(positions, 'bo', label='Followers')
         for i, agent in enumerate(self.agents):
             # plt.annotate(f"{agent}", (positions[i][0] + 1, positions[i][1]), fontsize=8, color='blue')
 
             # Plot actual history for the agent.
             history = self.state_history[agent]
-            x = []
-            y = []
-            z = []
-            for h in history:
-                x.append(h[0])
-                y.append(h[1])
-                if self.num_dimensions > 2:
-                    z.append(h[2])
-            coords = (x, y) if self.num_dimensions == 2 else (x, y, z)
-            plt.plot(*coords, 'b', alpha=0.5, linewidth=0.5, label="Actual Follower Position")            
+            plot_path(history, 'b', alpha=0.5, linewidth=0.5, label="Actual Follower Position")
         
         # Plot the adversary positions.
         positions = [a.position for a in self.possible_adversaries]
-        plt.plot([p[0] for p in positions], [p[1] for p in positions], 'ro', label='Leaders')
+        plot_points(positions, 'ro', label='Leaders')
         for i, adversary in enumerate(self.adversaries):
             # plt.annotate(f"{adversary}", (positions[i][0] + 1, positions[i][1]), fontsize=8, color='red')        
 
             # Plot actual history for the adversary.
             history = self.state_history[adversary]
-            plt.plot([h[0] for h in history], [h[1] for h in history], 'r', alpha=0.5, linewidth=0.5, label="Actual Leader Position")
+            plot_path(history, 'r', alpha=0.5, linewidth=0.5, label="Actual Leader Position")
 
 
         # Plot history of predictions from the perspective of agent 0.
@@ -287,15 +326,15 @@ class parallel_env(ParallelEnv):
 
             agent_preds = [pred_unflattened[i][self.possible_agents[0]]["agents"] for i in range(len(pred_unflattened))]
             agent_pred_pos = agent_preds[-1][self.possible_agents[0]]["position"]
-            plt.scatter([agent_pred_pos[0]], [agent_pred_pos[1]], s=80, facecolors='none', edgecolors='b', label='Predicted Follower Position')
+            scatter_point(agent_pred_pos, s=80, facecolors='none', edgecolors='b', label='Predicted Follower Position')
             for i, agent in enumerate(self.possible_agents):
                 # Get the history of predictions for this agent.
                 pred_pos = [p[agent]["position"] for p in agent_preds]
-                plt.plot([p[0] for p in pred_pos], [p[1] for p in pred_pos], 'b--', alpha=0.5, linewidth=1.5)            
+                plot_path(pred_pos, 'b--', alpha=0.5, linewidth=1.5)
                 # plt.annotate(f"Pred {agent}", (history[-1][0] + 1, history[-1][1]), fontsize=8, color='blue')
 
                 # Plot prediction uncertainty if available.
-                if uncertainty_unflattened is not None:
+                if uncertainty_unflattened is not None and not is_3d:
                     u = uncertainty_unflattened[self.possible_agents[0]]["agents"][agent]["position"]
                     ellipse = matplotlib.patches.Ellipse(
                         (pred_pos[-1][0], pred_pos[-1][1]),
@@ -307,20 +346,20 @@ class parallel_env(ParallelEnv):
             
             if len(uncertainty_ellipses) > 0:
                 patch_collection = matplotlib.collections.PatchCollection(uncertainty_ellipses, edgecolor='none', facecolor='blue', alpha=0.3)
-                plt.gca().add_collection(patch_collection)
+                ax.add_collection(patch_collection)
 
             uncertainty_ellipses = []
 
             adversary_preds = [pred_unflattened[i][self.possible_agents[0]]["adversaries"] for i in range(len(pred_unflattened))]
             adversary_pred_pos = adversary_preds[-1][self.possible_adversaries[0]]["position"]
-            plt.scatter([adversary_pred_pos[0]], [adversary_pred_pos[1]], s=80, facecolors='none', edgecolors='r', label='Predicted Leader Position')
+            scatter_point(adversary_pred_pos, s=80, facecolors='none', edgecolors='r', label='Predicted Leader Position')
             for i, adversary in enumerate(self.possible_adversaries):
                 # Get the history of predictions for this adversary.
                 pred_pos = [p[adversary]["position"] for p in adversary_preds]
-                plt.plot([p[0] for p in pred_pos], [p[1] for p in pred_pos], 'r--', alpha=0.5, linewidth=1.5)            
+                plot_path(pred_pos, 'r--', alpha=0.5, linewidth=1.5)
 
                 # Plot prediction uncertainty if available.
-                if uncertainty_unflattened is not None:
+                if uncertainty_unflattened is not None and not is_3d:
                     u = uncertainty_unflattened[self.possible_agents[0]]["adversaries"][adversary]["position"]
                     ellipse = matplotlib.patches.Ellipse(
                         (pred_pos[-1][0], pred_pos[-1][1]),
@@ -332,12 +371,12 @@ class parallel_env(ParallelEnv):
             
             if len(uncertainty_ellipses) > 0:
                 patch_collection = matplotlib.collections.PatchCollection(uncertainty_ellipses, edgecolor='none', facecolor='red', alpha=0.3)
-                plt.gca().add_collection(patch_collection)
+                ax.add_collection(patch_collection)
                 
 
         # Add legend outside the plot.
-        plt.legend(loc='upper left', bbox_to_anchor=(1, 1), fontsize=8)
-        plt.tight_layout()
+        ax.legend(loc='upper left', bbox_to_anchor=(1, 1), fontsize=8)
+        fig.tight_layout()
 
         # Show the plot.
         plt.show()      
@@ -472,7 +511,7 @@ class parallel_env(ParallelEnv):
             dy = x * (rho - z) - y
             dz = x * y - beta * z
 
-            velocity += np.array([dx, dy, dz], dtype=np.float32) * 0.01  # Scale down for smoother movement
+            velocity = np.array([dx, dy, dz], dtype=np.float32) * 0.01  # Scale down the velocity to keep it manageable.
         
         else:
             raise ValueError(f"Unknown adversary dynamics type: {self.adversary_dynamics}")
@@ -524,7 +563,7 @@ class parallel_env(ParallelEnv):
             adversary.position += adversary.velocity
 
             # Apply drift disturbance.
-            adversary.position += np.array([self.disturbance_drift_magnitude, 0.0])  # Drift in x-direction
+            adversary.position[0] += self.disturbance_drift_magnitude  # Drift in x-direction
 
             self.state_history[adversary].append(adversary.position.copy())
 
