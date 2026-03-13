@@ -47,9 +47,9 @@ class Predictor(torch.nn.Module):
                 emb_dim=128,
                 d_model=256,
                 n_heads=8,
-                depth=4,
-                timestep_emb_type="untrainable_fourier",
-                timestep_emb_params={"scale": 0.02},
+                depth=6,
+                timestep_emb_type="fourier",
+                timestep_emb_params={"scale": 0.1},
             )
             guide_base = HalfDiT1d(
                 x_dim=transition_dim,
@@ -59,7 +59,7 @@ class Predictor(torch.nn.Module):
                 d_model=256,
                 n_heads=8,
                 depth=4,
-                timestep_emb_type="untrainable_fourier",
+                timestep_emb_type="fourier",
                 timestep_emb_params={"scale": 0.02},
             )
         elif args.diffusion_model_type == "unet2d":
@@ -82,8 +82,10 @@ class Predictor(torch.nn.Module):
             fix_mask,
             loss_weight,
             diffusion_steps=256,
-            classifier=self.guide,
-            predict_noise=False
+            # classifier=self.guide,
+            predict_noise=False,
+            # ema_rate=0.9999,
+            
         ).to(device)
 
         # Update the diffuser optimizers.
@@ -208,15 +210,17 @@ class Predictor(torch.nn.Module):
         with torch.enable_grad():
             prediction, log = self.diffuser.sample(
                 prior=trajectory,
-                solver="ddpm",
-                n_samples=5,
+                solver="ddim",
+                n_samples=50,
+                temperature=0.6,
                 sample_steps=20,
                 condition_cg=trajectory,
                 condition_cg_mask=visibility_mask,
-                w_cg=0.1,
+                w_cg=0.0,
                 w_cfg=0.0,
                 warm_start_reference=warm_start_reference,
-                # warm_start_forward_level=0.99
+                # warm_start_forward_level=0.3,
+                use_ema=True,
             )
 
         # Take the mean over the samples and map back to the original observation scale.
