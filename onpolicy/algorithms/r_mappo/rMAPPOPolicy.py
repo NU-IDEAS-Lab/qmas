@@ -5,6 +5,9 @@ from onpolicy.utils.util import update_linear_schedule
 
 
 class R_MAPPOPolicy:
+
+    IS_TRAINABLE = True
+
     """
     MAPPO Policy  class. Wraps actor and critic networks to compute actions and value function predictions.
 

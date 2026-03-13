@@ -347,6 +347,10 @@ def get_config():
     parser.add_argument("--observation_mask", action="store_true",
                     help="Whether to apply visibility mask to observations during policy training")
 
+    # Communication heuristic parameters
+    parser.add_argument("--nearest_region_size", type=int, default=3,
+                        help="Side length (in cells) of the region used by the communication heuristic in 'nearest' mode.")
+    
     # State encoder parameters
     parser.add_argument("--state_encoder_output_dim", type=int, default=32,
                         help="Output dimension of the state encoder network")
