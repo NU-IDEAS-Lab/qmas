@@ -177,6 +177,7 @@ class QmasAlgorithm(Algorithm):
         else:
             key_obs = "obs_full"
             key_visibility = "visibility_mask"
+            individual_obs = True
 
         # If thread indices given, use only data from those threads.
         if thread_indices is None:
@@ -187,6 +188,11 @@ class QmasAlgorithm(Algorithm):
             obs_batch = sample[key_obs][:, :, thread_indices]
             rewards_batch = sample["rewards"][:, :, thread_indices]
             fix_mask_batch = sample[key_visibility][:, :, thread_indices]
+
+        # If using individual observations, we need to treat each agent as a separate batch item.
+        if individual_obs:
+            obs_batch = einops.rearrange(obs_batch, 'b h t n ... -> (b n) h t ...')
+            fix_mask_batch = einops.rearrange(fix_mask_batch, 'b h t n ... -> (b n) h t ...')
 
         if self.predictor_2d_conv:
             # Set up batches for 2D convolution.
