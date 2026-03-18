@@ -47,9 +47,9 @@ class Predictor(torch.nn.Module):
                 emb_dim=128,
                 d_model=256,
                 n_heads=8,
-                depth=4,
-                timestep_emb_type="untrainable_fourier",
-                timestep_emb_params={"scale": 0.02},
+                depth=6,
+                timestep_emb_type="fourier",
+                timestep_emb_params={"scale": 0.1},
             )
             guide_base = HalfDiT1d(
                 x_dim=transition_dim,
@@ -59,7 +59,7 @@ class Predictor(torch.nn.Module):
                 d_model=256,
                 n_heads=8,
                 depth=4,
-                timestep_emb_type="untrainable_fourier",
+                timestep_emb_type="fourier",
                 timestep_emb_params={"scale": 0.02},
             )
         elif args.diffusion_model_type == "unet2d":
@@ -82,8 +82,10 @@ class Predictor(torch.nn.Module):
             fix_mask,
             loss_weight,
             diffusion_steps=256,
-            classifier=self.guide,
-            predict_noise=False
+            # classifier=self.guide,
+            predict_noise=False,
+            # ema_rate=0.9999,
+            
         ).to(device)
 
         # Update the diffuser optimizers.
@@ -176,16 +178,29 @@ class Predictor(torch.nn.Module):
         trajectory = self.normalize_trajectory(trajectory)
         trajectory = trajectory * visibility_mask
 
+        # Set up the warm start based on previous prediction if provided.
+        warm_start_reference = None
+        if prediction_prev is not None and self.args.prediction_warm_start:
+            prediction_prev_normalized = self.normalize_trajectory(prediction_prev)
+            warm_start_reference = torch.cat([prediction_prev_normalized[:, 1:], torch.randn_like(prediction_prev[:, :1])], dim=1)
+
         # Autoregression
         if prediction_prev is not None and self.args.diffusion_autoregression_steps > 0:
             k = self.args.diffusion_autoregression_steps
             prediction_prev = self.normalize_trajectory(prediction_prev)
             trajectory[:, :k] = torch.where(
-                visibility_mask[:, :k] == 0,
-                prediction_prev[:, -k:],
-                trajectory[:, :k]
+                visibility_mask[:, :k] == 1,
+                trajectory[:, :k],
+                prediction_prev[:, -k:]
             )
             visibility_mask[:, :k] = 1
+
+        if warm_start_reference is not None:
+            warm_start_reference = torch.where(
+                visibility_mask == 1,
+                trajectory,
+                warm_start_reference
+            )
 
         # The trajectory and visibility_mask represent the known data and are applied as described by Janner et al.
         # We set the fix_mask manually here as a workaround for CleanDiffuser not taking it as an input.
@@ -195,13 +210,21 @@ class Predictor(torch.nn.Module):
         with torch.enable_grad():
             prediction, log = self.diffuser.sample(
                 prior=trajectory,
-                solver="ddpm",
-                n_samples=1,
-                sample_steps=5,
+                solver="ddim",
+                n_samples=50,
+                temperature=0.6,
+                sample_steps=20,
                 condition_cg=trajectory,
                 condition_cg_mask=visibility_mask,
-                w_cg=0.1,
-                w_cfg=0.0
+                w_cg=0.0,
+                w_cfg=0.0,
+                warm_start_reference=warm_start_reference,
+                # warm_start_forward_level=0.3,
+                use_ema=True,
             )
+
+        # Take the mean over the samples and map back to the original observation scale.
+        prediction = prediction.mean(dim=0, keepdim=True)
+        prediction = self.denormalize_trajectory(prediction)
 
         return prediction

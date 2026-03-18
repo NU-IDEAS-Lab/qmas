@@ -15,11 +15,11 @@ class QmasPolicy(R_MAPPOPolicy):
         super().__init__(args, obs_space, cent_obs_space, act_space, device)
 
         # Create the predictor / diffusion model.
-        obs_dim = get_shape_from_obs_space(self.obs_space, flatten_dicts=False)[0] # observation space for one agent
-        action_dim = get_shape_from_act_space(act_space) # action space for one agent
+        self.obs_dim = get_shape_from_obs_space(self.obs_space, flatten_dicts=False)[0] # observation space for one agent
+        self.action_dim = get_shape_from_act_space(act_space) # action space for one agent
         self.predictors = [Predictor(
-            obs_dim,
-            action_dim,
+            self.obs_dim,
+            self.action_dim,
             args,
             device=self.device
         )]
@@ -39,10 +39,20 @@ class QmasPolicy(R_MAPPOPolicy):
 
         predictions = []
         for predictor in self.predictors:
-            pred = predictor.get_prediction(trajectory, visibility_mask, prediction_prev)
+            pred = predictor.get_prediction(
+                trajectory.clone(),
+                visibility_mask.clone(),
+                prediction_prev)
             predictions.append(pred.unsqueeze(0))
         predictions = torch.cat(predictions, dim=0)  # Shape: (num_predictors, T, D_out)
         prediction = predictions.mean(dim=0)
-        uncertainty = predictions.var(dim=0)
+        if predictions.shape[0] > 1:
+            uncertainty = predictions.var(dim=0)
+        else:
+            uncertainty = torch.zeros_like(prediction)
+
+        # Remove actions from the prediction.
+        prediction = prediction[:, :, self.action_dim:]
+        uncertainty = uncertainty[:, :, self.action_dim:]
 
         return prediction, uncertainty
