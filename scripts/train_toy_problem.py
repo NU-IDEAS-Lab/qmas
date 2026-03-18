@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-    "--experiment_name", "toy-problem-obsprob0.2",
+    "--experiment_name", "toy-problem-obsprob0.5-normalizedObs-newParams-d6-tscale0.1-predictData-emaOrig",
     "--project_name", "qmas",
     "--env_class", "toy_problem.toy_problem_v1.parallel_env",
     "--user_name", "ideas-mas",
@@ -12,8 +12,8 @@ args = [
     "--num_agents", "1",
     "--num_adversaries", "1",
     "--num_dimensions", "2",
-    "--observation_probability", "0.2",
-    "--observation_mask",
+    "--observation_probability", "0.5",
+    # "--observation_mask",
     "--random_start_positions",
 
     "--num_env_steps", "3000000",
@@ -35,9 +35,9 @@ args = [
 
     "--seed", "0",
 
-    "--n_rollout_threads", "500",
+    "--n_rollout_threads", "400",
     "--cuda",
-    "--cuda_idx", "7",
+    "--cuda_idx", "2",
 
     "--save_interval", "100000",
     "--results_dir", "/data/group/mas/qmas/results",
