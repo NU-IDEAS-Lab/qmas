@@ -174,6 +174,7 @@ class QmasAlgorithm(Algorithm):
         if "state_visibility_mask" in sample:
             key_obs = "share_obs"
             key_visibility = "state_visibility_mask"
+            individual_obs = False
         else:
             key_obs = "obs_full"
             key_visibility = "visibility_mask"
