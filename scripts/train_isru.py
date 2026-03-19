@@ -6,7 +6,7 @@ os.environ["WANDB__SERVICE_WAIT"] = "300"
 args = [
     "--experiment_name", "isru-fullTest-2superBot-e200-r10-h10-20x20",
     "--project_name", "qmas",
-    "--env_class", "isru_zoo.isru_v0.parallel_env_graph_obs",
+    "--env_class", "isru_zoo.isru_v0.parallel_env_map_obs",
     "--user_name", "ideas-mas",
 
 	"--num_extractors", "0",
@@ -29,8 +29,8 @@ args = [
     # "--observation_mask",
     # "--available_actions_mask",
 
-    "--communication_mode", "full",
-    "--movement_mode", "velocity",
+    "--communication_mode", "broadcast",
+    "--movement_mode", "moore",
 
     "--num_env_steps", "15000000",
     "--episode_length", "200",
@@ -38,7 +38,7 @@ args = [
     "--num_mini_batch", "10",
 
     "--algorithm_class", "qmas.variant_two_modules.new.algorithm.QmasAlgorithm",
-    "--policy_class", "qmas.variant_two_modules.new.policy.QmasPolicy",
+    "--policy_class", "qmas.comms_heuristic.policy.QmasPolicy",
     "--algorithm_name", "mappo",
     "--use_centralized_V",
     "--use_gae",
@@ -47,9 +47,9 @@ args = [
     "--hidden_size", "128",
     "--layer_N", "3",
 
-	"--use_gnn_policy",
+	# "--use_gnn_policy",
     # "--use_gnn_mlp_policy",
-    "--gnn_dropout_rate", "0.5",
+    # "--gnn_dropout_rate", "0.5",
 
     "--diffusion_model_type", "dit1d",
     # "--prediction_disable",

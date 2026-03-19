@@ -174,7 +174,7 @@ class QmasAlgorithm(R_MAPPO):
         # Transfer tensors to the device.
         trajectories = trajectories.to(predictor.device)
         returns_batch = returns_batch.to(predictor.device)
-        fix_mask_batch = fix_mask_batch.to(predictor.device)
+        fix_mask_batch = fix_mask_batch.to(device=predictor.device, dtype=trajectories.dtype)
 
         # Update the fix_mask. This determines which parts of the trajectory are fixed and which are predicted.
         # This applies to both update_diffusion and update_classifier.

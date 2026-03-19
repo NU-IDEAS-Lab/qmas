@@ -202,6 +202,9 @@ class Predictor(torch.nn.Module):
                 warm_start_reference
             )
 
+        # CleanDiffuser expects an arithmetic mask because it evaluates expressions like `1.0 - fix_mask`.
+        visibility_mask = visibility_mask.to(dtype=trajectory.dtype)
+
         # The trajectory and visibility_mask represent the known data and are applied as described by Janner et al.
         # We set the fix_mask manually here as a workaround for CleanDiffuser not taking it as an input.
         self.diffuser.fix_mask = torch.nn.Parameter(visibility_mask, requires_grad=False)

@@ -171,6 +171,7 @@ class QmasAlgorithm(Algorithm):
     def train_sample_diffuser(self, sample, train_info, predictor, thread_indices=None):
         ''' Performs update for a single sample for a given predictor. '''
         
+        individual_obs = False
         if "state_visibility_mask" in sample:
             key_obs = "share_obs"
             key_visibility = "state_visibility_mask"
@@ -220,7 +221,7 @@ class QmasAlgorithm(Algorithm):
         # Transfer tensors to the device.
         trajectories = trajectories.to(predictor.device)
         returns_batch = returns_batch.to(predictor.device)
-        fix_mask_batch = fix_mask_batch.to(predictor.device)
+        fix_mask_batch = fix_mask_batch.to(device=predictor.device, dtype=trajectories.dtype)
 
         # Update running stats from training trajectories and train in normalized space.
         predictor.update_normalization_stats(trajectories)
