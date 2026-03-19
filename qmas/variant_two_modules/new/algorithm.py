@@ -176,15 +176,28 @@ class QmasAlgorithm(Algorithm):
     def train_sample_diffuser(self, sample, train_info, predictor, thread_indices=None):
         ''' Performs update for a single sample for a given predictor. '''
         
+        if "state_visibility_mask" in sample:
+            key_obs = "share_obs"
+            key_visibility = "state_visibility_mask"
+        else:
+            key_obs = "obs_full"
+            key_visibility = "visibility_mask"
+            individual_obs = True
+
         # If thread indices given, use only data from those threads.
         if thread_indices is None:
-            obs_batch = sample["share_obs"]
+            obs_batch = sample[key_obs]
             rewards_batch = sample["rewards"]
-            fix_mask_batch = sample["state_visibility_mask"]
+            fix_mask_batch = sample[key_visibility]
         else:
-            obs_batch = sample["share_obs"][:, :, thread_indices]
+            obs_batch = sample[key_obs][:, :, thread_indices]
             rewards_batch = sample["rewards"][:, :, thread_indices]
-            fix_mask_batch = sample["state_visibility_mask"][:, :, thread_indices]
+            fix_mask_batch = sample[key_visibility][:, :, thread_indices]
+
+        # If using individual observations, we need to treat each agent as a separate batch item.
+        if individual_obs:
+            obs_batch = einops.rearrange(obs_batch, 'b h t n ... -> (b n) h t ...')
+            fix_mask_batch = einops.rearrange(fix_mask_batch, 'b h t n ... -> (b n) h t ...')
 
         if self.predictor_2d_conv:
             # Set up batches for 2D convolution.
@@ -213,6 +226,10 @@ class QmasAlgorithm(Algorithm):
         trajectories = trajectories.to(predictor.device)
         returns_batch = returns_batch.to(predictor.device)
         fix_mask_batch = fix_mask_batch.to(predictor.device)
+
+        # Update running stats from training trajectories and train in normalized space.
+        predictor.update_normalization_stats(trajectories)
+        trajectories = predictor.normalize_trajectory(trajectories)
 
         # Update the fix_mask. This determines which parts of the trajectory are fixed and which are predicted.
         # This applies to both update_diffusion and update_classifier.

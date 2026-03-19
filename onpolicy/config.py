@@ -347,6 +347,10 @@ def get_config():
     parser.add_argument("--observation_mask", action="store_true",
                     help="Whether to apply visibility mask to observations during policy training")
 
+    # Communication heuristic parameters
+    parser.add_argument("--nearest_region_size", type=int, default=3,
+                        help="Side length (in cells) of the region used by the communication heuristic in 'nearest' mode.")
+    
     # State encoder parameters
     parser.add_argument("--state_encoder_output_dim", type=int, default=32,
                         help="Output dimension of the state encoder network")
@@ -360,6 +364,10 @@ def get_config():
                         help="The fraction of episodes at which to stop training the policy.")
     parser.add_argument("--prediction_ensemble_size", type=int, default=1)
     parser.add_argument("--prediction_history_window", type=int, default=8)
+    parser.add_argument("--prediction_warm_start", action=argparse.BooleanOptionalAction, default=False,
+                        help="Whether to warm start the diffusion model with the previous prediction.")
+    parser.add_argument("--prediction_history_include_actions", action=argparse.BooleanOptionalAction, default=False,
+                        help="Whether to include past actions in the input to the prediction model.")
     parser.add_argument("--prediction_disable", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--prediction_estimate_uncertainty", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--diffusion_steps", type=int, default=20)

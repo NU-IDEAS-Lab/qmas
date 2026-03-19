@@ -165,8 +165,6 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
             delta_steps = np.ones_like(value_preds)
         if visibility_mask is None:
             visibility_mask = np.ones_like(obs, dtype=np.float32)
-        if state_visibility_mask is None:
-            state_visibility_mask = np.zeros_like(share_obs, dtype=np.float32)
         if observation_global is None:
             observation_global = np.zeros((*obs.shape[0:2], *share_obs.shape[1:]), dtype=share_obs.dtype)
         
@@ -201,7 +199,6 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
                 'active_masks': active_masks, #+1
                 'delta_steps': delta_steps,
                 'visibility_mask': visibility_mask, #+1
-                'state_visibility_mask': state_visibility_mask, #+1
             },
             device='cpu',
         )
@@ -209,6 +206,8 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
             data['available_actions'] = available_actions #+1
         if observation_global is not None:
             data['observation_global'] = observation_global #+1
+        if state_visibility_mask is not None:
+            data['state_visibility_mask'] = state_visibility_mask #+1
 
         # In legacy mode, some data is added for timestep t, others for timestep t+1.
         if legacy_mode:

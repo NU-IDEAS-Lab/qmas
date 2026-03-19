@@ -150,11 +150,9 @@ class QmasActor(nn.Module):
         self.to(device)
 
 
-    def forward(self, obs, global_obs, rnn_states, masks, available_actions=None, deterministic=False):
+    def forward(self, obs, rnn_states, masks, available_actions=None, deterministic=False, global_obs=None):
         rnn_states = check(rnn_states).to(**self.tpdv)
         masks = check(masks).to(**self.tpdv)
-        if global_obs is not None:
-            global_obs = check(global_obs).to(**self.tpdv)
         if available_actions is not None:
             available_actions = check(available_actions).to(**self.tpdv)
 
@@ -208,6 +206,7 @@ class QmasActor(nn.Module):
                 batch_size = obs.shape[0]
                 encoded_state = torch.zeros((batch_size, self.args.state_encoder_output_dim), device=obs.device)
             else:
+                global_obs = check(global_obs).to(**self.tpdv)
                 # Encode the global state
                 encoded_state = self.state_encoder(global_obs)
                 # Repeat the encoded state for each agent if necessary.
