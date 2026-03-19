@@ -18,7 +18,8 @@ class QmasPolicy(QmasPolicyBase):
         self.action_dim = spaces.flatdim(act_space)
 
 
-    def get_actions(self, cent_obs, obs, rnn_states_actor, rnn_states_critic, masks, available_actions=None, deterministic=False):
+    def get_actions(self, cent_obs, obs, rnn_states_actor, rnn_states_critic, masks, available_actions=None,
+                    deterministic=False, global_obs=None):
         """
         Compute actions: movement and communication from heuristic.
         agents: list of agent objects (needed for heuristic)
@@ -34,7 +35,7 @@ class QmasPolicy(QmasPolicyBase):
         return values, actions, log_probs, rnn_states_actor, rnn_states_critic
 
 
-    def evaluate_actions(self, cent_obs, obs, rnn_states_actor, rnn_states_critic, action, masks, available_actions=None, active_masks=None):
+    def evaluate_actions(self, cent_obs, obs, rnn_states_actor, rnn_states_critic, action, masks, available_actions=None, active_masks=None, global_obs=None):
         """
         Evaluate only the communication part of the action, ignoring movement.
         Expects action to be a list/dict with 'communication' and 'movement' keys.
@@ -43,7 +44,7 @@ class QmasPolicy(QmasPolicyBase):
         raise NotImplementedError("QmasPolicy does not implement evaluate_actions since it is not trainable.")
 
 
-    def act(self, obs, rnn_states_actor, masks, available_actions=None, deterministic=False):
+    def act(self, obs, rnn_states_actor, masks, available_actions=None, deterministic=False, global_obs=None):
         """
         Compute actions using the given inputs.
         Movement actions are computed using a heuristic, communication actions from the parent class.
