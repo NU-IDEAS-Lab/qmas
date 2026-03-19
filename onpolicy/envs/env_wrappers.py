@@ -3,9 +3,21 @@ Modified from OpenAI Baselines code to work with multi-agent envs
 """
 import numpy as np
 import torch
-from multiprocessing import Process, Pipe
+from torch.multiprocessing import Process, Pipe
 from abc import ABC, abstractmethod
 from onpolicy.utils.util import tile_images
+
+
+print("PyTorch version:", torch.__version__)
+print("Sharing strategy:", torch.multiprocessing.get_sharing_strategy())
+print("Available sharing strategies: ", torch.multiprocessing.get_all_sharing_strategies())
+print("Spawn method:", torch.multiprocessing.get_start_method())
+print("Available start methods:", torch.multiprocessing.get_all_start_methods())
+
+# Set to spawn
+# torch.multiprocessing.set_start_method('spawn')
+# print("Set start method to:", torch.multiprocessing.get_start_method())
+
 
 class CloudpickleWrapper(object):
     """

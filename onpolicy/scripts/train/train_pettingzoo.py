@@ -13,6 +13,10 @@ import torch
 import wandb
 import random
 
+# Perform early torch configuration (before anything initialized).
+# torch.multiprocessing.set_start_method("spawn")
+# torch.multiprocessing.set_sharing_strategy('file_system')
+
 # code repository sub-packages
 from onpolicy.config import get_config
 from onpolicy.envs.pettingzoo.Pettingzoo_Env import PettingzooEnv
