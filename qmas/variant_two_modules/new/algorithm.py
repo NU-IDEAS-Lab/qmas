@@ -219,9 +219,9 @@ class QmasAlgorithm(Algorithm):
         trajectories = obs_batch
 
         # Transfer tensors to the device.
-        trajectories = trajectories.to(predictor.device)
-        returns_batch = returns_batch.to(predictor.device)
-        fix_mask_batch = fix_mask_batch.to(predictor.device)
+        trajectories = trajectories.float().to(predictor.device)
+        returns_batch = returns_batch.float().to(predictor.device)
+        fix_mask_batch = fix_mask_batch.float().to(predictor.device)
 
         # Update running stats from training trajectories and train in normalized space.
         predictor.update_normalization_stats(trajectories)
