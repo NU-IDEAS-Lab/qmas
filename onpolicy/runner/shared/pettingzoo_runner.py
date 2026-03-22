@@ -290,6 +290,11 @@ class PettingzooRunner(Runner):
         else:
             log_exp = log_root.require_group(self.all_args.eval_series).require_group(self.experiment_name)
 
+        # Store configuration in the Zarr file as attributes.
+        config_dict = vars(self.all_args)
+        for key, value in config_dict.items():
+            log_exp.attrs[key] = value
+
         eval_env = self.envs
 
         self.trainer.prep_rollout()
