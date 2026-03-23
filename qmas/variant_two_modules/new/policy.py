@@ -162,7 +162,7 @@ class QmasPolicy(Policy):
         predictions = torch.cat(predictions, dim=0)  # Shape: (num_predictors, T, D_out)
         prediction = predictions.mean(dim=0)
 
-        if self.args.prediction_estimate_uncertainty:
+        if self.args.prediction_uq_method == "estimation":
             # Predict uncertainty using a separate estimator network.
             uncertainty_lb, uncertainty_ub = predictor.get_uncertainty_bounds(trajectory.unsqueeze(0))
             uncertainty = torch.abs(uncertainty_ub - uncertainty_lb)

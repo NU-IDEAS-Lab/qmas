@@ -369,7 +369,6 @@ def get_config():
     parser.add_argument("--prediction_history_include_actions", action=argparse.BooleanOptionalAction, default=False,
                         help="Whether to include past actions in the input to the prediction model.")
     parser.add_argument("--prediction_disable", action=argparse.BooleanOptionalAction, default=False)
-    parser.add_argument("--prediction_estimate_uncertainty", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--diffusion_steps", type=int, default=20)
     parser.add_argument("--diffusion_autoregression_steps", type=int, default=0)
     parser.add_argument("--diffusion_model_type", type=str, default="dit1d",
@@ -377,6 +376,12 @@ def get_config():
                         help="Type of diffusion model to use")
     parser.add_argument("--diffusion_epoch", type=int, default=5,
                         help="Number of epochs to train the diffusion model for at each training step")
+    
+    # UQ parameters
+    parser.add_argument("--prediction_estimate_uncertainty", action=argparse.BooleanOptionalAction, default=False) # DEPRECATED
+    parser.add_argument("--prediction_uq_method", type=str, default="ensemble",
+                        choices=["ensemble", "estimation"],
+                        help="Method to use for estimating uncertainty in predictions")
 
     # Torch parameters.
     parser.add_argument("--torch_compile", action="store_true",

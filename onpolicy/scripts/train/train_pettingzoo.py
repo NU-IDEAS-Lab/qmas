@@ -202,6 +202,11 @@ def validateArgs(all_args):
         if not hasattr(env, "state") or not callable(env.state):
             raise ValueError(f"Environment class {env_class} does not have state function, but use_obs_instead_of_state is set false.")
 
+    # Check for deprecated UQ method flag.
+    if all_args.prediction_estimate_uncertainty:
+        all_args.prediction_uq_method = "estimation"
+        print("Warning: --prediction_estimate_uncertainty is deprecated. Setting prediction_uq_method to estimation.")
+
     print("Pettingzoo arguments validated: base")
 
     # Validate environment arguments.

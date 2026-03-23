@@ -134,7 +134,7 @@ class Predictor(torch.nn.Module):
 
         # Create uncertainty bounds estimator if needed.
         self.uncertainty_bounds_estimator = None
-        if args.prediction_estimate_uncertainty:
+        if args.prediction_uq_method == "estimation":
             print("Creating uncertainty bounds estimator for predictor.")
             self.uncertainty_bounds_estimator = UncertaintyBoundsEstimator(
                 input_dim=self.prediction_horizon * transition_dim,

@@ -250,7 +250,7 @@ class QmasAlgorithm(Algorithm):
         predictions_error = predictions - trajectories
 
         # Calculate uncertainty estimation loss.
-        if self.args.prediction_estimate_uncertainty:
+        if self.args.prediction_uq_method == "estimation":
             predictions_masked = predictions * fix_mask_batch
             predicted_lb, predicted_ub = predictor.get_uncertainty_bounds(predictions_masked)
             uncertainty_loss = predictor.uncertainty_bounds_estimator.loss(
