@@ -67,7 +67,7 @@ class QmasAlgorithm(Algorithm):
 
         # Results containers for threads
         policy_info = {}
-        predictor_info = {'diffuser_loss': 0, 'guide_loss': 0}
+        predictor_info = {'diffuser_loss': 0, 'guide_loss': 0, 'uncertainty_loss': 0}
 
         def train_policy():
             nonlocal policy_info
@@ -93,17 +93,19 @@ class QmasAlgorithm(Algorithm):
                         pred_threads = []
                         pred_losses = [None] * self.num_predictors
                         pred_guides = [None] * self.num_predictors
+                        pred_uncerts = [None] * self.num_predictors
 
                         def make_pred_thread(i, predictor):
                             def run():
                                 try:
                                     # Use a local dict to accumulate losses for this predictor
-                                    local_info = {'diffuser_loss': 0, 'guide_loss': 0}
+                                    local_info = {'diffuser_loss': 0, 'guide_loss': 0, 'uncertainty_loss': 0}
                                     if len(thread_splits[i]) == 0:
                                         raise ValueError("Thread split is empty. Check prediction_ensemble_size and n_rollout_threads.")
                                     self.train_sample_diffuser(sample, local_info, predictor, thread_indices=thread_splits[i])
                                     pred_losses[i] = local_info['diffuser_loss']
                                     pred_guides[i] = local_info['guide_loss']
+                                    pred_uncerts[i] = local_info.get('uncertainty_loss', 0)
                                 except Exception:
                                     with thread_exceptions_lock:
                                         thread_exceptions.append(sys.exc_info())
@@ -121,12 +123,14 @@ class QmasAlgorithm(Algorithm):
                             if pred_losses[i] is not None:
                                 predictor_info['diffuser_loss'] += pred_losses[i]
                                 predictor_info['guide_loss'] += pred_guides[i]
+                                predictor_info['uncertainty_loss'] += pred_uncerts[i]
                                 num_diffusion_updates[i] += 1
 
                 total_updates = sum(num_diffusion_updates)
                 if total_updates > 0:
                     predictor_info['diffuser_loss'] /= total_updates
                     predictor_info['guide_loss'] /= total_updates
+                    predictor_info['uncertainty_loss'] /= total_updates
             except Exception:
                 with thread_exceptions_lock:
                     thread_exceptions.append(sys.exc_info())
@@ -165,6 +169,7 @@ class QmasAlgorithm(Algorithm):
         if update_predictor:
             train_info['diffuser_loss'] = predictor_info['diffuser_loss']
             train_info['guide_loss'] = predictor_info['guide_loss']
+            train_info['uncertainty_loss'] = predictor_info['uncertainty_loss']
 
         return train_info
 
@@ -236,6 +241,30 @@ class QmasAlgorithm(Algorithm):
             x0=trajectories,
         )['diffusion_loss']
         train_info['diffuser_loss'] += diffuser_loss
+
+        # Get prediction.
+        predictions = predictor.get_prediction(
+            trajectories,
+            visibility_mask=fix_mask_batch,
+            has_sample_dim=True,
+        ).detach()
+        predictions_error = predictions - trajectories
+
+        # Calculate uncertainty estimation loss.
+        if self.args.prediction_uq_method == "estimation":
+            predictions_masked = predictions * fix_mask_batch
+            predicted_lb, predicted_ub = predictor.get_uncertainty_bounds(predictions_masked)
+            uncertainty_loss = predictor.uncertainty_bounds_estimator.loss(
+                predictions_error.flatten(start_dim=1),
+                predicted_lb,
+                predicted_ub
+            )
+            # Backpropagate and update uncertainty estimator parameters.
+            predictor.uncertainty_optimizer.zero_grad()
+            uncertainty_loss.backward()
+            predictor.uncertainty_optimizer.step()
+
+            train_info['uncertainty_loss'] += uncertainty_loss.item()
 
         # Update guide model.
         if predictor.diffuser.classifier is not None:

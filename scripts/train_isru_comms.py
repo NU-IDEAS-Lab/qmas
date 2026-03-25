@@ -29,7 +29,7 @@ args = [
     "--num_env_steps", "10000000",
     "--episode_length", "200",
     "--max_cycles", "200",
-    "--num_mini_batch", "10",
+    "--num_mini_batch", "4",
 
     "--algorithm_class", "qmas.variant_two_modules.new.algorithm.QmasAlgorithm",
     "--policy_class", "qmas.comms_heuristic.policy.QmasPolicy",
@@ -46,7 +46,7 @@ args = [
 
     "--seed", "0",
 
-    "--n_rollout_threads", "100",
+    "--n_rollout_threads", "1",
     "--n_training_threads", "16",
     "--cuda",
     "--cuda_idx", "1",
@@ -55,7 +55,7 @@ args = [
     "--save_interval", "200000",
     # "--save_checkpoints",
     "--results_dir", "/data/group/mas/qmas/results",
-    "--use_wandb",
+    # "--use_wandb",
 ]
 
 main(args)
