@@ -1,7 +1,7 @@
 
 import torch
 import gymnasium.spaces as spaces
-from qmas.variant_two_modules.policy import QmasPolicy as QmasPolicyBase
+from qmas.variant_two_modules.new.policy import QmasPolicy as QmasPolicyBase
 from qmas.comms_heuristic.heuristic import get_action_heuristic
 
 
