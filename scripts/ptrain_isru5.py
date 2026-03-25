@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-    "--experiment_name", "isru-graphObsGlobalEnc-1superBot-e200-r5-h5-20x20",
+    "--experiment_name", "isru-graphObsGlobalEnc-1superBot-e200-r5-h5-o5-20x20",
     "--project_name", "qmas",
     "--env_class", "isru_zoo.isru_v0.parallel_env_graph_obs",
     "--user_name", "ideas-mas",
@@ -23,19 +23,19 @@ args = [
     # "--randomize_num_resources",
     # "--curriculum_num_resources",
 
-    # "--noisy_memory",
+    "--noisy_memory",
 
-    "--observation_radius", "20",
+    "--observation_radius", "5",
     # "--observation_mask",
     # "--available_actions_mask",
 
     "--communication_mode", "full",
     "--movement_mode", "velocity",
 
-    "--num_env_steps", "5000000",
+    "--num_env_steps", "15000000",
     "--episode_length", "200",
     "--max_cycles", "200",
-    "--num_mini_batch", "1",
+    "--num_mini_batch", "10",
 
     "--algorithm_class", "qmas.variant_two_modules.new.algorithm.QmasAlgorithm",
     "--policy_class", "qmas.variant_two_modules.new.policy.QmasPolicy",
@@ -58,7 +58,7 @@ args = [
 
     # "--seed", "0",
 
-    "--n_rollout_threads", "100",
+    "--n_rollout_threads", "50",
     "--threaded_training",
     "--cuda",
     # "--cuda_idx", "5",
@@ -73,8 +73,8 @@ args = [
 import multiprocessing
 
 threads = []
-cuda_idx = [1, 2, 3]
-for i in range(3):
+cuda_idx = [5, 5, 7, 7]
+for i in range(len(cuda_idx)):
     args_seeded = args + ["--seed", str(i)]
     args_seeded += ["--cuda_idx", str(cuda_idx[i])]
     p = multiprocessing.Process(target=main, args=(args_seeded,))

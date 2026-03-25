@@ -133,7 +133,7 @@ class QmasActor(nn.Module):
             self.rnn = RNNLayer(input_dim, self.hidden_size, self._recurrent_N, self._use_orthogonal)
             input_dim = self.hidden_size
 
-        # Create the state encoder
+        # Create the state encoder.
         if args.state_encoder:
             self.state_encoder = StateEncoder(
                 args,
@@ -239,7 +239,8 @@ class QmasActor(nn.Module):
         rnn_states = check(rnn_states).to(**self.tpdv)
         action = check(action).to(**self.tpdv)
         masks = check(masks).to(**self.tpdv)
-        global_obs = check(global_obs).to(**self.tpdv)
+        if global_obs is not None:
+            global_obs = check(global_obs).to(**self.tpdv)
         if available_actions is not None:
             available_actions = check(available_actions).to(**self.tpdv)
 
