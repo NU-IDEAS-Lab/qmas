@@ -12,7 +12,7 @@ args = [
 	"--num_agents", "4",
 	"--agent_speed", "40.0",
 	"--action_method", "neighbors",
-	"--observe_method", "adjacency",
+	"--observe_method", "pyg",
 	"--observe_method_global", "adjacency",
 	"--observation_radius", "200.0",
 	"--communication_model", "bernoulli",
@@ -22,7 +22,7 @@ args = [
 	"--reward_method_terminal", "average",
 
 	"--graph_name", "milwaukee",
-	"--graph_file", "../patrolling_zoo/graphs/milwaukee.graph",
+	"--graph_file", "/data/anthony/dev/qmas_task_allocation-1/patrolling_zoo/graphs/milwaukee.graph",
 	"--num_env_steps", "1000000",
 	"--episode_length", "300",
 	"--max_cycles", "300",
@@ -31,7 +31,7 @@ args = [
 	"--algorithm_class", "qmas.variant_two_modules.new.algorithm.QmasAlgorithm",
 	"--policy_class", "qmas.variant_two_modules.new.policy.QmasPolicy",
 	"--algorithm_name", "mappo",
-	# "--use_gnn_policy",
+	"--use_gnn_policy",
 	# "--use_gnn_mlp_policy",
 	# "--gnn_layer_N", "10",
 	# "--gnn_hidden_size", "128",
@@ -49,15 +49,16 @@ args = [
 
 	"--diffusion_model_type", "dit1d",
 
-	"--n_rollout_threads", "50",
+	# "--n_rollout_threads", "50",
+	"--n_rollout_threads", "1",
 	"--cuda",
-	"--cuda_idx", "3",
+	"--cuda_idx", "2",
     "--threaded_training",
     "--n_training_threads", "16",
 
 	"--save_interval", "10000",
 	"--results_dir", "/data/group/mas/qmas/results",
-	"--use_wandb",
+	# "--use_wandb",
 ]
 
 main(args)
