@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-	"--experiment_name", "diffuser-patrolling-obs200",
+	"--experiment_name", "diffuser-patrolling-obs200-uqEst",
 	"--project_name", "qmas",
 	"--env_class", "patrolling_zoo.patrolling_zoo_v0.parallel_env",
 	"--user_name", "ideas-mas",
@@ -48,11 +48,12 @@ args = [
 	"--seed", "0",
 
 	"--diffusion_model_type", "dit1d",
+    "--prediction_uq_method", "estimation",
 
 	# "--n_rollout_threads", "50",
 	"--n_rollout_threads", "1",
 	"--cuda",
-	"--cuda_idx", "2",
+	"--cuda_idx", "0",
     "--threaded_training",
     "--n_training_threads", "16",
 

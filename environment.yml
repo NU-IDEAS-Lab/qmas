@@ -27,7 +27,7 @@ dependencies:
       - absl-py==2.2.2
       - annotated-types==0.7.0
       - attrs==25.3.0
-      - av==14.3.0
+      - av
       - certifi==2025.4.26
       - cffi==1.17.1
       - charset-normalizer==3.4.2

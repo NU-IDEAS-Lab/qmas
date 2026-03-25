@@ -290,6 +290,11 @@ class PettingzooRunner(Runner):
         else:
             log_exp = log_root.require_group(self.all_args.eval_series).require_group(self.experiment_name)
 
+        # Store configuration in the Zarr file as attributes.
+        config_dict = vars(self.all_args)
+        for key, value in config_dict.items():
+            log_exp.attrs[key] = value
+
         eval_env = self.envs
 
         self.trainer.prep_rollout()
@@ -371,7 +376,7 @@ class PettingzooRunner(Runner):
                 
                 # Calculate prediction error.
                 prediction_error = torch.abs(prediction[-1] - torch.from_numpy(obs[0]))
-                prediction_trajectory_error = prediction_trajectory_error.sum(dim=0) # Sum over the trajectory dimension to get a single error value per observation dimension.
+                prediction_trajectory_error_sum = prediction_trajectory_error.sum(dim=0) # Sum over the trajectory dimension to get a single error value per observation dimension.
 
                 actions, rnn_states = self.trainer.policy.act(
                     prediction[-1], # Use the final timestep of the prediction.
@@ -412,7 +417,13 @@ class PettingzooRunner(Runner):
                 
                 # Add prediction error to infos for logging.
                 infos[0]["prediction_error_mean"] = prediction_error.mean().item()
-                infos[0]["prediction_trajectory_error_mean"] = prediction_trajectory_error.mean().item()
+                infos[0]["prediction_trajectory_error_mean"] = prediction_trajectory_error_sum.mean().item()
+
+                # Add uncertainty to infos for logging.
+                infos[0]["prediction_uncertainty_mean"] = uncertainty.mean().item()
+                infos[0]["prediction_uncertainty_gap_mean"] = (uncertainty - prediction_trajectory_error).mean().item()
+                infos[0]["prediction_uncertainty_gap_min"] = (uncertainty - prediction_trajectory_error).min().item()
+                infos[0]["prediction_uncertainty_gap_max"] = (uncertainty - prediction_trajectory_error).max().item()
 
                 # Log information.
                 keys = infos[0].keys()
@@ -527,9 +538,9 @@ class PettingzooRunner(Runner):
                         # Calculate prediction error.
                         prediction_error = torch.abs(prediction[-1] - torch.from_numpy(obs[0]))
                         prediction_trajectory_error = torch.abs(prediction[:, agentIdx, :].to(trajectory.device) - trajectory)
-                        prediction_trajectory_error = prediction_trajectory_error.sum(dim=0) # Sum over the trajectory dimension to get a single error value per observation dimension.
+                        prediction_trajectory_error_sum = prediction_trajectory_error.sum(dim=0) # Sum over the trajectory dimension to get a single error value per observation dimension.
                         print(f"Mean Prediction Error ({agentIdx}): {prediction_error.mean():.2f}")
-                        print(f"Mean Trajectory Prediction Error ({agentIdx}): {prediction_trajectory_error.mean():.2f}")
+                        print(f"Mean Trajectory Prediction Error ({agentIdx}): {prediction_trajectory_error_sum.mean():.2f}")
                 else:
                     prediction.zero_()
                     prediction[-1] = torch.from_numpy(obs[0])
@@ -540,7 +551,8 @@ class PettingzooRunner(Runner):
                     rnn_states,
                     masks,
                     deterministic=False,
-                    available_actions=aa
+                    available_actions=aa,
+                    global_obs=prediction
                 )
 
                 # Prepare the actions for the environment.

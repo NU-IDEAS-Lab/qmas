@@ -136,3 +136,40 @@ class QmasPolicy(Policy):
 
         values, _ = self.critic(cent_obs, rnn_states_critic, masks)
         return values, action_log_probs, dist_entropy
+
+
+    def get_prediction(self, trajectory, visibility_mask=None, prediction_prev=None):
+        """
+        Get a prediction from the ensemble of predictors.
+        Args:
+            trajectory: A tensor of shape (T, D), where T is the trajectory length and D is the transition dimension (action + observation).
+            visibility_mask: An optional tensor of shape (T,) indicating which timesteps are visible (1) or not (0).
+            prediction_prev: An optional tensor of shape (T, D_out) representing the previous prediction to condition on.
+        Returns:
+            prediction: A tensor of shape (T, D_out) representing the mean prediction across the ensemble.
+            uncertainty: A tensor of shape (T, D_out) representing the uncertainty (variance) across the ensemble predictions.
+        """
+
+        predictions = []
+        for predictor in self.predictors:
+            if prediction_prev is not None:
+                prediction_prev = prediction_prev.to(predictor.device)
+            pred = predictor.get_prediction(
+                trajectory.clone().to(predictor.device),
+                visibility_mask.clone().to(predictor.device),
+                prediction_prev)
+            predictions.append(pred.unsqueeze(0).to(self.device))
+        predictions = torch.cat(predictions, dim=0)  # Shape: (num_predictors, T, D_out)
+        prediction = predictions.mean(dim=0)
+
+        if self.args.prediction_uq_method == "estimation":
+            # Predict uncertainty using a separate estimator network.
+            uncertainty_lb, uncertainty_ub = predictor.get_uncertainty_bounds(trajectory.unsqueeze(0))
+            uncertainty = torch.abs(uncertainty_ub - uncertainty_lb)
+        elif predictions.shape[0] > 1:
+            # Predict uncertainty as the variance across ensemble predictions.
+            uncertainty = predictions.var(dim=0)
+        else:
+            uncertainty = torch.zeros_like(prediction)
+
+        return prediction, uncertainty

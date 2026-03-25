@@ -376,6 +376,12 @@ def get_config():
                         help="Type of diffusion model to use")
     parser.add_argument("--diffusion_epoch", type=int, default=5,
                         help="Number of epochs to train the diffusion model for at each training step")
+    
+    # UQ parameters
+    parser.add_argument("--prediction_estimate_uncertainty", action=argparse.BooleanOptionalAction, default=False) # DEPRECATED
+    parser.add_argument("--prediction_uq_method", type=str, default="ensemble",
+                        choices=["ensemble", "estimation"],
+                        help="Method to use for estimating uncertainty in predictions")
 
     # Torch parameters.
     parser.add_argument("--torch_compile", action="store_true",
