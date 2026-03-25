@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-    "--experiment_name", "isru-gnn2-2superBot-e200-r10-h10-o20-20x20-commsFull",
+    "--experiment_name", "isru-fullTest-2superBot-e200-r10-h10-o20-20x20-commsFull",
     "--project_name", "qmas",
     "--env_class", "isru_zoo.isru_v0.parallel_env_graph_obs",
     "--user_name", "ideas-mas",
@@ -52,7 +52,6 @@ args = [
 	"--use_gnn_policy",
     # "--use_gnn_mlp_policy",
     "--gnn_dropout_rate", "0.5",
-    "--gnn_layer_N", "2",
 
     "--diffusion_model_type", "dit1d",
     "--prediction_disable",

@@ -31,15 +31,18 @@ args = [
     "--layer_N", "2",
 
     "--diffusion_model_type", "dit1d",
-    "--prediction_ensemble_size", "1",
+    "--prediction_ensemble_size", "3",
     # "--prediction_disable",
-    "--prediction_estimate_uncertainty",
+    # "--prediction_uq_method", "estimation",
 
     "--seed", "0",
 
-    "--n_rollout_threads", "400",
+    "--n_rollout_threads", "66",
     "--cuda",
-    "--cuda_idx", "2",
+    "--cuda_idx", "5",
+    "--cuda_idx_predictor", "3",
+    "--threaded_training",
+    "--n_training_threads", "16",
 
     "--save_interval", "100000",
     "--results_dir", "/data/group/mas/qmas/results",
