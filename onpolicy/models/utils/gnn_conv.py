@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from torch import Tensor
 
 from torch_geometric.nn import SAGEConv
-from torch_geometric.nn.aggr import Aggregation, MultiAggregation
+from torch_geometric.nn.aggr import Aggregation, MultiAggregation, AttentionalAggregation, SortAggregation
 from torch_geometric.nn.conv import MessagePassing
 from torch_geometric.nn.dense.linear import Linear
 from torch_geometric.typing import Adj, OptPairTensor, Size, SparseTensor, OptTensor
@@ -78,16 +78,29 @@ class SAGEConvWithEdges(SAGEConv):
         in_channels: Union[int, Tuple[int, int]],
         out_channels: int,
         *args,
+        aggr: Optional[Union[str, List[str], Aggregation]] = "mean",
         edge_channels: int = 0,
+        concat_k: int = 0,
         **kwargs,
     ):
-
-        super().__init__(
-            in_channels,
-            out_channels,
-            *args,
-            **kwargs
-        )
+        if concat_k > 0:
+            aggr = SortAggregation(concat_k)
+            super().__init__(
+                (concat_k * in_channels, in_channels),
+                out_channels,
+                *args,
+                aggr=aggr,
+                **kwargs
+            )
+        else:
+            super().__init__(
+                in_channels,
+                out_channels,
+                *args,
+                aggr=aggr,
+                **kwargs
+            )
+        
         self.edge_channels = edge_channels
 
 

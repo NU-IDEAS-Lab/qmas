@@ -44,11 +44,10 @@ class R_Actor(nn.Module):
         self.MAX_NEIGHBORS = 15
         self.MAX_NODES = 50
 
-        obs_shape = get_shape_from_obs_space(obs_space)
-        self._use_cnn = len(obs_shape) == 3
-        self._use_mlp = True
+        self._use_cnn = False
+        self._use_mlp = False
         self._use_attention = False
-
+        
         if self._use_gnn:
             # Split up the graph and non-graph space.
             obs_space_graph = get_graph_obs_space(obs_space)
@@ -63,19 +62,29 @@ class R_Actor(nn.Module):
                 output_dim=args.gnn_hidden_size, #self.hidden_size,
                 node_type_idx=obs_space_graph.node_type_idx,
                 node_type_dim=1,
-                node_type_embed_dim=2,
+                node_type_embed_dim=4,
                 node_embedding_num=args.gnn_node_embedding_num,
                 dropout_rate=args.gnn_dropout_rate,
-                jk=args.gnn_skip_connections
+                jk=args.gnn_skip_connections,
+                use_orthogonal=args.use_orthogonal,
+                use_ReLU=args.use_ReLU,
             )
-
-            self.neighbor_scorer = MLPLayer(input_dim=args.gnn_hidden_size, output_dim=1, hidden_size=self.hidden_size, layer_N=3, use_orthogonal=args.use_orthogonal, use_ReLU=args.use_ReLU, use_layer_norm=False)
-            input_dim = self.MAX_NEIGHBORS + get_shape_from_obs_space(obs_space_nongraph)[0]
+            
+            if args.gnn_neighbor_scoring:
+                self.neighbor_scorer = MLPLayer(input_dim=args.gnn_hidden_size, output_dim=1, hidden_size=self.hidden_size, layer_N=3, use_orthogonal=args.use_orthogonal, use_ReLU=args.use_ReLU, use_layer_norm=False)
+                input_dim = self.MAX_NEIGHBORS + get_shape_from_obs_space(obs_space_nongraph)[0]
+            else:
+                input_dim = args.gnn_hidden_size + get_shape_from_obs_space(obs_space_nongraph)[0]
 
             if self._use_gnn_mlp:
-                self.mlp0 = MLPLayer(input_dim=input_dim, output_dim=self.hidden_size, hidden_size=self.hidden_size, layer_N=3, use_orthogonal=args.use_orthogonal, use_ReLU=args.use_ReLU)
+                self.mlp0 = MLPLayer(input_dim=input_dim, output_dim=self.hidden_size, hidden_size=self.hidden_size, layer_N=args.layer_N, use_orthogonal=args.use_orthogonal, use_ReLU=args.use_ReLU)
                 input_dim = self.hidden_size
         else:
+            obs_shape = get_shape_from_obs_space(obs_space)
+            self._use_cnn = len(obs_shape) == 3
+            self._use_mlp = True
+            self._use_attention = False
+
             input_dim = np.prod(obs_shape)
 
             if self._use_cnn:
@@ -313,7 +322,7 @@ class R_Critic(nn.Module):
             input_dim = np.prod(obs_shape)
 
             if self._use_cnn:
-                self.cnn = CNNBase(args, obs_shape, mode='encoder')
+                self.cnn = CNNBase(args, obs_shape, mode='cnn')
                 input_dim = self.hidden_size
 
             if self._use_attention:            

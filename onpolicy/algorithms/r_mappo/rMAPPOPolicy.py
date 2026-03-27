@@ -5,6 +5,9 @@ from onpolicy.utils.util import update_linear_schedule
 
 
 class R_MAPPOPolicy:
+
+    IS_TRAINABLE = True
+
     """
     MAPPO Policy  class. Wraps actor and critic networks to compute actions and value function predictions.
 
@@ -48,7 +51,7 @@ class R_MAPPOPolicy:
         update_linear_schedule(self.critic_optimizer, episode, episodes, self.critic_lr)
 
     def get_actions(self, cent_obs, obs, rnn_states_actor, rnn_states_critic, masks, available_actions=None,
-                    deterministic=False):
+                    deterministic=False, global_obs=None):
         """
         Compute actions and value function predictions for the given inputs.
         :param cent_obs (np.ndarray): centralized input to the critic.
@@ -127,7 +130,7 @@ class R_MAPPOPolicy:
         values, _ = self.critic(cent_obs, rnn_states_critic, masks)
         return values, action_log_probs, dist_entropy
 
-    def act(self, obs, rnn_states_actor, masks, available_actions=None, deterministic=False):
+    def act(self, obs, rnn_states_actor, masks, available_actions=None, deterministic=False, global_obs=None):
         """
         Compute actions using the given inputs.
         :param obs (np.ndarray): local agent inputs to the actor.

@@ -140,6 +140,11 @@ def parse_args(args, parser):
                         help="Index of the GPU to use for policy and critic networks.")
     parser.add_argument("--cuda_idx_predictor", type=int, default=[], nargs="+",
                         help="Index of the GPU to use for world model predictor network.")
+
+    parser.add_argument("--broadcast_uncertainty_threshold", type=float, default=0.5, 
+                        help="Threshold for heuristic communication in broadcast mode.")
+    parser.add_argument("--nearest_uncertainty_threshold", type=float, default=0.5, 
+                        help="Threshold for heuristic communication in nearest mode.")
     
     # Parse once to get the environment name.
     parsed_args, unknown_args = parser.parse_known_args(args)
@@ -197,6 +202,11 @@ def validateArgs(all_args):
         if not hasattr(env, "state") or not callable(env.state):
             raise ValueError(f"Environment class {env_class} does not have state function, but use_obs_instead_of_state is set false.")
 
+    # Check for deprecated UQ method flag.
+    if all_args.prediction_estimate_uncertainty:
+        all_args.prediction_uq_method = "estimation"
+        print("Warning: --prediction_estimate_uncertainty is deprecated. Setting prediction_uq_method to estimation.")
+
     print("Pettingzoo arguments validated: base")
 
     # Validate environment arguments.
@@ -216,7 +226,6 @@ def main(args):
     torch._dynamo.config.compiled_autograd = True
     torch.backends.cudnn.benchmark = True
 
-
     # cuda
     if all_args.cuda and torch.cuda.is_available():
         device = torch.device(f"cuda:{all_args.cuda_idx}")
@@ -224,6 +233,13 @@ def main(args):
         if all_args.cuda_deterministic:
             torch.backends.cudnn.benchmark = False
             torch.backends.cudnn.deterministic = True
+
+            # Set CUBLAS_WORKSPACE_CONFIG for reproducibility:
+            # https://docs.nvidia.com/cuda/cublas/index.html#results-reproducibility
+            os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
+
+            # Set PyTorch flags for reproducibility:
+            torch.use_deterministic_algorithms(True)
     else:
         device = torch.device("cpu")
         torch.set_num_threads(all_args.n_training_threads)

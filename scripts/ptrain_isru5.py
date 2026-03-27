@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-    "--experiment_name", "isru-fullTest-2superBot-e200-r10-h10-20x20",
+    "--experiment_name", "isru-graphObsGlobalEnc-1superBot-e200-r5-h5-o5-20x20",
     "--project_name", "qmas",
     "--env_class", "isru_zoo.isru_v0.parallel_env_graph_obs",
     "--user_name", "ideas-mas",
@@ -12,18 +12,18 @@ args = [
 	"--num_extractors", "0",
     "--num_haulers", "0",
     "--num_prospectors", "0",
-    "--num_superbots", "2",
+    "--num_superbots", "1",
 
-    "--hauler_capacity", "10",
+    "--hauler_capacity", "5",
 
     # "--world_no_reset",
     "--world_size", "20",
     "--num_obstacles", "0",
-    "--num_resources", "10",
+    "--num_resources", "5",
     # "--randomize_num_resources",
     # "--curriculum_num_resources",
 
-    # "--noisy_memory",
+    "--noisy_memory",
 
     "--observation_radius", "5",
     # "--observation_mask",
@@ -52,17 +52,16 @@ args = [
     "--gnn_dropout_rate", "0.5",
 
     "--diffusion_model_type", "dit1d",
-    # "--prediction_disable",
+    "--prediction_disable",
 
     "--state_encoder",
 
-    "--seed", "2",
+    # "--seed", "0",
 
     "--n_rollout_threads", "50",
     "--threaded_training",
     "--cuda",
-    "--cuda_idx", "5",
-    "--cuda_idx_predictor", "7",
+    # "--cuda_idx", "5",
 
     "--save_interval", "200000",
     # "--save_checkpoints",
@@ -70,4 +69,17 @@ args = [
     "--use_wandb",
 ]
 
-main(args)
+# Run using multiple different seeds in different processes.
+import multiprocessing
+
+threads = []
+cuda_idx = [5, 5, 7, 7]
+for i in range(len(cuda_idx)):
+    args_seeded = args + ["--seed", str(i)]
+    args_seeded += ["--cuda_idx", str(cuda_idx[i])]
+    p = multiprocessing.Process(target=main, args=(args_seeded,))
+    p.start()
+    threads.append(p)
+
+for t in threads:
+    t.join()

@@ -224,7 +224,8 @@ class parallel_env(ParallelEnv):
         # This is not part of the standard PettingZoo API, but is useful for centralized training.
 
         state_space = self._buildStateSpace(self.observe_method_global)
-        self.state_space = spaces.Dict({agent: state_space for agent in self.possible_agents})
+        self.state_space = state_space
+        # self.state_space = spaces.Dict({agent: state_space for agent in self.possible_agents})
         
         # Create the observation space.
         obs_space = self._buildStateSpace(self.observe_method)
@@ -497,13 +498,13 @@ class parallel_env(ParallelEnv):
         return get_available_action_space(action_space)
 
 
-    def state_old(self):
+    def state(self):
         ''' Returns the global state of the environment.
             This is useful for centralized training, decentralized execution. '''
         
         return self._populateStateSpace(self.observe_method_global, self.possible_agents[0], radius=np.inf, allow_done_agents=True)[0]
 
-    def state(self):
+    def state_ALL(self):
         ''' Similar to the state_old() method, but this returns a customized copy of the state space for each agent.
             This is useful for centralized training, decentralized execution. '''
         
