@@ -199,8 +199,9 @@ class PettingzooRunner(Runner):
                 prediction_prev=self.train_prediction_prev,
                 has_sample_dim=True
             )
-            self.train_prediction_prev = pred.detach().clone()
-            obs = pred.reshape(obs_shape)
+            pred = pred.detach()
+            self.train_prediction_prev = pred
+            obs = pred[:, -1] # Get only the final timestep for each batch item.
 
         values, action, action_log_prob, rnn_states, rnn_states_critic = self.trainer.policy.get_actions(
             share_obs,

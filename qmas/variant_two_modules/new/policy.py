@@ -151,8 +151,6 @@ class QmasPolicy(Policy):
         """
 
         dim_ensemble = 0
-        if has_sample_dim:
-            dim_ensemble = 1
 
         predictions = []
         for predictor in self.predictors:
@@ -164,8 +162,7 @@ class QmasPolicy(Policy):
                 prediction_prev,
                 has_sample_dim=has_sample_dim
             )
-            if not has_sample_dim:
-                pred = pred.unsqueeze(0)
+            pred = pred.unsqueeze(0)
             predictions.append(pred.to(self.device))
         predictions = torch.cat(predictions, dim=dim_ensemble)
         prediction = predictions.mean(dim=dim_ensemble)
