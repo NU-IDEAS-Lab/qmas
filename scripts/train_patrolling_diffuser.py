@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-	"--experiment_name", "diffuser-patrolling-obs200-uqEst",
+	"--experiment_name", "diffuser-patrolling-obs200-uqEnsemble3-injectionAppend",
 	"--project_name", "qmas",
 	"--env_class", "patrolling_zoo.patrolling_zoo_v0.parallel_env",
 	"--user_name", "ideas-mas",
@@ -24,9 +24,9 @@ args = [
 	"--graph_name", "milwaukee",
 	"--graph_file", "../patrolling_zoo/graphs/milwaukee.graph",
 	"--num_env_steps", "1000000",
-	"--episode_length", "300",
-	"--max_cycles", "300",
-    "--num_mini_batch", "6",
+	"--episode_length", "200",
+	"--max_cycles", "200",
+    "--num_mini_batch", "5",
 
 	"--algorithm_class", "qmas.variant_two_modules.new.algorithm.QmasAlgorithm",
 	"--policy_class", "qmas.variant_two_modules.new.policy.QmasPolicy",
@@ -48,11 +48,15 @@ args = [
 	"--seed", "0",
 
 	"--diffusion_model_type", "dit1d",
-    "--prediction_uq_method", "estimation",
+    "--prediction_uq_method", "ensemble",
+    "--prediction_uq_injection_method", "append",
+	"--prediction_ensemble_size", "3",
 
-	"--n_rollout_threads", "50",
+	"--n_rollout_threads", "66",
 	"--cuda",
 	"--cuda_idx", "0",
+    # "--cuda_idx_predictor", "3",
+    "--cuda_idx_predictor", "3", "4", "5",
     "--threaded_training",
     "--n_training_threads", "16",
 
