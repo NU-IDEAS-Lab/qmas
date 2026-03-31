@@ -75,7 +75,7 @@ class PettingzooRunner(Runner):
             delta_steps = np.ones((self.n_rollout_threads, self.num_agents, 1), dtype=np.int32)
             for step in range(self.episode_length):
                 # Sample actions, collect values and probabilities.
-                values, actions, action_log_probs, rnn_states, rnn_states_critic, actions_env = self.collect(step)
+                values, actions, action_log_probs, rnn_states, rnn_states_critic, actions_env, uncertainty = self.collect(step)
                 
                 # Take a step in the environment and get the results.
                 obs, share_obs, rewards, dones, infos, available_actions = self.envs.step(actions_env)
@@ -84,7 +84,7 @@ class PettingzooRunner(Runner):
                 delta_steps = np.array([info["deltaSteps"] for info in infos])
 
                 # insert data into buffer
-                data = obs, share_obs, rewards, dones, infos, values, actions, action_log_probs, rnn_states, rnn_states_critic, delta_steps, available_actions
+                data = obs, share_obs, rewards, dones, infos, values, actions, action_log_probs, rnn_states, rnn_states_critic, delta_steps, available_actions, uncertainty
                 self.insert(data)
 
             # Get certain stats.
@@ -169,39 +169,66 @@ class PettingzooRunner(Runner):
         act_size = np.prod(get_shape_from_act_space(self.buffer.act_space))
         self.train_prediction_prev = None
         self.train_trajectory.reset()
-        self.train_trajectory.add(
-            obs=torch.from_numpy(obs[0]).to(self.device),
-            visibility_mask=torch.ones(obs[0].shape, dtype=torch.float32, device=self.device),
-            action=torch.zeros(act_size, dtype=torch.float32, device=self.device)
-        )
+        # self.train_trajectory.add(
+        #     obs=torch.from_numpy(obs).to(self.device),
+        #     visibility_mask=torch.ones(obs.shape, dtype=torch.float32, device=self.device),
+        #     action=torch.zeros(act_size, dtype=torch.float32, device=self.device)
+        # )
 
 
     @torch.no_grad()
     def collect(self, step):
         share_obs, obs, global_obs, rnn_states, rnn_states_critic, masks, available_actions = self.buffer.compatibility_get_policy_input(step)
 
+        uncertainty_now = None
+
         # If a predictor is available, replace obs with predictions from the trajectory buffers.
         use_prediction = (
             hasattr(self.policy, "predictors")
             and not self.all_args.prediction_disable
-            and self.all_args.prediction_during_training
             and self.all_args.episode_fraction_start_prediction <= (step * self.episode_length * self.n_rollout_threads) / self.num_env_steps
             and self.train_trajectory.ready()
+            and (self.all_args.prediction_during_training or self.all_args.prediction_uq_injection_method != "none")
         )
         if use_prediction:
-            obs_shape = obs.shape  # [n_threads * n_agents, obs_shape...]
+            # Get the prediction and the uncertainty.
             trajectory, visibility_mask = self.train_trajectory.get_trajectory()
             trajectory = trajectory.transpose(0, 1)
             visibility_mask = visibility_mask.transpose(0, 1)
-            pred, _ = self.trainer.policy.get_prediction(
+            pred, uncertainty = self.trainer.policy.get_prediction(
                 trajectory=trajectory,
                 visibility_mask=visibility_mask,
                 prediction_prev=self.train_prediction_prev,
                 has_sample_dim=True
             )
-            pred = pred.detach()
+            pred = pred.detach().cpu()
             self.train_prediction_prev = pred
-            obs = pred[:, -1] # Get only the final timestep for each batch item.
+            uncertainty = uncertainty.detach().cpu()
+
+            # Get the currrent state.
+            pred_now = pred[:, -1]
+            uncertainty_now = uncertainty[:, -1]
+
+            # Replace the observation with the prediction.
+            if self.all_args.prediction_during_training:
+                obs = pred_now
+            
+            # Inject uncertainty into the observation.
+            if self.all_args.prediction_uq_injection_method == "append":
+                if global_obs is not None:
+                    global_obs = torch.cat([global_obs, uncertainty_now], dim=-1)
+                else:
+                    obs = torch.cat([obs, uncertainty_now], dim=-1)
+        
+        # Handle case where UQ injection expected, but not yet available due to predictor not running.
+        elif self.all_args.prediction_uq_injection_method == "append":
+            uncertainty_now = None
+            if global_obs is not None:
+                uncertainty_now = torch.zeros_like(global_obs)
+                global_obs = torch.cat([global_obs, uncertainty_now], dim=-1)
+            else:
+                uncertainty_now = torch.zeros_like(obs)
+                obs = torch.cat([obs, uncertainty_now], dim=-1)
 
         values, action, action_log_prob, rnn_states, rnn_states_critic = self.trainer.policy.get_actions(
             share_obs,
@@ -228,12 +255,14 @@ class PettingzooRunner(Runner):
         # else:
         #     actions_env = [actions[idx, :, :].numpy() for idx in range(self.n_rollout_threads)]
         actions_env = [actions[idx, :, :].numpy() for idx in range(self.n_rollout_threads)]
-        
 
-        return values, actions, action_log_probs, rnn_states, rnn_states_critic, actions_env
+        if uncertainty_now is not None:     
+            uncertainty_now = uncertainty_now.cpu().reshape((self.n_rollout_threads, self.num_agents, *uncertainty_now.shape[1:]))
+
+        return values, actions, action_log_probs, rnn_states, rnn_states_critic, actions_env, uncertainty_now
 
     def insert(self, data):
-        obs, share_obs, rewards, dones, infos, values, actions, action_log_probs, rnn_states, rnn_states_critic, delta_steps, available_actions = data
+        obs, share_obs, rewards, dones, infos, values, actions, action_log_probs, rnn_states, rnn_states_critic, delta_steps, available_actions, uncertainty = data
         
         # update env_infos if done
         dones_env = np.all(dones, axis=-1)
@@ -281,12 +310,20 @@ class PettingzooRunner(Runner):
             visibility_mask=visibility_mask,
             state_visibility_mask=state_visibility_mask,
             observation_global=observation_global,
+            observation_uncertainty=uncertainty,
         )
 
+        # Select appropriate vectors to add to the trajectory buffer.
+        traj_obs = obs if observation_global is None else observation_global
+        traj_visibility_mask = state_visibility_mask if state_visibility_mask is not None else visibility_mask
+        traj_visibility_mask = traj_visibility_mask if traj_visibility_mask is not None else np.ones(traj_obs.shape, dtype=np.float32)
+        # Flatten the thread and agent dimensions.
+        traj_obs = einops.rearrange(traj_obs, "t n ... -> (t n) ...")
+        traj_visibility_mask = einops.rearrange(traj_visibility_mask, "t n ... -> (t n) ...")
         # Update training trajectory buffers.
         self.train_trajectory.add(
-            obs=torch.from_numpy(obs[0]).to(self.device),
-            visibility_mask=torch.from_numpy(visibility_mask[0]).to(self.device) if visibility_mask is not None else torch.ones(obs[0].shape, dtype=torch.float32, device=self.device),
+            obs=torch.from_numpy(traj_obs).to(self.device),
+            visibility_mask=torch.from_numpy(traj_visibility_mask).to(self.device),
             action=actions[0].detach().to(self.device)
         )        
 

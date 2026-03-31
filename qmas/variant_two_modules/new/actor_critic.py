@@ -20,13 +20,12 @@ from onpolicy.models.r_actor_critic import R_Actor as Actor, R_Critic as Critic
 class StateEncoder(nn.Module):
     ''' This class encodes the global state for communication purposes. '''
 
-    def __init__(self, args, state_space, output_dim, use_ReLU, use_orthogonal, device=torch.device("cpu"), gain=None):
+    def __init__(self, args, obs_shape, output_dim, use_ReLU, use_orthogonal, device=torch.device("cpu"), gain=None):
         super(StateEncoder, self).__init__()
         self.device = device
         self.args = args
         hidden_size = args.hidden_size
 
-        obs_shape = get_shape_from_obs_space(state_space)
         self._use_cnn = len(obs_shape) == 3
 
         input_dim = np.prod(obs_shape)
@@ -109,6 +108,9 @@ class QmasActor(nn.Module):
                 input_dim = self.hidden_size
         else:
             obs_shape = get_shape_from_obs_space(obs_space)
+            if args.prediction_uq_injection_method == "append" and not args.state_encoder:
+                obs_shape = (*obs_shape[:-1], obs_shape[-1] * 2)
+
             self._use_cnn = len(obs_shape) == 3
             self._use_mlp = True
             self._use_attention = False
@@ -135,9 +137,14 @@ class QmasActor(nn.Module):
 
         # Create the state encoder.
         if args.state_encoder:
+            # Determine global observation shape.
+            global_obs_shape = get_shape_from_obs_space(share_obs_space)
+            if args.prediction_uq_injection_method == "append":
+                global_obs_shape = (*global_obs_shape[:-1], global_obs_shape[-1] * 2)
+
             self.state_encoder = StateEncoder(
                 args,
-                share_obs_space,
+                global_obs_shape,
                 output_dim=args.state_encoder_output_dim,
                 use_ReLU=args.use_ReLU,
                 use_orthogonal=args.use_orthogonal,

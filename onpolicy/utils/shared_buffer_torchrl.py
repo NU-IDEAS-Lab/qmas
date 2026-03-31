@@ -133,7 +133,7 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
 
     def insert(self, share_obs, obs, rnn_states_actor, rnn_states_critic, actions, action_log_probs,
                value_preds, rewards, masks, bad_masks=None, active_masks=None, delta_steps=None, available_actions=None,
-               visibility_mask=None, state_visibility_mask=None, observation_global=None, legacy_mode=True):
+               visibility_mask=None, state_visibility_mask=None, observation_global=None, observation_uncertainty=None, legacy_mode=True):
         """
         Insert data into the buffer.
         :param share_obs: (argparse.Namespace) arguments containing relevant model, policy, and env information.
@@ -165,8 +165,8 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
             delta_steps = np.ones_like(value_preds)
         if visibility_mask is None:
             visibility_mask = np.ones_like(obs, dtype=np.float32)
-        if observation_global is None:
-            observation_global = np.zeros((*obs.shape[0:2], *share_obs.shape[1:]), dtype=share_obs.dtype)
+        if observation_uncertainty is None and isinstance(obs, np.ndarray) and obs.dtype != object:
+            observation_uncertainty = np.zeros_like(obs, dtype=np.float32)
         
         obs = self.convert_input_to_tensor(obs)
         self.obs_object = isinstance(obs, NonTensorStack)
@@ -208,6 +208,8 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
             data['observation_global'] = observation_global #+1
         if state_visibility_mask is not None:
             data['state_visibility_mask'] = state_visibility_mask #+1
+        if observation_uncertainty is not None:
+            data['observation_uncertainty'] = observation_uncertainty #+1
 
         # In legacy mode, some data is added for timestep t, others for timestep t+1.
         if legacy_mode:
@@ -474,19 +476,40 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
     def compatibility_transform_sample(self, sample, index_shape=(-1,), data_start_dim=3):
         ''' Returns sample in format expected by existing onpolicy code. '''
 
+        has_global_obs = "observation_global" in sample
+
         if self.share_obs_object:
             sample_share_obs = np.array(sample["share_obs"])
             share_obs_batch = sample_share_obs.reshape(*index_shape, *sample_share_obs.shape[data_start_dim+1:])
-            sample_global_obs = np.array(sample["observation_global"])
-            global_obs_batch = sample_global_obs.reshape(*index_shape, *sample_global_obs.shape[data_start_dim+1:])
+            if has_global_obs:
+                sample_global_obs = np.array(sample["observation_global"])
+                global_obs_batch = sample_global_obs.reshape(*index_shape, *sample_global_obs.shape[data_start_dim+1:])
+            else:
+                global_obs_batch = None
         else:
             share_obs_batch = sample["share_obs"].reshape(*index_shape, *sample["share_obs"].shape[2:])
-            global_obs_batch = sample["observation_global"].reshape(*index_shape, *sample["observation_global"].shape[data_start_dim:])
+            if has_global_obs:
+                global_obs_batch = sample["observation_global"].reshape(*index_shape, *sample["observation_global"].shape[data_start_dim:])
+            else:
+                global_obs_batch = None
         if self.obs_object:
             sample_obs = np.array(sample["obs"])
             obs_batch = sample_obs.reshape(*index_shape, *sample_obs.shape[data_start_dim+1:])
         else:
             obs_batch = sample["obs"].reshape(*index_shape, *sample["obs"].shape[data_start_dim:])
+
+        if self.args.prediction_uq_injection_method == "append":
+            if "observation_uncertainty" in sample and isinstance(sample["observation_uncertainty"], torch.Tensor):
+                uncertainty_batch = sample["observation_uncertainty"].reshape(*index_shape, *sample["observation_uncertainty"].shape[data_start_dim:])
+            else:
+                target = global_obs_batch if global_obs_batch is not None else obs_batch
+                uncertainty_batch = torch.zeros_like(target)
+
+            if global_obs_batch is not None:
+                global_obs_batch = torch.cat([global_obs_batch, uncertainty_batch], dim=-1)
+            else:
+                obs_batch = torch.cat([obs_batch, uncertainty_batch], dim=-1)
+
         rnn_states_batch = sample["rnn_states_actor"].reshape(*index_shape, *sample["rnn_states_actor"].shape[data_start_dim:])
         rnn_states_critic_batch = sample["rnn_states_critic"].reshape(*index_shape, *sample["rnn_states_critic"].shape[data_start_dim:])
         actions_batch = sample["actions"].reshape(*index_shape, *sample["actions"].shape[data_start_dim:])
@@ -509,14 +532,22 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
     def compatibility_get_policy_input(self, step):
         ''' Gets the necessary policy input for a particular step, in the format expected by existing onpolicy code. '''
         sample = self[step]
+
+        has_global_obs = "observation_global" in sample
         
         if self.share_obs_object:
             sample_share_obs = np.array(sample["share_obs"])
             share_obs = sample_share_obs.reshape(-1, *sample_share_obs.shape[2:])
-            global_obs = sample["observation_global"].reshape(-1, *sample["observation_global"].shape[3:])
+            if has_global_obs:
+                global_obs = sample["observation_global"].reshape(-1, *sample["observation_global"].shape[3:])
+            else:
+                global_obs = None
         else:
             share_obs = np.array(sample["share_obs"])
-            global_obs = sample["observation_global"].flatten(0, 1)
+            if has_global_obs:
+                global_obs = sample["observation_global"].flatten(0, 1)
+            else:
+                global_obs = None
         if self.obs_object:
             sample_obs = np.array(sample["obs"])
             obs = sample_obs.reshape(-1, *sample_obs.shape[3:])
