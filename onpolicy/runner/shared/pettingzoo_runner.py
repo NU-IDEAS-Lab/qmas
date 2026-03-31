@@ -45,6 +45,7 @@ class PettingzooRunner(Runner):
         self.train_prediction_prev = None
 
         self.env_infos = defaultdict(list)
+        self._nonfinite_input_warnings = 0
        
         # Perform restoration.
         config['all_args'].model_dir = model_dir
@@ -205,6 +206,11 @@ class PettingzooRunner(Runner):
             self.train_prediction_prev = pred
             uncertainty = uncertainty.detach().cpu()
 
+            # Predictor outputs can occasionally contain non-finite values.
+            pred = torch.nan_to_num(pred, nan=0.0, posinf=1e6, neginf=-1e6)
+            uncertainty = torch.nan_to_num(uncertainty, nan=0.0, posinf=1e6, neginf=0.0)
+            uncertainty = torch.clamp(uncertainty, min=0.0, max=1e6)
+
             # Get the currrent state.
             pred_now = pred[:, -1]
             uncertainty_now = uncertainty[:, -1]
@@ -229,6 +235,20 @@ class PettingzooRunner(Runner):
             else:
                 uncertainty_now = torch.zeros_like(obs)
                 obs = torch.cat([obs, uncertainty_now], dim=-1)
+
+        # Guard against non-finite values entering the actor.
+        if isinstance(obs, torch.Tensor):
+            if not torch.isfinite(obs).all() and self._nonfinite_input_warnings < 5:
+                print(f"Warning: non-finite obs detected at step {step}; replacing with finite values.")
+                self._nonfinite_input_warnings += 1
+            obs = torch.nan_to_num(obs, nan=0.0, posinf=1e6, neginf=-1e6)
+        if isinstance(global_obs, torch.Tensor):
+            if not torch.isfinite(global_obs).all() and self._nonfinite_input_warnings < 5:
+                print(f"Warning: non-finite global_obs detected at step {step}; replacing with finite values.")
+                self._nonfinite_input_warnings += 1
+            global_obs = torch.nan_to_num(global_obs, nan=0.0, posinf=1e6, neginf=-1e6)
+        if isinstance(share_obs, torch.Tensor):
+            share_obs = torch.nan_to_num(share_obs, nan=0.0, posinf=1e6, neginf=-1e6)
 
         values, action, action_log_prob, rnn_states, rnn_states_critic = self.trainer.policy.get_actions(
             share_obs,
