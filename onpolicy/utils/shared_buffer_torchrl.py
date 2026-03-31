@@ -209,12 +209,6 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
         if state_visibility_mask is not None:
             data['state_visibility_mask'] = state_visibility_mask #+1
         if observation_uncertainty is not None:
-            if isinstance(observation_uncertainty, torch.Tensor):
-                observation_uncertainty = torch.nan_to_num(observation_uncertainty, nan=0.0, posinf=1e6, neginf=0.0)
-                observation_uncertainty = torch.clamp(observation_uncertainty, min=0.0, max=1e6)
-            elif isinstance(observation_uncertainty, np.ndarray):
-                observation_uncertainty = np.nan_to_num(observation_uncertainty, nan=0.0, posinf=1e6, neginf=0.0)
-                observation_uncertainty = np.clip(observation_uncertainty, a_min=0.0, a_max=1e6)
             data['observation_uncertainty'] = observation_uncertainty #+1
 
         # In legacy mode, some data is added for timestep t, others for timestep t+1.
@@ -504,20 +498,12 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
         else:
             obs_batch = sample["obs"].reshape(*index_shape, *sample["obs"].shape[data_start_dim:])
 
-        if isinstance(obs_batch, torch.Tensor):
-            obs_batch = torch.nan_to_num(obs_batch, nan=0.0, posinf=1e6, neginf=-1e6)
-        if isinstance(global_obs_batch, torch.Tensor):
-            global_obs_batch = torch.nan_to_num(global_obs_batch, nan=0.0, posinf=1e6, neginf=-1e6)
-
         if self.args.prediction_uq_injection_method == "append":
             if "observation_uncertainty" in sample and isinstance(sample["observation_uncertainty"], torch.Tensor):
                 uncertainty_batch = sample["observation_uncertainty"].reshape(*index_shape, *sample["observation_uncertainty"].shape[data_start_dim:])
             else:
                 target = global_obs_batch if global_obs_batch is not None else obs_batch
                 uncertainty_batch = torch.zeros_like(target)
-
-            uncertainty_batch = torch.nan_to_num(uncertainty_batch, nan=0.0, posinf=1e6, neginf=0.0)
-            uncertainty_batch = torch.clamp(uncertainty_batch, min=0.0, max=1e6)
 
             if global_obs_batch is not None:
                 global_obs_batch = torch.cat([global_obs_batch, uncertainty_batch], dim=-1)
