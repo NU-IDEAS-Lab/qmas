@@ -2,6 +2,7 @@ import torch
 import numpy as np
 
 from tensordict import TensorDict
+from tensordict import set_capture_non_tensor_stack
 from tensordict.tensorclass import NonTensorData, NonTensorStack
 from torchrl.data.replay_buffers import LazyTensorStorage, TensorDictReplayBuffer
 from torchrl.data.replay_buffers.samplers import SamplerWithoutReplacement, RandomSampler
@@ -131,6 +132,7 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
         print(f"Buffer initialized with episode length {args.episode_length}")
 
 
+    @set_capture_non_tensor_stack(False)
     def insert(self, share_obs, obs, rnn_states_actor, rnn_states_critic, actions, action_log_probs,
                value_preds, rewards, masks, bad_masks=None, active_masks=None, delta_steps=None, available_actions=None,
                visibility_mask=None, state_visibility_mask=None, observation_global=None, legacy_mode=True):
