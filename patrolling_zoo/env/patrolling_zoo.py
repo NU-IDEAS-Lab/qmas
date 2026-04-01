@@ -502,7 +502,12 @@ class parallel_env(ParallelEnv):
         ''' Returns the global state of the environment.
             This is useful for centralized training, decentralized execution. '''
         
-        return self._populateStateSpace(self.observe_method_global, self.possible_agents[0], radius=np.inf, allow_done_agents=True)[0]
+        return self._state()[0]
+
+    def _state(self):
+
+        return self._populateStateSpace(self.observe_method_global, self.possible_agents[0], radius=np.inf, allow_done_agents=True, global_state=True)
+
 
     def state_ALL(self):
         ''' Similar to the state_old() method, but this returns a customized copy of the state space for each agent.
@@ -526,7 +531,7 @@ class parallel_env(ParallelEnv):
         return self.available_actions_dict[agent]
 
 
-    def _populateStateSpace(self, observe_method, agent, radius, allow_done_agents):
+    def _populateStateSpace(self, observe_method, agent, radius, allow_done_agents, global_state=False):
         ''' Returns a populated state/observation space.'''
 
         if radius == None:
@@ -756,7 +761,17 @@ class parallel_env(ParallelEnv):
 
         if (type(obs) == dict and obs == {}) or (type(obs) != dict and len(obs) < 1):
             raise ValueError(f"Invalid observation method {observe_method}")
-        
+
+        # If getting the global state, set the fixed/visible mask to 0 for everything
+        if global_state:
+            if observe_method == "adjacency":
+                for key in obs_mask:
+                    if type(obs_mask[key]) == dict:
+                        for subkey in obs_mask[key]:
+                            obs_mask[key][subkey] = np.zeros_like(obs_mask[key][subkey], dtype=bool)
+                    else:
+                        obs_mask[key] = np.zeros_like(obs_mask[key], dtype=bool)
+
         return obs, obs_mask
     
     def _calculateEdgeWeight(self, pos1, pos2):
@@ -857,6 +872,10 @@ class parallel_env(ParallelEnv):
             obs, obs_mask = self.observe(agent)
             obs_dict[agent] = obs
             info_dict[agent]["visibility_mask"] = obs_mask
+
+        # Add the state fixed mask. (Nothing is fixed.)
+        _, state_visibility_mask = self._state()
+        info_dict["state_visibility_mask"] = state_visibility_mask
         
         # Record miscellaneous information.
         for i, n in enumerate(self.nodeVisits):
