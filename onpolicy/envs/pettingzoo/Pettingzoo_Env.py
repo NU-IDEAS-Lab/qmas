@@ -228,7 +228,7 @@ class PettingzooEnv(object):
             all_viz = []
             for a in self.env.possible_agents:
                 i = info[a]
-                if "visibility_mask" in i:
+                if "visibility_mask" in i and i["visibility_mask"] is not None:
                     viz = i["visibility_mask"]
                     if self.flatten_observations:
                         viz = flatten_mask(self.env.observation_space(a), viz)
