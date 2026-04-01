@@ -267,7 +267,7 @@ class Predictor(torch.nn.Module):
             prediction, log = self.diffuser.sample(
                 prior=trajectory,
                 solver="ddim",
-                n_samples=50,
+                n_samples=trajectory.shape[0],
                 temperature=0.6,
                 sample_steps=20,
                 condition_cg=trajectory,
@@ -280,7 +280,7 @@ class Predictor(torch.nn.Module):
             )
 
         # Take the mean over the samples and map back to the original observation scale.
-        prediction = prediction.mean(dim=0, keepdim=True)
+        # prediction = prediction.mean(dim=0, keepdim=True)
         prediction = self.denormalize_trajectory(prediction)
 
         return prediction

@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-	"--experiment_name", "diffuser-patrolling-obs200-uqEnsemble3-pygNS",
+	"--experiment_name", "diffuser-patrolling-obs200-uqEnsemble3-pygNS-injectionAppend",
 	"--project_name", "qmas",
 	"--env_class", "patrolling_zoo.patrolling_zoo_v0.parallel_env",
 	"--user_name", "ideas-mas",

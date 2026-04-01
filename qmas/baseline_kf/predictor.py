@@ -58,10 +58,20 @@ class Predictor:
 
         self.kf = None
 
-    def initialize(self, x0, P0):
+    def initialize(self, batch_size, x0, P0):
         ''' Initialize the Kalman Filter. '''
 
-        self.kf = KalmanFilterIntermittenObservations(self.A, self.B, self.C, self.Q, self.R, x0, P0)
+        self.kf = [
+            KalmanFilterIntermittenObservations(
+                self.A,
+                self.B,
+                self.C,
+                self.Q,
+                self.R,
+                x0[i],
+                P0.clone()
+            ) for i in range(batch_size)
+        ]
 
 
     def get_lower_bound_lambda_critical(self):
@@ -107,7 +117,7 @@ class Predictor:
             raise NotImplementedError("Upper bound calculation for the general case is not implemented.")
 
 
-    def get_prediction(self, trajectory, visibility_mask, prediction_prev=None):
+    def get_prediction(self, trajectory, visibility_mask, prediction_prev=None, has_sample_dim=False):
         ''' Get a prediction from the KF.
             Args:
                 trajectory: A tensor of shape (T, D), where T is the trajectory length and D is the transition dimension (action + observation).
@@ -123,22 +133,30 @@ class Predictor:
         # Check whether the filter is initialized.
         if self.kf is None:
             self.initialize(
-                x0=trajectory[-1, self.action_dim:],
+                batch_size=trajectory.shape[0] if has_sample_dim else 1,
+                x0=trajectory[:, -1, self.action_dim:],
                 P0=torch.eye(self.obs_dim, device=self.device)
             )
 
-        # Get actions.
-        actions = trajectory[-1, :self.action_dim]
+        if not has_sample_dim:
+            trajectory = trajectory.unsqueeze(0)
+            visibility_mask = visibility_mask.unsqueeze(0)
 
-        # Get prediction.
-        prediction = torch.zeros((1, self.prediction_horizon, self.transition_dim), device=self.device)
-        prediction[0, 0, self.action_dim:] = self.kf.predict(actions)
+        assert trajectory.shape[0] == len(self.kf), "Batch size of trajectory must match number of Kalman Filters. Inconsistent batch size!"
 
-        # Set up a diagonal visibility mask for the observation.
-        visibility_mask_diag = torch.diag(visibility_mask[-1, self.action_dim:])
+        for i in range(trajectory.shape[0]):
+            # Get actions.
+            actions = trajectory[i, -1, :self.action_dim]
 
-        # Update the Kalman Filter with the observation.
-        self.kf.update(trajectory[-1, self.action_dim:], gamma=visibility_mask_diag)
+            # Get prediction.
+            prediction = torch.zeros((trajectory.shape[0], self.prediction_horizon, self.transition_dim), device=self.device)
+            prediction[i, 0, self.action_dim:] = self.kf[i].predict(actions)
+
+            # Set up a diagonal visibility mask for the observation.
+            visibility_mask_diag = torch.diag(visibility_mask[i, -1, self.action_dim:])
+
+            # Update the Kalman Filter with the observation.
+            self.kf[i].update(trajectory[i, -1, self.action_dim:], gamma=visibility_mask_diag)
 
         return prediction
 

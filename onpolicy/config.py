@@ -362,6 +362,8 @@ def get_config():
                         help="The fraction of episodes at which to start training the prediction model.")
     parser.add_argument("--episode_fraction_stop_policy", type=float, default=1.0,
                         help="The fraction of episodes at which to stop training the policy.")
+    parser.add_argument("--prediction_during_training", action=argparse.BooleanOptionalAction, default=False,
+                        help="Whether to use the prediction model to generate predicted observations during training of the policy.")
     parser.add_argument("--prediction_ensemble_size", type=int, default=1)
     parser.add_argument("--prediction_history_window", type=int, default=8)
     parser.add_argument("--prediction_warm_start", action=argparse.BooleanOptionalAction, default=False,
@@ -382,6 +384,9 @@ def get_config():
     parser.add_argument("--prediction_uq_method", type=str, default="ensemble",
                         choices=["ensemble", "estimation"],
                         help="Method to use for estimating uncertainty in predictions")
+    parser.add_argument("--prediction_uq_injection_method", type=str, default="none",
+                        choices=["none", "append"],
+                        help="Method to inject uncertainty estimates into the policy input")
 
     # Torch parameters.
     parser.add_argument("--torch_compile", action="store_true",
