@@ -476,15 +476,17 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
 
         if self.share_obs_object:
             sample_share_obs = np.array(sample["share_obs"])
-            share_obs_batch = sample_share_obs.reshape(*index_shape, *sample_share_obs.shape[data_start_dim+1:])
+            share_obs_batch = sample_share_obs.reshape(*index_shape, *sample_share_obs.shape[data_start_dim:])
             sample_global_obs = np.array(sample["observation_global"])
-            global_obs_batch = sample_global_obs.reshape(*index_shape, *sample_global_obs.shape[data_start_dim+1:])
+            global_obs_batch = sample_global_obs.reshape(*index_shape, *sample_global_obs.shape[data_start_dim:])
         else:
             share_obs_batch = sample["share_obs"].reshape(*index_shape, *sample["share_obs"].shape[2:])
             global_obs_batch = sample["observation_global"].reshape(*index_shape, *sample["observation_global"].shape[data_start_dim:])
         if self.obs_object:
             sample_obs = np.array(sample["obs"])
-            obs_batch = sample_obs.reshape(*index_shape, *sample_obs.shape[data_start_dim+1:])
+            # Use shape[-1:] to keep only the last dim (n_obs_keys), collapsing all leading
+            # dims regardless of extra TorchRL stacking dimensions.
+            obs_batch = sample_obs.reshape(*index_shape, *sample_obs.shape[-1:])
         else:
             obs_batch = sample["obs"].reshape(*index_shape, *sample["obs"].shape[data_start_dim:])
         rnn_states_batch = sample["rnn_states_actor"].reshape(*index_shape, *sample["rnn_states_actor"].shape[data_start_dim:])
@@ -519,7 +521,10 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
             global_obs = sample["observation_global"].flatten(0, 1)
         if self.obs_object:
             sample_obs = np.array(sample["obs"])
-            obs = sample_obs.reshape(-1, *sample_obs.shape[3:])
+            # Use shape[-1:] to keep only the last dim (n_obs_keys), collapsing all leading
+            # dims (n_threads, n_agents, and any extra dims TorchRL may add when stacking
+            # NonTensorData across steps).
+            obs = sample_obs.reshape(-1, *sample_obs.shape[-1:])
         else:
             obs = sample["obs"].flatten(0, 1)
         rnn_states_actor = sample["rnn_states_actor"].flatten(0, 1)

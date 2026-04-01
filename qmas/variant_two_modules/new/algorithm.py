@@ -185,6 +185,16 @@ class QmasAlgorithm(Algorithm):
             key_visibility = "visibility_mask"
             individual_obs = True
 
+        # Raise a clear error if obs_full holds non-tensor (e.g. PyG graph) objects. In this case, the environment must provide global_visibility_mask.
+        if isinstance(sample[key_obs], list):
+            raise ValueError(
+                "obs_full contains non-tensor (PyG graph) observations and no "
+                "'state_visibility_mask' was found in the sample.  Set "
+                "observe_method_global='adjacency' in the environment so that it "
+                "provides state_visibility_mask and the diffuser can train on the "
+                "float adjacency global state instead of the graph observations."
+            )
+
         # If thread indices given, use only data from those threads.
         if thread_indices is None:
             obs_batch = sample[key_obs]
