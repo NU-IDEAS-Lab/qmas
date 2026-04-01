@@ -18,6 +18,9 @@ class TrajectoryBuffer:
 
         if self.transition_includes_actions and action is not None:
             transition = torch.cat([action, obs], dim=-1)
+            # Pad visibility_mask with ones for the action dimensions so it matches the transition shape.
+            action_mask = torch.ones(*action.shape[:-1], action.shape[-1], dtype=visibility_mask.dtype, device=visibility_mask.device)
+            visibility_mask = torch.cat([action_mask, visibility_mask], dim=-1)
         else:
             transition = obs
         

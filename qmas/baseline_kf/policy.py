@@ -25,7 +25,7 @@ class QmasPolicy(R_MAPPOPolicy):
         )]
 
 
-    def get_prediction(self, trajectory, visibility_mask=None, prediction_prev=None):
+    def get_prediction(self, trajectory, visibility_mask=None, prediction_prev=None, has_sample_dim=False):
         """
         Get a prediction from the ensemble of predictors.
         Args:
@@ -42,7 +42,8 @@ class QmasPolicy(R_MAPPOPolicy):
             pred = predictor.get_prediction(
                 trajectory.clone(),
                 visibility_mask.clone(),
-                prediction_prev)
+                prediction_prev,
+                has_sample_dim=has_sample_dim)
             predictions.append(pred.unsqueeze(0))
         predictions = torch.cat(predictions, dim=0)  # Shape: (num_predictors, T, D_out)
         prediction = predictions.mean(dim=0)
