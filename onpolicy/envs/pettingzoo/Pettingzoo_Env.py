@@ -74,7 +74,7 @@ class PettingzooEnv(object):
     def reset(self):
         self.ppoSteps = 0
         self.deltaSteps = {a: 0 for a in self.env.possible_agents}
-        obs, _  = self.env.reset()
+        obs, _ = self.env.reset()
 
         ret_obs = self._obs_wrapper(obs)
         if self.use_obs_instead_of_state:
@@ -84,7 +84,16 @@ class PettingzooEnv(object):
         available_actions = {a: self.env.available_actions(a) for a in self.env.possible_agents}
         ret_available_actions = self._available_actions_wrapper(available_actions)
 
-        return ret_obs, ret_share_obs, ret_available_actions
+        # Use get_reset_info() if the environment provides it (custom extension),
+        # otherwise fall back to an empty per-agent info dict.
+        if hasattr(self.env, 'get_reset_info'):
+            raw_infos = self.env.get_reset_info()
+        else:
+            raw_infos = {a: {} for a in self.env.possible_agents}
+
+        infos = self._info_wrapper(raw_infos)
+
+        return ret_obs, ret_share_obs, ret_available_actions, infos
 
     def step(self, action):
 
