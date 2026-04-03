@@ -131,7 +131,7 @@ class PettingzooRunner(Runner):
 
     def warmup(self):
         # Reset environment.
-        obs, share_obs, available_actions = self.envs.reset()
+        obs, share_obs, available_actions, infos = self.envs.reset(return_info=True)
 
         # Get the shape of the action space.
         act_shape = get_shape_from_act_space(self.buffer.act_space)
@@ -145,6 +145,10 @@ class PettingzooRunner(Runner):
             action_log_prob_shape = (self.n_rollout_threads, self.num_agents, self.policy.actor.act.log_prob_dim)
         else:
             action_log_prob_shape = (self.n_rollout_threads, self.num_agents, 1)
+
+        observation_global = None
+        if "observation_global" in infos[0]:
+            observation_global = np.array([info["observation_global"] for info in infos])
 
         # Initialize buffer.
         self.buffer.insert(
@@ -162,7 +166,8 @@ class PettingzooRunner(Runner):
             rewards=np.zeros((self.n_rollout_threads, self.num_agents, 1), dtype=np.float32),
             masks=np.ones((self.n_rollout_threads, self.num_agents, 1), dtype=np.float32),
             delta_steps=np.ones((self.n_rollout_threads, self.num_agents, 1), dtype=np.int32),
-            available_actions=available_actions
+            available_actions=available_actions,
+            observation_global=observation_global,
         )
 
         # Reset and seed training trajectory buffer with the initial observations.
@@ -215,17 +220,21 @@ class PettingzooRunner(Runner):
             
             # Inject uncertainty into the observation.
             if self.all_args.prediction_uq_injection_method == "append":
-                if global_obs is not None:
+                if global_obs is not None and self.all_args.state_encoder:
                     global_obs = torch.cat([global_obs, uncertainty_now], dim=-1)
+                elif obs.dtype == object:
+                    raise ValueError("Must have observation_global in infos to use object-type observations (e.g. pyg graph observations). Check that environment is providing this information.")
                 else:
                     obs = torch.cat([obs, uncertainty_now], dim=-1)
         
         # Handle case where UQ injection expected, but not yet available due to predictor not running.
         elif self.all_args.prediction_uq_injection_method == "append":
             uncertainty_now = None
-            if global_obs is not None:
+            if global_obs is not None and self.all_args.state_encoder:
                 uncertainty_now = torch.zeros_like(global_obs)
                 global_obs = torch.cat([global_obs, uncertainty_now], dim=-1)
+            elif obs.dtype == object:
+                raise ValueError("Must have observation_global in infos to use object-type observations (e.g. pyg graph observations). Check that environment is providing this information.")
             else:
                 uncertainty_now = torch.zeros_like(obs)
                 obs = torch.cat([obs, uncertainty_now], dim=-1)
@@ -313,19 +322,15 @@ class PettingzooRunner(Runner):
             observation_uncertainty=uncertainty,
         )
 
-        # Select appropriate vectors to add to the trajectory buffer.
-        traj_obs = obs if observation_global is None else observation_global
-        traj_visibility_mask = state_visibility_mask if state_visibility_mask is not None else visibility_mask
-        traj_visibility_mask = traj_visibility_mask if traj_visibility_mask is not None else np.ones(traj_obs.shape, dtype=np.float32)
-        # Flatten the thread and agent dimensions.
-        traj_obs = einops.rearrange(traj_obs, "t n ... -> (t n) ...")
-        traj_visibility_mask = einops.rearrange(traj_visibility_mask, "t n ... -> (t n) ...")
-        # Update training trajectory buffers.
-        self.train_trajectory.add(
-            obs=torch.from_numpy(traj_obs).to(self.device),
-            visibility_mask=torch.from_numpy(traj_visibility_mask).to(self.device),
-            action=actions[0].detach().to(self.device)
-        )        
+        # Update the trajectory buffer with the new transition.
+        self._update_trajectory_buffer(
+            self.train_trajectory,
+            obs,
+            infos,
+            actions,
+            self.n_rollout_threads,
+            share_obs=share_obs
+        )
 
 
     @torch.no_grad()
@@ -384,31 +389,41 @@ class PettingzooRunner(Runner):
             viz_mask = viz_mask_obs.reshape(n_threads, self.num_agents, -1)
         return viz_mask, obs
 
-    def _seed_trajectory_buffer(self, trajectory_buffer, obs, n_threads):
-        traj_obs = einops.rearrange(obs, "t n ... -> (t n) ...")
-        traj_visibility_mask = np.ones_like(traj_obs, dtype=np.float32)
-        act_shape = get_shape_from_act_space(self.buffer.act_space)
-        if isinstance(act_shape, Iterable):
-            traj_actions_shape = (n_threads * self.num_agents, *act_shape)
-        else:
-            traj_actions_shape = (n_threads * self.num_agents, act_shape)
-        traj_actions = torch.zeros(traj_actions_shape, dtype=torch.float32, device=self.device)
+    def _seed_trajectory_buffer(self, trajectory_buffer, obs, n_threads, share_obs=None):
+        # _obs = share_obs if (obs.dtype == object and share_obs is not None) else obs
+        # traj_obs = einops.rearrange(_obs, "t n ... -> (t n) ...")
+        # traj_visibility_mask = np.ones_like(traj_obs, dtype=np.float32)
+        # act_shape = get_shape_from_act_space(self.buffer.act_space)
+        # if isinstance(act_shape, Iterable):
+        #     traj_actions_shape = (n_threads * self.num_agents, *act_shape)
+        # else:
+        #     traj_actions_shape = (n_threads * self.num_agents, act_shape)
+        # traj_actions = torch.zeros(traj_actions_shape, dtype=torch.float32, device=self.device)
 
         trajectory_buffer.reset()
-        trajectory_buffer.add(
-            obs=torch.from_numpy(traj_obs).to(self.device),
-            visibility_mask=torch.from_numpy(traj_visibility_mask).to(self.device),
-            action=traj_actions,
-        )
+        # trajectory_buffer.add(
+        #     obs=torch.from_numpy(traj_obs).to(self.device),
+        #     visibility_mask=torch.from_numpy(traj_visibility_mask).to(self.device),
+        #     action=traj_actions,
+        # )
 
-    def _update_trajectory_buffer(self, trajectory_buffer, obs, infos, actions, n_threads):
+    def _update_trajectory_buffer(self, trajectory_buffer, obs, infos, actions, n_threads, share_obs=None):
+        # Get data from infos.
         observation_global = np.array([info["observation_global"] for info in infos]) if "observation_global" in infos[0] else None
         state_visibility_mask = np.array([info["state_visibility_mask"] for info in infos]) if "state_visibility_mask" in infos[0] else None
         visibility_mask = np.array([info["visibility_mask"] for info in infos]) if "visibility_mask" in infos[0] else None
+        visibility_mask_global = np.array([info["visibility_mask_global"] for info in infos]) if "visibility_mask_global" in infos[0] else None
 
-        traj_obs = obs if observation_global is None else observation_global
-        traj_visibility_mask = state_visibility_mask if state_visibility_mask is not None else visibility_mask
-        traj_visibility_mask = traj_visibility_mask if traj_visibility_mask is not None else np.ones(traj_obs.shape, dtype=np.float32)
+        # Select appropriate vectors to add to the trajectory buffer.
+        if observation_global is not None and self.all_args.state_encoder:
+            traj_obs = observation_global
+            traj_visibility_mask = visibility_mask_global
+        elif obs.dtype == object:
+            raise ValueError("Must have observation_global in infos to use object-type observations (e.g. pyg graph observations). Check that environment is providing this information.")
+        else:
+            traj_obs = obs
+            traj_visibility_mask = visibility_mask
+        assert traj_visibility_mask is not None, "Must have some form of visibility mask in infos to update trajectory buffer. Check that environment is providing this information."
 
         traj_obs = einops.rearrange(traj_obs, "t n ... -> (t n) ...")
         traj_visibility_mask = einops.rearrange(traj_visibility_mask, "t n ... -> (t n) ...")
@@ -484,7 +499,7 @@ class PettingzooRunner(Runner):
             obs, share_obs, available_actions = eval_env.reset()
             rnn_states = torch.zeros((self.n_eval_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=torch.float32)
             masks = torch.ones((self.n_eval_rollout_threads, self.num_agents, 1), dtype=torch.float32)
-            self._seed_trajectory_buffer(eval_trajectory, obs, self.n_eval_rollout_threads)
+            self._seed_trajectory_buffer(eval_trajectory, obs, self.n_eval_rollout_threads, share_obs=share_obs)
 
             dones = False
             j = -1
@@ -523,7 +538,7 @@ class PettingzooRunner(Runner):
                 obs, share_obs, eval_rewards, dones, infos, available_actions = eval_env.step(actions_env)
 
                 _, obs = self._build_viz_mask(obs, infos, actions, self.n_eval_rollout_threads)
-                self._update_trajectory_buffer(eval_trajectory, obs, infos, actions, self.n_eval_rollout_threads)
+                self._update_trajectory_buffer(eval_trajectory, obs, infos, actions, self.n_eval_rollout_threads, share_obs=share_obs)
 
                 # Add prediction error to infos for logging.
                 infos[0]["prediction_error_mean"] = prediction_error.mean().item() if prediction_error is not None else 0.0
@@ -581,7 +596,7 @@ class PettingzooRunner(Runner):
             obs, share_obs, available_actions = render_env.reset()
             rnn_states = torch.zeros((self.n_render_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=torch.float32)
             masks = torch.ones((self.n_render_rollout_threads, self.num_agents, 1), dtype=torch.float32)
-            self._seed_trajectory_buffer(render_trajectory, obs, self.n_render_rollout_threads)
+            self._seed_trajectory_buffer(render_trajectory, obs, self.n_render_rollout_threads, share_obs=share_obs)
 
             if self.all_args.save_gifs:        
                 frames = []
@@ -638,7 +653,7 @@ class PettingzooRunner(Runner):
                 obs, share_obs, render_rewards, dones, infos, available_actions = render_env.step(actions_env)
 
                 _, obs = self._build_viz_mask(obs, infos, actions, self.n_render_rollout_threads)
-                self._update_trajectory_buffer(render_trajectory, obs, infos, actions, self.n_render_rollout_threads)
+                self._update_trajectory_buffer(render_trajectory, obs, infos, actions, self.n_render_rollout_threads, share_obs=share_obs)
 
                 reward_total += render_rewards[0].sum()
 
