@@ -239,7 +239,23 @@ class PettingzooEnv(object):
                 # Combine the visibility masks into a single tensor.
                 all_viz = np.array(all_viz, dtype=np.float32)
                 info["visibility_mask"] = all_viz
-        
+
+        if "visibility_mask_global" not in info:
+            all_viz = []
+            for a in self.env.possible_agents:
+                i = info[a]
+                if "visibility_mask_global" in i and i["visibility_mask_global"] is not None:
+                    viz = i["visibility_mask_global"]
+                    if self.flatten_observations_global:
+                        viz = flatten_mask(self.env.state_space, viz)
+                    all_viz.append(viz)
+                else:
+                    break
+            if all_viz:
+                # Combine the visibility masks into a single tensor.
+                all_viz = np.array(all_viz, dtype=np.float32)
+                info["visibility_mask_global"] = all_viz
+
         # Flatten the state visibility mask if needed.
         if "state_visibility_mask" in info and self.flatten_observations_global:
             svm = info["state_visibility_mask"]
