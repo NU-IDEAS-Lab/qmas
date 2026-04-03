@@ -52,8 +52,10 @@ class Predictor(torch.nn.Module):
         self.args = args
         self.device = device
 
-        # transition_dim = obs_dim + action_dim
-        transition_dim = obs_dim
+        if self.args.prediction_history_include_actions:
+            transition_dim = obs_dim + action_dim
+        else:
+            transition_dim = obs_dim
 
         self.prediction_horizon = args.prediction_history_window
 
