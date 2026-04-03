@@ -509,7 +509,7 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
                 target = global_obs_batch if global_obs_batch is not None else obs_batch
                 uncertainty_batch = torch.zeros_like(target)
 
-            if global_obs_batch is not None:
+            if global_obs_batch is not None and self.args.state_encoder:
                 global_obs_batch = torch.cat([global_obs_batch, uncertainty_batch], dim=-1)
             else:
                 obs_batch = torch.cat([obs_batch, uncertainty_batch], dim=-1)

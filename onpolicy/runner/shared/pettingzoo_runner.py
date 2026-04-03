@@ -215,7 +215,7 @@ class PettingzooRunner(Runner):
             
             # Inject uncertainty into the observation.
             if self.all_args.prediction_uq_injection_method == "append":
-                if global_obs is not None:
+                if global_obs is not None and self.all_args.state_encoder:
                     global_obs = torch.cat([global_obs, uncertainty_now], dim=-1)
                 elif obs.dtype == object:
                     raise ValueError("Must have observation_global in infos to use object-type observations (e.g. pyg graph observations). Check that environment is providing this information.")
@@ -225,7 +225,7 @@ class PettingzooRunner(Runner):
         # Handle case where UQ injection expected, but not yet available due to predictor not running.
         elif self.all_args.prediction_uq_injection_method == "append":
             uncertainty_now = None
-            if global_obs is not None:
+            if global_obs is not None and self.all_args.state_encoder:
                 uncertainty_now = torch.zeros_like(global_obs)
                 global_obs = torch.cat([global_obs, uncertainty_now], dim=-1)
             elif obs.dtype == object:
@@ -410,7 +410,7 @@ class PettingzooRunner(Runner):
         visibility_mask_global = np.array([info["visibility_mask_global"] for info in infos]) if "visibility_mask_global" in infos[0] else None
 
         # Select appropriate vectors to add to the trajectory buffer.
-        if observation_global is not None:
+        if observation_global is not None and self.all_args.state_encoder:
             traj_obs = observation_global
             traj_visibility_mask = visibility_mask_global
         elif obs.dtype == object:
