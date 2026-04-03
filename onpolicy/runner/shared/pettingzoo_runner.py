@@ -131,7 +131,7 @@ class PettingzooRunner(Runner):
 
     def warmup(self):
         # Reset environment.
-        obs, share_obs, available_actions = self.envs.reset()
+        obs, share_obs, available_actions, infos = self.envs.reset(return_info=True)
 
         # Get the shape of the action space.
         act_shape = get_shape_from_act_space(self.buffer.act_space)
@@ -145,6 +145,10 @@ class PettingzooRunner(Runner):
             action_log_prob_shape = (self.n_rollout_threads, self.num_agents, self.policy.actor.act.log_prob_dim)
         else:
             action_log_prob_shape = (self.n_rollout_threads, self.num_agents, 1)
+
+        observation_global = None
+        if "observation_global" in infos[0]:
+            observation_global = np.array([info["observation_global"] for info in infos])
 
         # Initialize buffer.
         self.buffer.insert(
@@ -162,7 +166,8 @@ class PettingzooRunner(Runner):
             rewards=np.zeros((self.n_rollout_threads, self.num_agents, 1), dtype=np.float32),
             masks=np.ones((self.n_rollout_threads, self.num_agents, 1), dtype=np.float32),
             delta_steps=np.ones((self.n_rollout_threads, self.num_agents, 1), dtype=np.int32),
-            available_actions=available_actions
+            available_actions=available_actions,
+            observation_global=observation_global,
         )
 
         # Reset and seed training trajectory buffer with the initial observations.
