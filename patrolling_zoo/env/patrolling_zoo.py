@@ -49,8 +49,12 @@ def add_args(parser):
                         help="number of steps between the periodic reward. -1 disables periodic reward")
     parser.add_argument("--agent_speed", type=float, default=10.0,
                         help="the speed of each agent")
-    parser.add_argument("--action_method", type=str, default="full", 
-                        help="the action method to use")
+    parser.add_argument("--action_method", type=str, default="full",
+                        choices=["full", "neighbors", "neighbors_with_comm_boolean"],
+                        help="the action method to use. 'neighbors_with_comm_boolean' extends "
+                             "'neighbors' with a binary communication-request action: agents "
+                             "may request a broadcast from all other agents, who respond by "
+                             "sharing their local observations.")
     parser.add_argument("--observe_method", type=str, default="adjacency", 
                         help="the observation method to use")
     parser.add_argument("--observe_method_global", type=str, default="", 
@@ -126,6 +130,7 @@ class PatrolAgent():
         self.currentAction = -1.0
         self.lastNode = self.startingNode
         self.lastNodeVisited = None
+        self.last_comm_request = False
      
 
 class parallel_env(ParallelEnv):
@@ -519,10 +524,10 @@ class parallel_env(ParallelEnv):
         return state
 
 
-    def observe(self, agent, radius=None, allow_done_agents=False):
+    def observe(self, agent, radius=None, allow_done_agents=False, senders=None):
         ''' Returns the observation for the given agent.'''
 
-        return self._populateStateSpace(self.observe_method, agent, radius, allow_done_agents)
+        return self._populateStateSpace(self.observe_method, agent, radius, allow_done_agents, senders=senders)
 
 
     def available_actions(self, agent):
@@ -531,7 +536,7 @@ class parallel_env(ParallelEnv):
         return self.available_actions_dict[agent]
 
 
-    def _populateStateSpace(self, observe_method, agent, radius, allow_done_agents, global_state=False):
+    def _populateStateSpace(self, observe_method, agent, radius, allow_done_agents, global_state=False, senders=None):
         ''' Returns a populated state/observation space.'''
 
         if radius == None:
@@ -555,6 +560,17 @@ class parallel_env(ParallelEnv):
                     if self._dist(self.pg.getNodePosition(v), a.position) <= radius:
                         if v not in vertices:
                             vertices.append(v)
+
+        # Request-based communication: include data broadcast by each responding agent.
+        if senders:
+            for a in senders:
+                if a in agentList:
+                    if a not in agents:
+                        agents.append(a)
+                    for v in self.pg.graph.nodes:
+                        if self._dist(self.pg.getNodePosition(v), a.position) <= a.observationRadius:
+                            if v not in vertices:
+                                vertices.append(v)
         
         agents = sorted(agents, key=lambda a: a.id)
         vertices = sorted(vertices)
@@ -816,11 +832,18 @@ class parallel_env(ParallelEnv):
                     self.dones[attrition_agent] = True
                     print(f"Agent {attrition_agent.id} has been removed from the environment at step {self.step_count}.")
 
+        # Track communication requests made this step: {requesting_agent: set_of_sender_agents}.
+        comms_requests = {}
+        info_dict["communication/requests_made"] = 0
+
         # Perform actions.
         for agent in self.agents:
             if agent in action_dict:
                 action = action_dict[agent]
-                action = int(action)
+
+                # Convert scalar actions to int; keep array actions (e.g. MultiDiscrete) as-is.
+                if self.action_method in ["full", "neighbors"]:
+                    action = int(action)
                 
                 # Check if the action is valid.
                 if not self.action_space(agent).contains(action):
@@ -831,6 +854,16 @@ class parallel_env(ParallelEnv):
                     agent.currentAction = action
                 else:
                     agent.currentAction = action[0]
+
+                # Handle communication request for neighbors_with_comm_boolean.
+                if self.action_method == "neighbors_with_comm_boolean":
+                    _, communicate = action
+                    agent.last_comm_request = bool(communicate == 1)
+                    if communicate == 1:
+                        senders = {other for other in self.agents if other is not agent}
+                        if senders:
+                            comms_requests[agent] = senders
+                            info_dict["communication/requests_made"] += 1
 
                 # Get the destination node.
                 dstNode = self.getDestinationNode(agent, action)
@@ -869,7 +902,8 @@ class parallel_env(ParallelEnv):
 
         # Perform observations.
         for agent in self.possible_agents:
-            obs, obs_mask = self.observe(agent)
+            senders = comms_requests.get(agent, None)
+            obs, obs_mask = self.observe(agent, senders=senders)
             obs_dict[agent] = obs
             info_dict[agent]["visibility_mask"] = obs_mask
             og, vmg = self._populateStateSpace(self.observe_method_global, agent, radius=None, allow_done_agents=False)
@@ -887,6 +921,9 @@ class parallel_env(ParallelEnv):
         info_dict["stddev_idleness"] = self.pg.getStdDevIdlenessTime(self.step_count)
         info_dict["worst_idleness"] = self.pg.getWorstIdlenessTime(self.step_count)
         info_dict["agent_count"] = len(self.agents)
+        info_dict["communication/request_rate"] = (
+            info_dict["communication/requests_made"] / max(len(self.agents), 1)
+        )
 
         # Check truncation conditions.
         if lastStep or (self.max_cycles >= 0 and self.step_count >= self.max_cycles):
