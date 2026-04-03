@@ -217,8 +217,9 @@ class PettingzooRunner(Runner):
             if self.all_args.prediction_uq_injection_method == "append":
                 if global_obs is not None:
                     global_obs = torch.cat([global_obs, uncertainty_now], dim=-1)
-                elif obs.dtype != object:  # Don't try to append to object-type observations (e.g. pyg graph observations)
-                # else:
+                elif obs.dtype == object:
+                    raise ValueError("Must have observation_global in infos to use object-type observations (e.g. pyg graph observations). Check that environment is providing this information.")
+                else:
                     obs = torch.cat([obs, uncertainty_now], dim=-1)
         
         # Handle case where UQ injection expected, but not yet available due to predictor not running.
@@ -227,8 +228,9 @@ class PettingzooRunner(Runner):
             if global_obs is not None:
                 uncertainty_now = torch.zeros_like(global_obs)
                 global_obs = torch.cat([global_obs, uncertainty_now], dim=-1)
-            elif obs.dtype != object:  # Don't try to append to object-type observations (e.g. pyg graph observations)
-            # else:
+            elif obs.dtype == object:
+                raise ValueError("Must have observation_global in infos to use object-type observations (e.g. pyg graph observations). Check that environment is providing this information.")
+            else:
                 uncertainty_now = torch.zeros_like(obs)
                 obs = torch.cat([obs, uncertainty_now], dim=-1)
 
