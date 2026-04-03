@@ -872,6 +872,9 @@ class parallel_env(ParallelEnv):
             obs, obs_mask = self.observe(agent)
             obs_dict[agent] = obs
             info_dict[agent]["visibility_mask"] = obs_mask
+            og, vmg = self._populateStateSpace(self.observe_method_global, agent, radius=None, allow_done_agents=False)
+            info_dict[agent]["observation_global"] = og
+            info_dict[agent]["visibility_mask_global"] = vmg
 
         # Add the state fixed mask. (Nothing is fixed.)
         _, state_visibility_mask = self._state()
