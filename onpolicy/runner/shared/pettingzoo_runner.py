@@ -323,13 +323,13 @@ class PettingzooRunner(Runner):
         )
 
         # Update the trajectory buffer with the new transition.
-        self._update_trajectory_buffer(
-            self.train_trajectory,
-            obs,
-            infos,
-            actions,
-            self.n_rollout_threads,
-            share_obs=share_obs
+        self._apply_masks_and_update_trajectory(
+            trajectory_buffer=self.train_trajectory,
+            obs=obs,
+            infos=infos,
+            actions=actions,
+            n_threads=self.n_rollout_threads,
+            global_obs=observation_global
         )
 
 
@@ -371,23 +371,55 @@ class PettingzooRunner(Runner):
                 else:
                     self.writter.add_scalars(k, {k: np.mean(v)}, total_num_steps)    
 
-    def _build_viz_mask(self, obs, infos, actions, n_threads):
-        """Build the combined visibility mask for observations (and optionally actions).
-        
-        Applies the observation mask to obs in-place when configured. Returns viz_mask.
-        """
-        viz_mask_obs = np.array([info["visibility_mask"] for info in infos]) if "visibility_mask" in infos[0] else np.ones_like(obs)
-        if self.all_args.observation_mask:
-            obs = obs * viz_mask_obs
+    def _apply_masks_and_update_trajectory(self, trajectory_buffer, obs, infos, actions, n_threads, global_obs=None):
+        """Apply visibility masks to observations, then add the masked transition to the trajectory buffer.
 
-        if self.all_args.prediction_history_include_actions:
-            viz_mask_actions = np.ones(actions.shape, dtype=np.float32)
-            viz_mask = np.concatenate(
-                [viz_mask_actions, viz_mask_obs.reshape(n_threads, self.num_agents, -1)], axis=-1
-            )
+        Both local obs (when not object-dtype) and global_obs are masked when
+        observation_mask is set. The trajectory buffer receives whichever observation
+        type is appropriate (global_obs when present, otherwise obs), along with its
+        matching visibility mask. Returns masked (obs, global_obs).
+        """
+        # Build visibility masks from infos.
+        viz_mask_local = np.array([info["visibility_mask"] for info in infos]) if "visibility_mask" in infos[0] else np.ones_like(obs)
+        viz_mask_global = np.array([info["visibility_mask_global"] for info in infos]) if "visibility_mask_global" in infos[0] else None
+
+        # Perform observation masking.
+        if self.all_args.observation_mask:
+            if obs.dtype != object:
+                obs = obs * viz_mask_local
+            if global_obs is not None and viz_mask_global is not None:
+                global_obs = global_obs * viz_mask_global
+
+        # Select which obs and visibility mask go into the trajectory buffer.
+        if global_obs is not None:
+            traj_obs = global_obs
+            traj_visibility_mask = viz_mask_global
+        elif obs.dtype == object:
+            raise ValueError("Must have observation_global in infos to use object-type observations (e.g. pyg graph observations). Check that environment is providing this information.")
         else:
-            viz_mask = viz_mask_obs.reshape(n_threads, self.num_agents, -1)
-        return viz_mask, obs
+            traj_obs = obs
+            traj_visibility_mask = viz_mask_local
+        assert traj_visibility_mask is not None, "Must have some form of visibility mask in infos to update trajectory buffer. Check that environment is providing this information."
+
+        # Concatenate actions if requested.
+        if self.all_args.prediction_history_include_actions:
+            actions = actions.detach().cpu()
+            traj_obs = np.concatenate([traj_obs, actions], axis=-1)
+            traj_visibility_mask = np.concatenate([traj_visibility_mask, np.ones_like(actions, dtype=np.float32)], axis=-1)
+
+        # Reshape to match expected input shape of trajectory buffer (T*N, ...).
+        traj_obs = einops.rearrange(traj_obs, "t n ... -> (t n) ...")
+        traj_visibility_mask = einops.rearrange(traj_visibility_mask, "t n ... -> (t n) ...")
+        traj_actions = einops.rearrange(actions.detach().cpu(), "t n ... -> (t n) ...")
+
+        # Add to the buffer.
+        trajectory_buffer.add(
+            obs=torch.from_numpy(traj_obs).to(self.device),
+            visibility_mask=torch.from_numpy(traj_visibility_mask).to(self.device),
+            action=traj_actions.to(self.device),
+        )
+
+        return obs, global_obs
 
     def _seed_trajectory_buffer(self, trajectory_buffer, obs, n_threads, share_obs=None):
         # _obs = share_obs if (obs.dtype == object and share_obs is not None) else obs
@@ -406,34 +438,6 @@ class PettingzooRunner(Runner):
         #     visibility_mask=torch.from_numpy(traj_visibility_mask).to(self.device),
         #     action=traj_actions,
         # )
-
-    def _update_trajectory_buffer(self, trajectory_buffer, obs, infos, actions, n_threads, share_obs=None):
-        # Get data from infos.
-        observation_global = np.array([info["observation_global"] for info in infos]) if "observation_global" in infos[0] else None
-        state_visibility_mask = np.array([info["state_visibility_mask"] for info in infos]) if "state_visibility_mask" in infos[0] else None
-        visibility_mask = np.array([info["visibility_mask"] for info in infos]) if "visibility_mask" in infos[0] else None
-        visibility_mask_global = np.array([info["visibility_mask_global"] for info in infos]) if "visibility_mask_global" in infos[0] else None
-
-        # Select appropriate vectors to add to the trajectory buffer.
-        if observation_global is not None:
-            traj_obs = observation_global
-            traj_visibility_mask = visibility_mask_global
-        elif obs.dtype == object:
-            raise ValueError("Must have observation_global in infos to use object-type observations (e.g. pyg graph observations). Check that environment is providing this information.")
-        else:
-            traj_obs = obs
-            traj_visibility_mask = visibility_mask
-        assert traj_visibility_mask is not None, "Must have some form of visibility mask in infos to update trajectory buffer. Check that environment is providing this information."
-
-        traj_obs = einops.rearrange(traj_obs, "t n ... -> (t n) ...")
-        traj_visibility_mask = einops.rearrange(traj_visibility_mask, "t n ... -> (t n) ...")
-        traj_actions = einops.rearrange(actions.detach().cpu(), "t n ... -> (t n) ...")
-
-        trajectory_buffer.add(
-            obs=torch.from_numpy(traj_obs).to(self.device),
-            visibility_mask=torch.from_numpy(traj_visibility_mask).to(self.device),
-            action=traj_actions.to(self.device),
-        )
 
     def _compute_predictions(self, trajectory_buffer, prediction_prev, n_threads, obs_shape):
         use_prediction = (
@@ -570,9 +574,17 @@ class PettingzooRunner(Runner):
 
                 obs, share_obs, rewards, dones, infos, available_actions = env.step(actions_env)
 
-                _, obs = self._build_viz_mask(obs, infos, actions, rollout_threads)
+                observation_global = np.array([info["observation_global"] for info in infos]) if "observation_global" in infos[0] else None
                 if hasattr(self.policy, "predictors") and not self.all_args.prediction_disable:
-                    self._update_trajectory_buffer(trajectory, obs, infos, actions, rollout_threads, share_obs=share_obs)
+                    obs, observation_global = self._apply_masks_and_update_trajectory(trajectory, obs, infos, actions, rollout_threads, global_obs=observation_global)
+                else:
+                    if self.all_args.observation_mask:
+                        viz_mask_local = np.array([info["visibility_mask"] for info in infos]) if "visibility_mask" in infos[0] else np.ones_like(obs)
+                        viz_mask_global = np.array([info["visibility_mask_global"] for info in infos]) if "visibility_mask_global" in infos[0] else None
+                        if obs.dtype != object:
+                            obs = obs * viz_mask_local
+                        if observation_global is not None and viz_mask_global is not None:
+                            observation_global = observation_global * viz_mask_global
 
                 # Add prediction error to infos for logging.
                 infos[0]["prediction_error_mean"] = prediction_error.mean().item() if prediction_error is not None else 0.0
@@ -707,9 +719,17 @@ class PettingzooRunner(Runner):
 
                 obs, share_obs, rewards, dones, infos, available_actions = env.step(actions_env)
 
-                _, obs = self._build_viz_mask(obs, infos, actions, rollout_threads)
+                observation_global = np.array([info["observation_global"] for info in infos]) if "observation_global" in infos[0] else None
                 if hasattr(self.policy, "predictors") and not self.all_args.prediction_disable:
-                    self._update_trajectory_buffer(trajectory, obs, infos, actions, rollout_threads, share_obs=share_obs)
+                    obs, observation_global = self._apply_masks_and_update_trajectory(trajectory, obs, infos, actions, rollout_threads, global_obs=observation_global)
+                else:
+                    if self.all_args.observation_mask:
+                        viz_mask_local = np.array([info["visibility_mask"] for info in infos]) if "visibility_mask" in infos[0] else np.ones_like(obs)
+                        viz_mask_global = np.array([info["visibility_mask_global"] for info in infos]) if "visibility_mask_global" in infos[0] else None
+                        if obs.dtype != object:
+                            obs = obs * viz_mask_local
+                        if observation_global is not None and viz_mask_global is not None:
+                            observation_global = observation_global * viz_mask_global
 
                 reward_total += rewards[0].sum()
 
