@@ -532,10 +532,6 @@ class PettingzooRunner(Runner):
                 if use_prediction:
                     prediction_now = prediction[:, -1]
                     uncertainty_now = uncertainty[:, -1]
-
-                    for agentIdx in range(self.num_agents):
-                        print(f"Mean Prediction Error ({agentIdx}): {prediction_error.mean():.2f}")
-                        # print(f"Mean Trajectory Prediction Error ({agentIdx}): {prediction_error.mean():.2f}")
                 else:
                     prediction_now = None
                     uncertainty_now = torch.zeros((rollout_threads, self.num_agents, *obs_shape), dtype=torch.float32)
