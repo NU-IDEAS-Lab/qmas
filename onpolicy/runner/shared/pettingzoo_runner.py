@@ -484,22 +484,34 @@ class PettingzooRunner(Runner):
         for key, value in config_dict.items():
             log_exp.attrs[key] = value
 
-        eval_env = self.envs
+        env = self.envs
+        episodes = self.all_args.eval_episodes
+        rollout_threads = self.n_eval_rollout_threads
 
         self.trainer.prep_rollout()
 
+        # Call the reset function to determine whether this environment returns global observations.
+        obs, share_obs, available_actions, infos = env.reset(return_info=True)
+                
+        # Get shape of observation space.
+        if "observation_global" in infos[0]:
+            obs_shape = get_shape_from_obs_space(self.buffer.share_obs_space)
+        else:
         obs_shape = get_shape_from_obs_space(self.buffer.obs_space)
-        eval_trajectory = TrajectoryBuffer(
+
+        # Set up the trajectory buffer for prediction.
+        trajectory = TrajectoryBuffer(
             history_length=self.all_args.prediction_history_window,
             transition_includes_actions=self.all_args.prediction_history_include_actions,
         )
 
         prediction_prev = None  # For autoregression
-        for i_episode in range(self.all_args.eval_episodes):
-            obs, share_obs, available_actions = eval_env.reset()
-            rnn_states = torch.zeros((self.n_eval_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=torch.float32)
-            masks = torch.ones((self.n_eval_rollout_threads, self.num_agents, 1), dtype=torch.float32)
-            self._seed_trajectory_buffer(eval_trajectory, obs, self.n_eval_rollout_threads, share_obs=share_obs)
+        for i_episode in range(episodes):
+            # Reset the environment and get the initial observations.
+            obs, share_obs, available_actions = env.reset()
+            rnn_states = torch.zeros((rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=torch.float32)
+            masks = torch.ones((rollout_threads, self.num_agents, 1), dtype=torch.float32)
+            self._seed_trajectory_buffer(trajectory, obs, rollout_threads, share_obs=share_obs)
 
             dones = False
             j = -1
@@ -511,120 +523,9 @@ class PettingzooRunner(Runner):
                     aa = None
 
                 prediction, uncertainty, prediction_prev, prediction_error, use_prediction = self._compute_predictions(
-                    eval_trajectory,
-                    prediction_prev,
-                    self.n_eval_rollout_threads,
-                    obs_shape,
-                )
-
-                if use_prediction:
-                    obs_policy = einops.rearrange(prediction[:, -1], "(t n) ... -> (t n) ...", t=self.n_eval_rollout_threads, n=self.num_agents)
-                    uncertainty_now = uncertainty[:, -1].reshape((self.n_eval_rollout_threads, self.num_agents, *obs_shape))
-                else:
-                    obs_policy = torch.from_numpy(einops.rearrange(obs, "t n ... -> (t n) ...")).float()
-                    uncertainty_now = torch.zeros((self.n_eval_rollout_threads, self.num_agents, *obs_shape), dtype=torch.float32)
-
-                actions, rnn_states = self.trainer.policy.act(
-                    obs_policy,
-                    rnn_states,
-                    masks,
-                    deterministic=False,
-                    available_actions=aa
-                )
-
-                actions = actions.detach().cpu().reshape((self.n_eval_rollout_threads, self.num_agents, *actions.shape[1:]))
-                rnn_states = rnn_states.detach()
-                actions_env = [actions[idx, :, :].numpy() for idx in range(self.n_eval_rollout_threads)]
-
-                obs, share_obs, eval_rewards, dones, infos, available_actions = eval_env.step(actions_env)
-
-                _, obs = self._build_viz_mask(obs, infos, actions, self.n_eval_rollout_threads)
-                if hasattr(self.policy, "predictors") and not self.all_args.prediction_disable:
-                    self._update_trajectory_buffer(eval_trajectory, obs, infos, actions, self.n_eval_rollout_threads, share_obs=share_obs)
-
-                # Add prediction error to infos for logging.
-                infos[0]["prediction_error_mean"] = prediction_error.mean().item() if prediction_error is not None else 0.0
-                infos[0]["prediction_trajectory_error_mean"] = prediction_error.mean().item() if prediction_error is not None else 0.0
-
-                # Add uncertainty to infos for logging.
-                infos[0]["prediction_uncertainty_mean"] = uncertainty_now.mean().item()
-                if prediction_error is not None:
-                    uncertainty_gap = uncertainty_now - prediction_error
-                    infos[0]["prediction_uncertainty_gap_mean"] = uncertainty_gap.mean().item()
-                    infos[0]["prediction_uncertainty_gap_min"] = uncertainty_gap.min().item()
-                    infos[0]["prediction_uncertainty_gap_max"] = uncertainty_gap.max().item()
-                else:
-                    infos[0]["prediction_uncertainty_gap_mean"] = 0.0
-                    infos[0]["prediction_uncertainty_gap_min"] = 0.0
-                    infos[0]["prediction_uncertainty_gap_max"] = 0.0
-
-                # Log information.
-                for key in infos[0].keys():
-                    if type(key) == str:
-                        array = log_exp.require_dataset(
-                            key,
-                            shape=(
-                                self.all_args.eval_episodes,
-                                self.all_args.episode_length,
-                                *np.array(infos[0][key]).shape
-                            ),
-                            dtype=np.float32,
-                            fill_value=0.0,
-                        )
-                        array[i_episode, j] = np.array(infos[0][key])
-
-
-    @torch.no_grad()
-    def render(self, ipython_clear_output=True):        
-
-        if ipython_clear_output:
-            from IPython.display import clear_output
-
-        render_env = self.envs
-
-        self.trainer.prep_rollout()
-
-        # Call the reset function to determine whether this environment returns global observations.
-        obs, share_obs, available_actions, infos = render_env.reset(return_info=True)
-                
-        # Get shape of observation space.
-        if "observation_global" in infos[0]:
-            obs_shape = get_shape_from_obs_space(self.buffer.share_obs_space)
-        else:
-            obs_shape = get_shape_from_obs_space(self.buffer.obs_space)
-
-        # Set up the trajectory buffer for prediction.
-        trajectory = TrajectoryBuffer(
-            history_length=self.all_args.prediction_history_window,
-            transition_includes_actions=self.all_args.prediction_history_include_actions,
-        )
-
-        prediction_prev = None  # For autoregression
-        for i_episode in range(self.all_args.render_episodes):
-            # Reset the environment and get the initial observations.
-            obs, share_obs, available_actions = render_env.reset()
-            rnn_states = torch.zeros((self.n_render_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=torch.float32)
-            masks = torch.ones((self.n_render_rollout_threads, self.num_agents, 1), dtype=torch.float32)
-            self._seed_trajectory_buffer(trajectory, obs, self.n_render_rollout_threads, share_obs=share_obs)
-
-            if self.all_args.save_gifs:        
-                frames = []
-                image = self.envs.envs[0].env.unwrapped.observation()[0]["frame"]
-                frames.append(image)
-
-            dones = False
-            reward_total = 0.0
-            while not np.all(dones):
-                time_start = time.time()
-
-                aa = np.concatenate(available_actions)
-                if np.any(aa == None):
-                    aa = None
-
-                prediction, uncertainty, prediction_prev, prediction_error, use_prediction = self._compute_predictions(
                     trajectory,
                     prediction_prev,
-                    self.n_render_rollout_threads,
+                    rollout_threads,
                     obs_shape,
                 )
 
@@ -637,7 +538,7 @@ class PettingzooRunner(Runner):
                         # print(f"Mean Trajectory Prediction Error ({agentIdx}): {prediction_error.mean():.2f}")
                 else:
                     prediction_now = None
-                    uncertainty_now = torch.zeros((self.n_render_rollout_threads, self.num_agents, *obs_shape), dtype=torch.float32)
+                    uncertainty_now = torch.zeros((rollout_threads, self.num_agents, *obs_shape), dtype=torch.float32)
 
                 # Reshape obs from [n_threads, n_agents, obs_dim] to [n_threads*n_agents, obs_dim]
                 # to match the format expected by the policy (same as buffer.compatibility_get_policy_input).
@@ -667,17 +568,154 @@ class PettingzooRunner(Runner):
 
                 # Prepare the actions for the environment.
                 # [n_envs*n_agents, ...] -> [n_envs, n_agents, ...]
-                actions = actions.detach().cpu().reshape((self.n_render_rollout_threads, self.num_agents, *actions.shape[1:]))
+                actions = actions.detach().cpu().reshape((rollout_threads, self.num_agents, *actions.shape[1:]))
                 rnn_states = rnn_states.detach()
-                actions_env = [actions[idx, :, :].numpy() for idx in range(self.n_render_rollout_threads)]
+                actions_env = [actions[idx, :, :].numpy() for idx in range(rollout_threads)]
 
-                obs, share_obs, render_rewards, dones, infos, available_actions = render_env.step(actions_env)
+                obs, share_obs, rewards, dones, infos, available_actions = env.step(actions_env)
 
-                _, obs = self._build_viz_mask(obs, infos, actions, self.n_render_rollout_threads)
+                _, obs = self._build_viz_mask(obs, infos, actions, rollout_threads)
                 if hasattr(self.policy, "predictors") and not self.all_args.prediction_disable:
-                    self._update_trajectory_buffer(trajectory, obs, infos, actions, self.n_render_rollout_threads, share_obs=share_obs)
+                    self._update_trajectory_buffer(trajectory, obs, infos, actions, rollout_threads, share_obs=share_obs)
 
-                reward_total += render_rewards[0].sum()
+                # Add prediction error to infos for logging.
+                infos[0]["prediction_error_mean"] = prediction_error.mean().item() if prediction_error is not None else 0.0
+                infos[0]["prediction_trajectory_error_mean"] = prediction_error.mean().item() if prediction_error is not None else 0.0
+
+                # Add uncertainty to infos for logging.
+                infos[0]["prediction_uncertainty_mean"] = uncertainty_now.mean().item()
+                if prediction_error is not None:
+                    uncertainty_gap = uncertainty_now - prediction_error
+                    infos[0]["prediction_uncertainty_gap_mean"] = uncertainty_gap.mean().item()
+                    infos[0]["prediction_uncertainty_gap_min"] = uncertainty_gap.min().item()
+                    infos[0]["prediction_uncertainty_gap_max"] = uncertainty_gap.max().item()
+                else:
+                    infos[0]["prediction_uncertainty_gap_mean"] = 0.0
+                    infos[0]["prediction_uncertainty_gap_min"] = 0.0
+                    infos[0]["prediction_uncertainty_gap_max"] = 0.0
+
+                # Log information.
+                for key in infos[0].keys():
+                    if type(key) == str:
+                        array = log_exp.require_dataset(
+                            key,
+                            shape=(
+                                episodes,
+                                self.all_args.episode_length,
+                                *np.array(infos[0][key]).shape
+                            ),
+                            dtype=np.float32,
+                            fill_value=0.0,
+                        )
+                        array[i_episode, j] = np.array(infos[0][key])
+
+
+    @torch.no_grad()
+    def render(self, ipython_clear_output=True):        
+
+        if ipython_clear_output:
+            from IPython.display import clear_output
+
+        env = self.envs
+        episodes = self.all_args.render_episodes
+        rollout_threads = self.n_render_rollout_threads
+
+        self.trainer.prep_rollout()
+
+        # Call the reset function to determine whether this environment returns global observations.
+        obs, share_obs, available_actions, infos = env.reset(return_info=True)
+                
+        # Get shape of observation space.
+        if "observation_global" in infos[0]:
+            obs_shape = get_shape_from_obs_space(self.buffer.share_obs_space)
+        else:
+            obs_shape = get_shape_from_obs_space(self.buffer.obs_space)
+
+        # Set up the trajectory buffer for prediction.
+        trajectory = TrajectoryBuffer(
+            history_length=self.all_args.prediction_history_window,
+            transition_includes_actions=self.all_args.prediction_history_include_actions,
+        )
+
+        prediction_prev = None  # For autoregression
+        for i_episode in range(episodes):
+            # Reset the environment and get the initial observations.
+            obs, share_obs, available_actions = env.reset()
+            rnn_states = torch.zeros((rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=torch.float32)
+            masks = torch.ones((rollout_threads, self.num_agents, 1), dtype=torch.float32)
+            self._seed_trajectory_buffer(trajectory, obs, rollout_threads, share_obs=share_obs)
+
+            if self.all_args.save_gifs:        
+                frames = []
+                image = self.envs.envs[0].env.unwrapped.observation()[0]["frame"]
+                frames.append(image)
+
+            dones = False
+            reward_total = 0.0
+            while not np.all(dones):
+                time_start = time.time()
+
+                aa = np.concatenate(available_actions)
+                if np.any(aa == None):
+                    aa = None
+
+                prediction, uncertainty, prediction_prev, prediction_error, use_prediction = self._compute_predictions(
+                    trajectory,
+                    prediction_prev,
+                    rollout_threads,
+                    obs_shape,
+                )
+
+                if use_prediction:
+                    prediction_now = prediction[:, -1]
+                    uncertainty_now = uncertainty[:, -1]
+
+                    for agentIdx in range(self.num_agents):
+                        print(f"Mean Prediction Error ({agentIdx}): {prediction_error.mean():.2f}")
+                        # print(f"Mean Trajectory Prediction Error ({agentIdx}): {prediction_error.mean():.2f}")
+                else:
+                    prediction_now = None
+                    uncertainty_now = torch.zeros((rollout_threads, self.num_agents, *obs_shape), dtype=torch.float32)
+
+                # Reshape obs from [n_threads, n_agents, obs_dim] to [n_threads*n_agents, obs_dim]
+                # to match the format expected by the policy (same as buffer.compatibility_get_policy_input).
+                if obs.dtype == object:
+                    obs_policy = obs.reshape(-1, *obs.shape[-1:])
+                else:
+                    obs_policy = torch.from_numpy(obs.reshape(-1, *obs.shape[2:])).float()
+
+                if self.all_args.state_encoder and use_prediction:
+                    global_obs = prediction_now
+                else:
+                    global_obs = None
+                    # For GNN envs (object-dtype obs), the prediction cannot replace the graph obs directly.
+                    # The prediction (from observation_global) can only feed the state encoder.
+                    if use_prediction and obs.dtype != object:
+                        obs_policy = prediction_now
+
+
+                actions, rnn_states = self.trainer.policy.act(
+                    obs_policy,
+                    rnn_states,
+                    masks,
+                    deterministic=False,
+                    available_actions=aa,
+                    global_obs=global_obs
+                )
+
+                # Prepare the actions for the environment.
+                # [n_envs*n_agents, ...] -> [n_envs, n_agents, ...]
+                actions = actions.detach().cpu().reshape((rollout_threads, self.num_agents, *actions.shape[1:]))
+                rnn_states = rnn_states.detach()
+                actions_env = [actions[idx, :, :].numpy() for idx in range(rollout_threads)]
+
+                obs, share_obs, rewards, dones, infos, available_actions = env.step(actions_env)
+
+                _, obs = self._build_viz_mask(obs, infos, actions, rollout_threads)
+                if hasattr(self.policy, "predictors") and not self.all_args.prediction_disable:
+                    self._update_trajectory_buffer(trajectory, obs, infos, actions, rollout_threads, share_obs=share_obs)
+
+                reward_total += rewards[0].sum()
 
                 time_stop = time.time()
 
@@ -685,7 +723,7 @@ class PettingzooRunner(Runner):
                 if ipython_clear_output:
                     clear_output(wait = True)
                 spf = prediction_now if use_prediction else None
-                render_env.envs[0].env.render(spf, history_length=self.all_args.prediction_history_window, uncertainty=uncertainty_now)
+                env.envs[0].env.render(spf, history_length=self.all_args.prediction_history_window, uncertainty=uncertainty_now)
 
                 # append frame
                 if self.all_args.save_gifs:        
@@ -693,7 +731,7 @@ class PettingzooRunner(Runner):
                     frames.append(image)
                 
                 # Print the FPS information.
-                print(f"Step {render_env.envs[0].env.step_count} - FPS: {1 / (time_stop - time_start):.2f} (excluding render) - Reward Total: {reward_total:.2f}")
+                print(f"Step {env.envs[0].env.step_count} - FPS: {1 / (time_stop - time_start):.2f} (excluding render) - Reward Total: {reward_total:.2f}")
 
             # save gif
             if self.all_args.save_gifs:
