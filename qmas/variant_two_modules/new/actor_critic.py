@@ -242,10 +242,13 @@ class QmasActor(nn.Module):
 
         # Handle global observation.
         if self._use_state_encoder:
-            if global_obs == None:
+            if global_obs is None:
                 # If no global state is provided, use zeros.
                 batch_size = obs.shape[0]
-                encoded_state = torch.zeros((batch_size, self.args.state_encoder_output_dim), device=obs.device)
+                encoded_state = torch.zeros(
+                    (batch_size, self.args.state_encoder_output_dim),
+                    device=self.device,
+                )
             else:
                 global_obs = check(global_obs).to(**self.tpdv)
                 # Encode the global state
@@ -359,10 +362,13 @@ class QmasActor(nn.Module):
 
         # Handle global observation.
         if self._use_state_encoder:
-            if global_obs == None:
+            if global_obs is None:
                 # If no global state is provided, use zeros.
                 batch_size = obs.shape[0]
-                encoded_state = torch.zeros((batch_size, self.args.state_encoder_output_dim), device=obs.device)
+                encoded_state = torch.zeros(
+                    (batch_size, self.args.state_encoder_output_dim),
+                    device=self.device,
+                )
             else:
                 # Encode the global state
                 encoded_state = self.state_encoder(global_obs)

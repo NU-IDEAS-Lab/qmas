@@ -471,6 +471,43 @@ class PettingzooRunner(Runner):
 
         return pred, uncertainty, prediction_prev, prediction_error, True
 
+    def _get_prediction_obs_shape(self, obs, share_obs, infos):
+        """Infer the tensor shape used by the predictor for the current rollout."""
+        if infos and "observation_global" in infos[0] and self.all_args.state_encoder:
+            obs_global = np.array(infos[0]["observation_global"])
+            return obs_global.shape[1:] if obs_global.ndim >= 2 else obs_global.shape
+        if isinstance(obs, np.ndarray) and obs.dtype != object:
+            return obs.shape[2:] if obs.ndim >= 3 else obs.shape[1:]
+        if share_obs is not None:
+            share_obs = np.array(share_obs)
+            return share_obs.shape[2:] if share_obs.ndim >= 3 else share_obs.shape[1:]
+        raise ValueError("Unable to infer predictor observation shape for render/eval.")
+
+    def _format_policy_obs(self, obs):
+        """Match the policy input layout used by the replay buffer."""
+        if isinstance(obs, np.ndarray) and obs.dtype != object:
+            return torch.from_numpy(einops.rearrange(obs, "t n ... -> (t n) ...")).float()
+
+        if isinstance(obs, np.ndarray) and obs.dtype == object:
+            if obs.ndim >= 3:
+                return obs.reshape(-1, obs.shape[-1])
+            if obs.ndim == 2 and obs.shape[-1] > 1:
+                return obs.reshape(-1, obs.shape[-1])
+
+        flat_obs = obs.reshape(-1)
+        if flat_obs.shape[0] == 0:
+            return flat_obs
+        if isinstance(flat_obs[0], dict):
+            return np.array([list(item.values()) for item in flat_obs], dtype=object)
+        return flat_obs
+
+    def _format_policy_global_obs(self, infos):
+        """Build the per-agent global observation input expected by the state encoder."""
+        if not infos or "observation_global" not in infos[0]:
+            return None
+        global_obs = np.array([info["observation_global"] for info in infos])
+        return torch.from_numpy(global_obs.reshape(-1, *global_obs.shape[2:])).float()
+
     @torch.no_grad()
     def eval(self):
         log_root = zarr.open_group(self.all_args.eval_output_file, mode="a")
@@ -488,7 +525,6 @@ class PettingzooRunner(Runner):
 
         self.trainer.prep_rollout()
 
-        obs_shape = get_shape_from_obs_space(self.buffer.obs_space)
         eval_trajectory = TrajectoryBuffer(
             history_length=self.all_args.prediction_history_window,
             transition_includes_actions=self.all_args.prediction_history_include_actions,
@@ -496,7 +532,8 @@ class PettingzooRunner(Runner):
 
         prediction_prev = None  # For autoregression
         for i_episode in range(self.all_args.eval_episodes):
-            obs, share_obs, available_actions = eval_env.reset()
+            obs, share_obs, available_actions, infos = eval_env.reset(return_info=True)
+            obs_shape = self._get_prediction_obs_shape(obs, share_obs, infos)
             rnn_states = torch.zeros((self.n_eval_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=torch.float32)
             masks = torch.ones((self.n_eval_rollout_threads, self.num_agents, 1), dtype=torch.float32)
             self._seed_trajectory_buffer(eval_trajectory, obs, self.n_eval_rollout_threads, share_obs=share_obs)
@@ -517,10 +554,14 @@ class PettingzooRunner(Runner):
                     obs_shape,
                 )
 
-                obs_policy = torch.from_numpy(einops.rearrange(obs, "t n ... -> (t n) ...")).float()
+                obs_policy = self._format_policy_obs(obs)
+                global_obs_policy = self._format_policy_global_obs(infos)
                 uncertainty_now = torch.zeros((self.n_eval_rollout_threads, self.num_agents, *obs_shape), dtype=torch.float32)
                 if use_prediction:
-                    obs_policy = einops.rearrange(prediction[:, -1], "(t n) ... -> (t n) ...", t=self.n_eval_rollout_threads, n=self.num_agents)
+                    if global_obs_policy is not None and self.all_args.state_encoder:
+                        global_obs_policy = einops.rearrange(prediction[:, -1], "(t n) ... -> (t n) ...", t=self.n_eval_rollout_threads, n=self.num_agents)
+                    else:
+                        obs_policy = einops.rearrange(prediction[:, -1], "(t n) ... -> (t n) ...", t=self.n_eval_rollout_threads, n=self.num_agents)
                     uncertainty_now = uncertainty[:, -1].reshape((self.n_eval_rollout_threads, self.num_agents, *obs_shape))
 
                 actions, rnn_states = self.trainer.policy.act(
@@ -528,7 +569,8 @@ class PettingzooRunner(Runner):
                     rnn_states,
                     masks,
                     deterministic=False,
-                    available_actions=aa
+                    available_actions=aa,
+                    global_obs=global_obs_policy
                 )
 
                 actions = actions.detach().cpu().reshape((self.n_eval_rollout_threads, self.num_agents, *actions.shape[1:]))
@@ -583,7 +625,6 @@ class PettingzooRunner(Runner):
         self.trainer.prep_rollout()
                 
         # Get shape of observation space.
-        obs_shape = get_shape_from_obs_space(self.buffer.obs_space)
         HISTORY_LENGTH = self.all_args.prediction_history_window
         render_trajectory = TrajectoryBuffer(
             history_length=self.all_args.prediction_history_window,
@@ -593,7 +634,8 @@ class PettingzooRunner(Runner):
         prediction_prev = None  # For autoregression
         for i_episode in range(self.all_args.render_episodes):
             # Reset the environment and get the initial observations.
-            obs, share_obs, available_actions = render_env.reset()
+            obs, share_obs, available_actions, infos = render_env.reset(return_info=True)
+            obs_shape = self._get_prediction_obs_shape(obs, share_obs, infos)
             rnn_states = torch.zeros((self.n_render_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=torch.float32)
             masks = torch.ones((self.n_render_rollout_threads, self.num_agents, 1), dtype=torch.float32)
             self._seed_trajectory_buffer(render_trajectory, obs, self.n_render_rollout_threads, share_obs=share_obs)
@@ -624,11 +666,15 @@ class PettingzooRunner(Runner):
                         print(f"Mean Prediction Error ({agentIdx}): {prediction_error.mean():.2f}")
                         print(f"Mean Trajectory Prediction Error ({agentIdx}): {prediction_error.mean():.2f}")
 
-                obs_policy = torch.from_numpy(einops.rearrange(obs, "t n ... -> (t n) ...")).float()
+                obs_policy = self._format_policy_obs(obs)
+                global_obs_policy = self._format_policy_global_obs(infos)
                 prediction_render = None
                 uncertainty_render = None
                 if use_prediction:
-                    obs_policy = einops.rearrange(prediction[:, -1], "(t n) ... -> (t n) ...", t=self.n_render_rollout_threads, n=self.num_agents)
+                    if global_obs_policy is not None and self.all_args.state_encoder:
+                        global_obs_policy = einops.rearrange(prediction[:, -1], "(t n) ... -> (t n) ...", t=self.n_render_rollout_threads, n=self.num_agents)
+                    else:
+                        obs_policy = einops.rearrange(prediction[:, -1], "(t n) ... -> (t n) ...", t=self.n_render_rollout_threads, n=self.num_agents)
                     prediction_render = prediction[:, :, :].reshape((self.n_render_rollout_threads, self.num_agents, HISTORY_LENGTH, *obs_shape))[0].transpose(0, 1)
                     uncertainty_render = uncertainty[:, :, :].reshape((self.n_render_rollout_threads, self.num_agents, HISTORY_LENGTH, *obs_shape))[0].transpose(0, 1)
 
@@ -638,7 +684,7 @@ class PettingzooRunner(Runner):
                     masks,
                     deterministic=False,
                     available_actions=aa,
-                    global_obs=prediction_render
+                    global_obs=global_obs_policy
                 )
 
                 # Prepare the actions for the environment.
