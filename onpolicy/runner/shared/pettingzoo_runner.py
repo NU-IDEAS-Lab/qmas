@@ -497,7 +497,7 @@ class PettingzooRunner(Runner):
         if "observation_global" in infos[0]:
             obs_shape = get_shape_from_obs_space(self.buffer.share_obs_space)
         else:
-        obs_shape = get_shape_from_obs_space(self.buffer.obs_space)
+            obs_shape = get_shape_from_obs_space(self.buffer.obs_space)
 
         # Set up the trajectory buffer for prediction.
         trajectory = TrajectoryBuffer(
