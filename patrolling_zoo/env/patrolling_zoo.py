@@ -456,16 +456,26 @@ class parallel_env(ParallelEnv):
             plt.plot([], [], color=color, marker=marker, linestyle='None', label=agent.name, alpha=0.5)
 
         # Draw the predicted agent positions if provided.
-        if predicted_positions is not None:
+        # Only supported for adjacency-type state spaces that have named agent positions.
+        _prediction_supported = (
+            predicted_positions is not None
+            and isinstance(self.state_space, spaces.Dict)
+            and "agent_graph_position" in self.state_space.spaces
+        )
+        if _prediction_supported:
             pred_unflattened = []
             pred_steps = predicted_positions.shape[0]
             # for j in range(pred_steps): ### TEMP: We only care about the last step.
             for j in range(pred_steps - 1, pred_steps):
-                p = spaces.unflatten(self.observation_spaces, predicted_positions[j].flatten())
+                pred_j = predicted_positions[j]
+                if hasattr(pred_j, 'numpy'):
+                    pred_j = pred_j.numpy()
+                p = spaces.unflatten(self.state_space, pred_j.flatten())
                 pred_unflattened.append(p)
 
             # Plot history of predictions from the perspective of agent 0.
-            agent_preds = pred_unflattened[-1][self.possible_agents[0]]
+            # state_space obs is a single-agent view (not keyed by agent at the top level).
+            agent_preds = pred_unflattened[-1]
             graph_pos = agent_preds["agent_graph_position"]
             pos = nx.get_node_attributes(self.pg.graph, "pos")
 

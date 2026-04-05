@@ -220,7 +220,7 @@ class PettingzooRunner(Runner):
             
             # Inject uncertainty into the observation.
             if self.all_args.prediction_uq_injection_method == "append":
-                if global_obs is not None and self.all_args.state_encoder:
+                if global_obs is not None:
                     global_obs = torch.cat([global_obs, uncertainty_now], dim=-1)
                 elif obs.dtype == object:
                     raise ValueError("Must have observation_global in infos to use object-type observations (e.g. pyg graph observations). Check that environment is providing this information.")
@@ -230,7 +230,7 @@ class PettingzooRunner(Runner):
         # Handle case where UQ injection expected, but not yet available due to predictor not running.
         elif self.all_args.prediction_uq_injection_method == "append":
             uncertainty_now = None
-            if global_obs is not None and self.all_args.state_encoder:
+            if global_obs is not None:
                 uncertainty_now = torch.zeros_like(global_obs)
                 global_obs = torch.cat([global_obs, uncertainty_now], dim=-1)
             elif obs.dtype == object:
@@ -415,7 +415,7 @@ class PettingzooRunner(Runner):
         visibility_mask_global = np.array([info["visibility_mask_global"] for info in infos]) if "visibility_mask_global" in infos[0] else None
 
         # Select appropriate vectors to add to the trajectory buffer.
-        if observation_global is not None and self.all_args.state_encoder:
+        if observation_global is not None:
             traj_obs = observation_global
             traj_visibility_mask = visibility_mask_global
         elif obs.dtype == object:
@@ -517,11 +517,12 @@ class PettingzooRunner(Runner):
                     obs_shape,
                 )
 
-                obs_policy = torch.from_numpy(einops.rearrange(obs, "t n ... -> (t n) ...")).float()
-                uncertainty_now = torch.zeros((self.n_eval_rollout_threads, self.num_agents, *obs_shape), dtype=torch.float32)
                 if use_prediction:
                     obs_policy = einops.rearrange(prediction[:, -1], "(t n) ... -> (t n) ...", t=self.n_eval_rollout_threads, n=self.num_agents)
                     uncertainty_now = uncertainty[:, -1].reshape((self.n_eval_rollout_threads, self.num_agents, *obs_shape))
+                else:
+                    obs_policy = torch.from_numpy(einops.rearrange(obs, "t n ... -> (t n) ...")).float()
+                    uncertainty_now = torch.zeros((self.n_eval_rollout_threads, self.num_agents, *obs_shape), dtype=torch.float32)
 
                 actions, rnn_states = self.trainer.policy.act(
                     obs_policy,
@@ -538,7 +539,8 @@ class PettingzooRunner(Runner):
                 obs, share_obs, eval_rewards, dones, infos, available_actions = eval_env.step(actions_env)
 
                 _, obs = self._build_viz_mask(obs, infos, actions, self.n_eval_rollout_threads)
-                self._update_trajectory_buffer(eval_trajectory, obs, infos, actions, self.n_eval_rollout_threads, share_obs=share_obs)
+                if hasattr(self.policy, "predictors") and not self.all_args.prediction_disable:
+                    self._update_trajectory_buffer(eval_trajectory, obs, infos, actions, self.n_eval_rollout_threads, share_obs=share_obs)
 
                 # Add prediction error to infos for logging.
                 infos[0]["prediction_error_mean"] = prediction_error.mean().item() if prediction_error is not None else 0.0
@@ -581,11 +583,18 @@ class PettingzooRunner(Runner):
         render_env = self.envs
 
         self.trainer.prep_rollout()
+
+        # Call the reset function to determine whether this environment returns global observations.
+        obs, share_obs, available_actions, infos = render_env.reset(return_info=True)
                 
         # Get shape of observation space.
-        obs_shape = get_shape_from_obs_space(self.buffer.obs_space)
-        HISTORY_LENGTH = self.all_args.prediction_history_window
-        render_trajectory = TrajectoryBuffer(
+        if "observation_global" in infos[0]:
+            obs_shape = get_shape_from_obs_space(self.buffer.share_obs_space)
+        else:
+            obs_shape = get_shape_from_obs_space(self.buffer.obs_space)
+
+        # Set up the trajectory buffer for prediction.
+        trajectory = TrajectoryBuffer(
             history_length=self.all_args.prediction_history_window,
             transition_includes_actions=self.all_args.prediction_history_include_actions,
         )
@@ -596,7 +605,7 @@ class PettingzooRunner(Runner):
             obs, share_obs, available_actions = render_env.reset()
             rnn_states = torch.zeros((self.n_render_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=torch.float32)
             masks = torch.ones((self.n_render_rollout_threads, self.num_agents, 1), dtype=torch.float32)
-            self._seed_trajectory_buffer(render_trajectory, obs, self.n_render_rollout_threads, share_obs=share_obs)
+            self._seed_trajectory_buffer(trajectory, obs, self.n_render_rollout_threads, share_obs=share_obs)
 
             if self.all_args.save_gifs:        
                 frames = []
@@ -613,24 +622,39 @@ class PettingzooRunner(Runner):
                     aa = None
 
                 prediction, uncertainty, prediction_prev, prediction_error, use_prediction = self._compute_predictions(
-                    render_trajectory,
+                    trajectory,
                     prediction_prev,
                     self.n_render_rollout_threads,
                     obs_shape,
                 )
 
                 if use_prediction:
+                    prediction_now = prediction[:, -1]
+                    uncertainty_now = uncertainty[:, -1]
+
                     for agentIdx in range(self.num_agents):
                         print(f"Mean Prediction Error ({agentIdx}): {prediction_error.mean():.2f}")
-                        print(f"Mean Trajectory Prediction Error ({agentIdx}): {prediction_error.mean():.2f}")
+                        # print(f"Mean Trajectory Prediction Error ({agentIdx}): {prediction_error.mean():.2f}")
+                else:
+                    prediction_now = None
+                    uncertainty_now = torch.zeros((self.n_render_rollout_threads, self.num_agents, *obs_shape), dtype=torch.float32)
 
-                obs_policy = torch.from_numpy(einops.rearrange(obs, "t n ... -> (t n) ...")).float()
-                prediction_render = None
-                uncertainty_render = None
-                if use_prediction:
-                    obs_policy = einops.rearrange(prediction[:, -1], "(t n) ... -> (t n) ...", t=self.n_render_rollout_threads, n=self.num_agents)
-                    prediction_render = prediction[:, :, :].reshape((self.n_render_rollout_threads, self.num_agents, HISTORY_LENGTH, *obs_shape))[0].transpose(0, 1)
-                    uncertainty_render = uncertainty[:, :, :].reshape((self.n_render_rollout_threads, self.num_agents, HISTORY_LENGTH, *obs_shape))[0].transpose(0, 1)
+                # Reshape obs from [n_threads, n_agents, obs_dim] to [n_threads*n_agents, obs_dim]
+                # to match the format expected by the policy (same as buffer.compatibility_get_policy_input).
+                if obs.dtype == object:
+                    obs_policy = obs.reshape(-1, *obs.shape[-1:])
+                else:
+                    obs_policy = torch.from_numpy(obs.reshape(-1, *obs.shape[2:])).float()
+
+                if self.all_args.state_encoder and use_prediction:
+                    global_obs = prediction_now
+                else:
+                    global_obs = None
+                    # For GNN envs (object-dtype obs), the prediction cannot replace the graph obs directly.
+                    # The prediction (from observation_global) can only feed the state encoder.
+                    if use_prediction and obs.dtype != object:
+                        obs_policy = prediction_now
+
 
                 actions, rnn_states = self.trainer.policy.act(
                     obs_policy,
@@ -638,7 +662,7 @@ class PettingzooRunner(Runner):
                     masks,
                     deterministic=False,
                     available_actions=aa,
-                    global_obs=prediction_render
+                    global_obs=global_obs
                 )
 
                 # Prepare the actions for the environment.
@@ -647,13 +671,11 @@ class PettingzooRunner(Runner):
                 rnn_states = rnn_states.detach()
                 actions_env = [actions[idx, :, :].numpy() for idx in range(self.n_render_rollout_threads)]
 
-                if render_env.envs[0].env.step_count == 24:
-                    print(f"ready")
-
                 obs, share_obs, render_rewards, dones, infos, available_actions = render_env.step(actions_env)
 
                 _, obs = self._build_viz_mask(obs, infos, actions, self.n_render_rollout_threads)
-                self._update_trajectory_buffer(render_trajectory, obs, infos, actions, self.n_render_rollout_threads, share_obs=share_obs)
+                if hasattr(self.policy, "predictors") and not self.all_args.prediction_disable:
+                    self._update_trajectory_buffer(trajectory, obs, infos, actions, self.n_render_rollout_threads, share_obs=share_obs)
 
                 reward_total += render_rewards[0].sum()
 
@@ -662,8 +684,8 @@ class PettingzooRunner(Runner):
                 # Perform rendering.
                 if ipython_clear_output:
                     clear_output(wait = True)
-                spf = prediction_render if use_prediction else None
-                render_env.envs[0].env.render(spf, history_length=HISTORY_LENGTH, uncertainty=uncertainty_render)
+                spf = prediction_now if use_prediction else None
+                render_env.envs[0].env.render(spf, history_length=self.all_args.prediction_history_window, uncertainty=uncertainty_now)
 
                 # append frame
                 if self.all_args.save_gifs:        
