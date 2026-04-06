@@ -44,11 +44,11 @@ class ACTLayer(nn.Module):
             
             elif action_space.__class__.__name__ == "MultiDiscrete":
                 action_outs = []
-                for n in action_space.nvec:
+                for i, n in enumerate(action_space.nvec):
                     ao = Categorical(inputs_dim, n, use_orthogonal, gain)
                     ao.action_dim = 1
                     ao.available_action_dim = n
-                    ao.start = action_space.start[n]
+                    ao.start = action_space.start[i]
                     action_outs.append(ao)
                 return action_outs
 
