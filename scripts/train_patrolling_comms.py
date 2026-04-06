@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-	"--experiment_name", "diffuser-patrolling-obs200-uqEnsemble3-pygNS",
+	"--experiment_name", "patrolling-obs200-commsRL",
 	# "--experiment_name", "diffuser-patrolling-obs200-uqEnsemble3-pygNS-injectionAppend",
 	"--project_name", "qmas",
 	"--env_class", "patrolling_zoo.patrolling_zoo_v0.parallel_env",
@@ -27,7 +27,7 @@ args = [
 	"--num_env_steps", "1000000",
 	"--episode_length", "200",
 	"--max_cycles", "200",
-    "--num_mini_batch", "10",
+    "--num_mini_batch", "20",
 
 	"--algorithm_class", "qmas.variant_two_modules.new.algorithm.QmasAlgorithm",
 	"--policy_class", "qmas.variant_two_modules.new.policy.QmasPolicy",
@@ -56,10 +56,10 @@ args = [
 	"--prediction_ensemble_size", "3",
     "--state_encoder",
 
-	"--n_rollout_threads", "21",
+	"--n_rollout_threads", "33",
 	"--cuda",
-	"--cuda_idx", "4",
-    "--cuda_idx_predictor", "5",
+	"--cuda_idx", "3",
+    "--cuda_idx_predictor", "3",
     "--threaded_training",
     "--n_training_threads", "16",
 
