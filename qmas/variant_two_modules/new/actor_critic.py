@@ -257,6 +257,11 @@ class QmasActor(nn.Module):
                     encoded_state = encoded_state.repeat_interleave(obs.shape[0] // encoded_state.shape[0], dim=0)
             actor_features = torch.cat([actor_features, encoded_state], dim=-1)
 
+        # Guard against NaNs in the actor features.
+        if torch.any(torch.isnan(actor_features)) or torch.any(torch.isinf(actor_features)):
+            print("Warning: NaNs or infinities in actor features during forward pass.")
+            actor_features = torch.nan_to_num(actor_features)
+
         actions, action_log_probs = self.act(actor_features, available_actions, deterministic)
 
         return actions, action_log_probs, rnn_states
@@ -372,6 +377,12 @@ class QmasActor(nn.Module):
                         raise ValueError("Batch size of obs is not a multiple of batch size of share_obs.")
                     encoded_state = encoded_state.repeat_interleave(obs.shape[0] // encoded_state.shape[0], dim=0)
             actor_features = torch.cat([actor_features, encoded_state], dim=-1)
+
+        # Guard against NaNs in the actor features.
+        if torch.any(torch.isnan(actor_features)) or torch.any(torch.isinf(actor_features)):
+            print("Warning: NaNs or infinities in actor features during evaluation.")
+            actor_features = torch.nan_to_num(actor_features)
+
 
         action_log_probs, dist_entropy = self.act.evaluate_actions(actor_features,
                                                                    action, available_actions,
