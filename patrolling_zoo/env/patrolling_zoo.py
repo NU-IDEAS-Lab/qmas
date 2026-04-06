@@ -130,7 +130,6 @@ class PatrolAgent():
         self.currentAction = -1.0
         self.lastNode = self.startingNode
         self.lastNodeVisited = None
-        self.last_comm_request = False
      
 
 class parallel_env(ParallelEnv):
@@ -255,7 +254,18 @@ class parallel_env(ParallelEnv):
         
         elif action_method == "neighbors_with_comm_boolean":
             maxDegree = self.action_neighbors_max_degree
-            return spaces.MultiDiscrete([maxDegree, 2])
+            return spaces.Dict({
+                "movement": spaces.Box(
+                    low = 0,
+                    high = maxDegree - 1,
+                    dtype = np.int32
+                ),
+                "communication": spaces.Box(
+                    low = 0,
+                    high = 1,
+                    dtype = np.int32
+                )
+            })
 
 
     def _buildStateSpace(self, observe_method):
@@ -873,32 +883,27 @@ class parallel_env(ParallelEnv):
             if agent in action_dict:
                 action = action_dict[agent]
 
-                # Convert scalar actions to int; keep array actions (e.g. MultiDiscrete) as-is.
-                if self.action_method in ["full", "neighbors"]:
-                    action = int(action)
-                
                 # Check if the action is valid.
-                if not self.action_space(agent).contains(action):
-                    raise ValueError(f"Invalid action {action} of type {type(action)} provided.")
+                # if not self.action_space(agent).contains(action):
+                #     raise ValueError(f"Invalid action {action} of type {type(action)} provided.")
 
-                # Store this as the agent's last action.
-                if self.action_method in ["neighbors", "full"]:
-                    agent.currentAction = action
-                else:
-                    agent.currentAction = action[0]
-
+                if self.action_method in ["full", "neighbors"]:
+                    action_movement = int(action)
                 # Handle communication request for neighbors_with_comm_boolean.
-                if self.action_method == "neighbors_with_comm_boolean":
-                    _, communicate = action
-                    agent.last_comm_request = bool(communicate == 1)
-                    if communicate == 1:
+                elif self.action_method == "neighbors_with_comm_boolean":
+                    action_movement = int(action[0])
+                    action_communication = bool(action[1])
+                    if action_communication:
                         senders = {other for other in self.agents if other is not agent}
                         if senders:
                             comms_requests[agent] = senders
                             info_dict["communication/requests_made"] += 1
 
+                # Store this as the agent's last movement action.
+                agent.currentAction = action_movement
+
                 # Get the destination node.
-                dstNode = self.getDestinationNode(agent, action)
+                dstNode = self.getDestinationNode(agent, action_movement)
                 
                 # Calculate the shortest path.
                 path = self._getPathToNode(agent, dstNode)
@@ -938,7 +943,7 @@ class parallel_env(ParallelEnv):
             obs, obs_mask = self.observe(agent, senders=senders)
             obs_dict[agent] = obs
             info_dict[agent]["visibility_mask"] = obs_mask
-            og, vmg = self._populateStateSpace(self.observe_method_global, agent, radius=None, allow_done_agents=False)
+            og, vmg = self._populateStateSpace(self.observe_method_global, agent, radius=None, allow_done_agents=False, senders=senders)
             info_dict[agent]["observation_global"] = og
             info_dict[agent]["visibility_mask_global"] = vmg
 
@@ -953,9 +958,6 @@ class parallel_env(ParallelEnv):
         info_dict["stddev_idleness"] = self.pg.getStdDevIdlenessTime(self.step_count)
         info_dict["worst_idleness"] = self.pg.getWorstIdlenessTime(self.step_count)
         info_dict["agent_count"] = len(self.agents)
-        info_dict["communication/request_rate"] = (
-            info_dict["communication/requests_made"] / max(len(self.agents), 1)
-        )
 
         # Check truncation conditions.
         if lastStep or (self.max_cycles >= 0 and self.step_count >= self.max_cycles):
@@ -1025,7 +1027,7 @@ class parallel_env(ParallelEnv):
             dstNode = action
         
         # Interpret the action using the "neighbors" method.
-        elif self.action_method == "neighbors":
+        elif self.action_method in ["neighbors", "neighbors_with_comm_boolean"]:
             if agent.edge == None:
                 if action >= self.pg.graph.degree(agent.lastNode):
                     raise ValueError(f"Invalid action {action} for agent {agent.name}. Node {agent.lastNode} has only {self.pg.graph.degree(agent.lastNode)} neighbors.")
@@ -1035,17 +1037,6 @@ class parallel_env(ParallelEnv):
                     raise ValueError(f"Invalid action {action} for agent {agent.name}. Must complete action {agent.currentAction} first.")
                 dstNode = list(self.pg.graph.neighbors(agent.lastNode))[action]
         
-        elif self.action_method == "neighbors_with_comm_boolean":
-            move, communicate = action
-            if agent.edge == None:
-                if move >= self.pg.graph.degree(agent.lastNode):
-                    raise ValueError(f"Invalid action {move} for agent {agent.name}. Node {agent.lastNode} has only {self.pg.graph.degree(agent.lastNode)} neighbors.")
-                dstNode = list(self.pg.graph.neighbors(agent.lastNode))[move]
-            else:
-                if move != agent.currentAction:
-                    raise ValueError(f"Invalid action {move} for agent {agent.name}. Must complete action {agent.currentAction} first.")
-                dstNode = list(self.pg.graph.neighbors(agent.lastNode))[move]
-
         else:
             raise ValueError(f"Invalid action method {self.action_method}")
         
@@ -1161,18 +1152,25 @@ class parallel_env(ParallelEnv):
                 return actionMap
             
         elif self.action_method == "neighbors_with_comm_boolean":
-            nvec = self.action_space(agent).nvec
-            result = np.zeros((len(nvec), max(nvec)), dtype=np.bool)
-
+            num_moves = self.action_space(agent)["movement"].high - self.action_space(agent)["movement"].low + 1
             if agent.edge == None:
-                # All neighbors of the current node are available.
+                # All neighbors of the current node are available, and communication is always available.
+                actionMap = {
+                    "movement": np.zeros(num_moves, dtype=np.float32),
+                    "communication": np.array([1.0, 1.0], dtype=np.float32)
+                }
                 numNeighbors = self.pg.graph.degree(agent.lastNode)
-                result[0, :numNeighbors] = True
+                actionMap["movement"][:numNeighbors] = 1.0
             else:
-                # Only the current action available (as it is still incomplete).
-                result[0, agent.currentAction] = True
+                # Only the current movement action is available (as it is still incomplete), but communication is still available.
+                actionMap = {
+                    "movement": np.zeros(num_moves, dtype=np.float32),
+                    "communication": np.array([1.0, 1.0], dtype=np.float32)
+                }
+                actionMap["movement"][agent.currentAction] = 1.0
             
-            result[1, :] = True
-            return result
+            # Flatten the action map.
+            flatActionMap = np.concatenate([actionMap["movement"], actionMap["communication"]])
+            return flatActionMap
         else:
             raise ValueError(f"Invalid action method {self.action_method}")
