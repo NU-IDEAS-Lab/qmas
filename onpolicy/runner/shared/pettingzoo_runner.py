@@ -401,12 +401,6 @@ class PettingzooRunner(Runner):
             traj_visibility_mask = viz_mask_local
         assert traj_visibility_mask is not None, "Must have some form of visibility mask in infos to update trajectory buffer. Check that environment is providing this information."
 
-        # Concatenate actions if requested.
-        if self.all_args.prediction_history_include_actions:
-            actions = actions.detach().cpu()
-            traj_obs = np.concatenate([traj_obs, actions], axis=-1)
-            traj_visibility_mask = np.concatenate([traj_visibility_mask, np.ones_like(actions, dtype=np.float32)], axis=-1)
-
         # Reshape to match expected input shape of trajectory buffer (T*N, ...).
         traj_obs = einops.rearrange(traj_obs, "t n ... -> (t n) ...")
         traj_visibility_mask = einops.rearrange(traj_visibility_mask, "t n ... -> (t n) ...")
