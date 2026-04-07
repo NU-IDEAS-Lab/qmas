@@ -543,6 +543,8 @@ class PettingzooRunner(Runner):
 
                 if self.all_args.state_encoder and use_prediction:
                     global_obs = prediction_now
+                    if self.all_args.prediction_uq_injection_method == "append":
+                        global_obs = torch.cat([global_obs, uncertainty_now], dim=-1)
                 else:
                     global_obs = None
                     # For GNN envs (object-dtype obs), the prediction cannot replace the graph obs directly.
@@ -688,6 +690,8 @@ class PettingzooRunner(Runner):
 
                 if self.all_args.state_encoder and use_prediction:
                     global_obs = prediction_now
+                    if self.all_args.prediction_uq_injection_method == "append":
+                        global_obs = torch.cat([global_obs, uncertainty_now], dim=-1)
                 else:
                     global_obs = None
                     # For GNN envs (object-dtype obs), the prediction cannot replace the graph obs directly.
