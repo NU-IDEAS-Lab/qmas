@@ -246,11 +246,19 @@ class parallel_env(ParallelEnv):
             if self.action_full_max_nodes < len(self.pg.graph):
                 raise ValueError("The action space is smaller than the graph size.")
             maxNodes = self.action_full_max_nodes if self.action_full_max_nodes > 0 else len(self.pg.graph)
-            return spaces.Discrete(maxNodes)
+            return spaces.Box(
+                low = 0,
+                high = maxNodes - 1,
+                dtype = np.int32
+            )
         
         elif action_method == "neighbors":
             maxDegree = self.action_neighbors_max_degree # just use a fixed size and mask it
-            return spaces.Discrete(maxDegree)
+            return spaces.Box(
+                low = 0,
+                high = maxDegree - 1,
+                dtype = np.int32
+            )
         
         elif action_method == "neighbors_with_comm_boolean":
             maxDegree = self.action_neighbors_max_degree
@@ -540,6 +548,13 @@ class parallel_env(ParallelEnv):
                 return spaces.MultiBinary(action_space.n)
             elif action_space.__class__.__name__ == "MultiDiscrete":
                 return spaces.MultiBinary(len(action_space.nvec), np.max(action_space.nvec))
+            elif action_space.__class__.__name__ == "Box" and action_space.dtype == np.int32:
+                shape = action_space.high - action_space.low + 1
+                return spaces.Box(
+                    low = np.zeros(shape, dtype=np.int32),
+                    high = np.ones(shape, dtype=np.int32),
+                    dtype = np.int32
+                )
             else:
                 raise NotImplementedError(f"Action space {action_space} not supported for action masking.")
         return get_available_action_space(action_space)
@@ -882,17 +897,18 @@ class parallel_env(ParallelEnv):
         for agent in self.agents:
             if agent in action_dict:
                 action = action_dict[agent]
+                action = spaces.unflatten(self.action_space(agent), action)
 
                 # Check if the action is valid.
-                # if not self.action_space(agent).contains(action):
-                #     raise ValueError(f"Invalid action {action} of type {type(action)} provided.")
+                if not self.action_space(agent).contains(action):
+                    raise ValueError(f"Invalid action {action} of type {type(action)} provided.")
 
                 if self.action_method in ["full", "neighbors"]:
                     action_movement = int(action)
                 # Handle communication request for neighbors_with_comm_boolean.
                 elif self.action_method == "neighbors_with_comm_boolean":
-                    action_movement = int(action[0])
-                    action_communication = bool(action[1])
+                    action_movement = int(action["movement"])
+                    action_communication = bool(action["communication"])
                     if action_communication:
                         senders = {other for other in self.agents if other is not agent}
                         if senders:
@@ -1126,28 +1142,30 @@ class parallel_env(ParallelEnv):
         ''' Returns the available actions for the given agent. '''
 
         if self.action_method == "full":
+            num_nodes = self.action_space(agent).high - self.action_space(agent).low + 1
             if agent.edge == None:
                 # All actions available.
-                actionMap = np.zeros(self.action_space(agent).n, dtype=np.float32)
+                actionMap = np.zeros(num_nodes, dtype=np.float32)
                 actionMap[:self.pg.graph.number_of_nodes()] = 1.0
                 return actionMap
             else:
                 # Only the current action available (as it is still incomplete).
-                actionMap = np.zeros(self.action_space(agent).n, dtype=np.float32)
+                actionMap = np.zeros(num_nodes, dtype=np.float32)
                 actionMap[agent.currentAction] = 1.0
                 return actionMap
         
         elif self.action_method == "neighbors":
+            num_nodes = self.action_space(agent).high - self.action_space(agent).low + 1
             if agent.edge == None:
                 # All neighbors of the current node are available.
-                actionMap = np.zeros(self.action_space(agent).n, dtype=np.float32)
+                actionMap = np.zeros(num_nodes, dtype=np.float32)
                 # numNeighbors = self.pg.graph.degree(agent.lastNode) - 1 # subtract 1 since the self loop adds 2 to the degree
                 numNeighbors = self.pg.graph.degree(agent.lastNode)
                 actionMap[:numNeighbors] = 1.0
                 return actionMap
             else:
                 # Only the current action available (as it is still incomplete).
-                actionMap = np.zeros(self.action_space(agent).n, dtype=np.float32)
+                actionMap = np.zeros(num_nodes, dtype=np.float32)
                 actionMap[agent.currentAction] = 1.0
                 return actionMap
             
@@ -1170,7 +1188,7 @@ class parallel_env(ParallelEnv):
                 actionMap["movement"][agent.currentAction] = 1.0
             
             # Flatten the action map.
-            flatActionMap = np.concatenate([actionMap["movement"], actionMap["communication"]])
-            return flatActionMap
+            flat = spaces.flatten(self.available_actions_space(agent), actionMap)
+            return flat
         else:
             raise ValueError(f"Invalid action method {self.action_method}")
