@@ -25,7 +25,7 @@ args = [
 
     "--noisy_memory",
 
-    "--observation_radius", "3",
+    "--observation_radius", "10",
     # "--observation_mask",
     # "--available_actions_mask",
 
