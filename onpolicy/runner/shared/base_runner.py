@@ -183,7 +183,7 @@ class Runner(object):
         
         # Export wandb config to file.
         if self.all_args.use_wandb:
-            conf = wandb.config._as_dict()
+            conf = dict(wandb.config)
             with open(os.path.join(save_dir, 'config.yaml'), 'w') as f:
                 yaml.safe_dump(conf, f)
 
