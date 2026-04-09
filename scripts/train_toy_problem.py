@@ -37,10 +37,10 @@ args = [
 
     "--seed", "0",
 
-    "--n_rollout_threads", "66",
+    "--n_rollout_threads", "300",
     "--cuda",
-    "--cuda_idx", "5",
-    "--cuda_idx_predictor", "3",
+    "--cuda_idx", "6",
+    "--cuda_idx_predictor", "4",
     "--threaded_training",
     "--n_training_threads", "16",
 

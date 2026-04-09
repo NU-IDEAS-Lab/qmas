@@ -24,6 +24,9 @@ class TrajectoryBuffer:
         else:
             transition = obs
         
+        transition = transition.detach()
+        visibility_mask = visibility_mask.detach()
+
         self.buffer.append((transition, visibility_mask))
 
     def ready(self):

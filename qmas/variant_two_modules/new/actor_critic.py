@@ -244,18 +244,23 @@ class QmasActor(nn.Module):
         if self._use_state_encoder:
             if global_obs == None:
                 # If no global state is provided, use zeros.
-                batch_size = obs.shape[0]
-                encoded_state = torch.zeros((batch_size, self.args.state_encoder_output_dim), device=obs.device)
+                batch_size = actor_features.shape[0]
+                encoded_state = torch.zeros((batch_size, self.args.state_encoder_output_dim), device=actor_features.device)
             else:
                 global_obs = check(global_obs).to(**self.tpdv)
                 # Encode the global state
                 encoded_state = self.state_encoder(global_obs)
                 # Repeat the encoded state for each agent if necessary.
-                if encoded_state.shape[0] < obs.shape[0]:
-                    if obs.shape[0] % encoded_state.shape[0] != 0:
+                if encoded_state.shape[0] < actor_features.shape[0]:
+                    if actor_features.shape[0] % encoded_state.shape[0] != 0:
                         raise ValueError("Batch size of obs is not a multiple of batch size of share_obs.")
-                    encoded_state = encoded_state.repeat_interleave(obs.shape[0] // encoded_state.shape[0], dim=0)
+                    encoded_state = encoded_state.repeat_interleave(actor_features.shape[0] // encoded_state.shape[0], dim=0)
             actor_features = torch.cat([actor_features, encoded_state], dim=-1)
+
+        # Guard against NaNs in the actor features.
+        if torch.any(torch.isnan(actor_features)) or torch.any(torch.isinf(actor_features)):
+            print("Warning: NaNs or infinities in actor features during forward pass.")
+            actor_features = torch.nan_to_num(actor_features)
 
         actions, action_log_probs = self.act(actor_features, available_actions, deterministic)
 
@@ -361,17 +366,23 @@ class QmasActor(nn.Module):
         if self._use_state_encoder:
             if global_obs == None:
                 # If no global state is provided, use zeros.
-                batch_size = obs.shape[0]
-                encoded_state = torch.zeros((batch_size, self.args.state_encoder_output_dim), device=obs.device)
+                batch_size = actor_features.shape[0]
+                encoded_state = torch.zeros((batch_size, self.args.state_encoder_output_dim), device=actor_features.device)
             else:
                 # Encode the global state
                 encoded_state = self.state_encoder(global_obs)
                 # Repeat the encoded state for each agent if necessary.
-                if encoded_state.shape[0] < obs.shape[0]:
-                    if obs.shape[0] % encoded_state.shape[0] != 0:
+                if encoded_state.shape[0] < actor_features.shape[0]:
+                    if actor_features.shape[0] % encoded_state.shape[0] != 0:
                         raise ValueError("Batch size of obs is not a multiple of batch size of share_obs.")
-                    encoded_state = encoded_state.repeat_interleave(obs.shape[0] // encoded_state.shape[0], dim=0)
+                    encoded_state = encoded_state.repeat_interleave(actor_features.shape[0] // encoded_state.shape[0], dim=0)
             actor_features = torch.cat([actor_features, encoded_state], dim=-1)
+
+        # Guard against NaNs in the actor features.
+        if torch.any(torch.isnan(actor_features)) or torch.any(torch.isinf(actor_features)):
+            print("Warning: NaNs or infinities in actor features during evaluation.")
+            actor_features = torch.nan_to_num(actor_features)
+
 
         action_log_probs, dist_entropy = self.act.evaluate_actions(actor_features,
                                                                    action, available_actions,

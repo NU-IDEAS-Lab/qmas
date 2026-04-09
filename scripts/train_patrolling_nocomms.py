@@ -1,10 +1,14 @@
+
+import torch
+torch.multiprocessing.set_sharing_strategy('file_system')
+
 from onpolicy.scripts.train.train_pettingzoo import main
 
 import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-	"--experiment_name", "diffuser-patrolling-obs200-uqEnsemble3-pygNS",
+	"--experiment_name", "patrolling-obs200-gnn2",
 	# "--experiment_name", "diffuser-patrolling-obs200-uqEnsemble3-pygNS-injectionAppend",
 	"--project_name", "qmas",
 	"--env_class", "patrolling_zoo.patrolling_zoo_v0.parallel_env",
@@ -12,7 +16,7 @@ args = [
 
 	"--num_agents", "4",
 	"--agent_speed", "40.0",
-	"--action_method", "neighbors_with_comm_boolean",
+	"--action_method", "neighbors",
 	"--observe_method", "pyg",
 	"--observe_method_global", "adjacency",
 	"--observation_radius", "200.0",
@@ -27,14 +31,14 @@ args = [
 	"--num_env_steps", "1000000",
 	"--episode_length", "200",
 	"--max_cycles", "200",
-    "--num_mini_batch", "10",
+    "--num_mini_batch", "50",
 
 	"--algorithm_class", "qmas.variant_two_modules.new.algorithm.QmasAlgorithm",
 	"--policy_class", "qmas.variant_two_modules.new.policy.QmasPolicy",
 	"--algorithm_name", "mappo",
 	"--use_gnn_policy",
 	"--use_gnn_mlp_policy",
-	"--gnn_layer_N", "10",
+	"--gnn_layer_N", "4",
 	"--gnn_hidden_size", "128",
 	"--gnn_skip_connections",
 	"--gnn_neighbor_scoring",
@@ -46,7 +50,7 @@ args = [
 	"--share_policy",
 	"--use_ReLU",
 	"--hidden_size", "512",
-	"--layer_N", "4",
+	"--layer_N", "2",
 	"--seed", "0",
 
 	"--diffusion_model_type", "dit1d",
@@ -56,10 +60,10 @@ args = [
 	"--prediction_ensemble_size", "3",
     "--state_encoder",
 
-	"--n_rollout_threads", "21",
+	"--n_rollout_threads", "99",
 	"--cuda",
-	"--cuda_idx", "4",
-    "--cuda_idx_predictor", "5",
+	"--cuda_idx", "7",
+    "--cuda_idx_predictor", "7",
     "--threaded_training",
     "--n_training_threads", "16",
 
