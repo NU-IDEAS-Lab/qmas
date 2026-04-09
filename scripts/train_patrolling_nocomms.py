@@ -8,7 +8,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-	"--experiment_name", "patrolling-obs200-commsRL",
+	"--experiment_name", "patrolling-obs200-gnn2",
 	# "--experiment_name", "diffuser-patrolling-obs200-uqEnsemble3-pygNS-injectionAppend",
 	"--project_name", "qmas",
 	"--env_class", "patrolling_zoo.patrolling_zoo_v0.parallel_env",
@@ -16,7 +16,7 @@ args = [
 
 	"--num_agents", "4",
 	"--agent_speed", "40.0",
-	"--action_method", "neighbors_with_comm_boolean",
+	"--action_method", "neighbors",
 	"--observe_method", "pyg",
 	"--observe_method_global", "adjacency",
 	"--observation_radius", "200.0",
@@ -50,7 +50,7 @@ args = [
 	"--share_policy",
 	"--use_ReLU",
 	"--hidden_size", "512",
-	"--layer_N", "4",
+	"--layer_N", "2",
 	"--seed", "0",
 
 	"--diffusion_model_type", "dit1d",
