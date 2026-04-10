@@ -85,6 +85,7 @@ class QmasActor(nn.Module):
         self._use_cnn = False
         self._use_mlp = False
         self._use_attention = False
+        self._use_rnn = self._use_naive_recurrent_policy or self._use_recurrent_policy
         
         if self._use_gnn:
             # Split up the graph and non-graph space.
@@ -137,11 +138,7 @@ class QmasActor(nn.Module):
                 self.mlp = MLPBase(args, input_dim)
                 input_dim = self.hidden_size
         
-        print(f"R_Actor: Use GNN: {self._use_gnn}, Use CNN: {self._use_cnn}, Use MLP: {self._use_mlp}, Use Encoder: {self._use_state_encoder}")
-
-        if self._use_naive_recurrent_policy or self._use_recurrent_policy:
-            self.rnn = RNNLayer(input_dim, self.hidden_size, self._recurrent_N, self._use_orthogonal)
-            input_dim = self.hidden_size
+        print(f"R_Actor: Use GNN: {self._use_gnn}, Use CNN: {self._use_cnn}, Use MLP: {self._use_mlp}, Use RNN: {self._use_rnn}, Use Encoder: {self._use_state_encoder}")
 
         # Create the state encoder.
         if args.state_encoder:
@@ -159,6 +156,10 @@ class QmasActor(nn.Module):
                 device=device
             )
             input_dim += args.state_encoder_output_dim
+
+        if self._use_rnn:
+            self.rnn = RNNLayer(input_dim, self.hidden_size, self._recurrent_N, self._use_orthogonal)
+            input_dim = self.hidden_size
 
         self.act = ACTLayer(action_space, input_dim, self._use_orthogonal, self._gain)
 
@@ -236,29 +237,31 @@ class QmasActor(nn.Module):
             if self._use_mlp:
                 actor_features = self.mlp(actor_features)
 
-        # Recurrent network.
-        if self._use_naive_recurrent_policy or self._use_recurrent_policy:
-            actor_features, rnn_states = self.rnn(actor_features, rnn_states, masks)
-
         # Handle global observation.
         if self._use_state_encoder:
             if global_obs is None:
                 # If no global state is provided, use zeros.
-                batch_size = obs.shape[0]
-                encoded_state = torch.zeros(
-                    (batch_size, self.args.state_encoder_output_dim),
-                    device=self.device,
-                )
+                batch_size = actor_features.shape[0]
+                encoded_state = torch.zeros((batch_size, self.args.state_encoder_output_dim), device=actor_features.device)
             else:
                 global_obs = check(global_obs).to(**self.tpdv)
                 # Encode the global state
                 encoded_state = self.state_encoder(global_obs)
                 # Repeat the encoded state for each agent if necessary.
-                if encoded_state.shape[0] < obs.shape[0]:
-                    if obs.shape[0] % encoded_state.shape[0] != 0:
+                if encoded_state.shape[0] < actor_features.shape[0]:
+                    if actor_features.shape[0] % encoded_state.shape[0] != 0:
                         raise ValueError("Batch size of obs is not a multiple of batch size of share_obs.")
-                    encoded_state = encoded_state.repeat_interleave(obs.shape[0] // encoded_state.shape[0], dim=0)
+                    encoded_state = encoded_state.repeat_interleave(actor_features.shape[0] // encoded_state.shape[0], dim=0)
             actor_features = torch.cat([actor_features, encoded_state], dim=-1)
+
+        # Recurrent network.
+        if self._use_rnn:
+            actor_features, rnn_states = self.rnn(actor_features, rnn_states, masks)
+
+        # Guard against NaNs in the actor features.
+        if torch.any(torch.isnan(actor_features)) or torch.any(torch.isinf(actor_features)):
+            print("Warning: NaNs or infinities in actor features during forward pass.")
+            actor_features = torch.nan_to_num(actor_features)
 
         actions, action_log_probs = self.act(actor_features, available_actions, deterministic)
 
@@ -356,28 +359,31 @@ class QmasActor(nn.Module):
             if self._use_mlp:
                 actor_features = self.mlp(actor_features)
 
-        # Recurrent network.
-        if self._use_naive_recurrent_policy or self._use_recurrent_policy:
-            actor_features, rnn_states = self.rnn(actor_features, rnn_states, masks)
-
         # Handle global observation.
         if self._use_state_encoder:
             if global_obs is None:
                 # If no global state is provided, use zeros.
-                batch_size = obs.shape[0]
-                encoded_state = torch.zeros(
-                    (batch_size, self.args.state_encoder_output_dim),
-                    device=self.device,
-                )
+                batch_size = actor_features.shape[0]
+                encoded_state = torch.zeros((batch_size, self.args.state_encoder_output_dim), device=actor_features.device)
             else:
                 # Encode the global state
                 encoded_state = self.state_encoder(global_obs)
                 # Repeat the encoded state for each agent if necessary.
-                if encoded_state.shape[0] < obs.shape[0]:
-                    if obs.shape[0] % encoded_state.shape[0] != 0:
+                if encoded_state.shape[0] < actor_features.shape[0]:
+                    if actor_features.shape[0] % encoded_state.shape[0] != 0:
                         raise ValueError("Batch size of obs is not a multiple of batch size of share_obs.")
-                    encoded_state = encoded_state.repeat_interleave(obs.shape[0] // encoded_state.shape[0], dim=0)
+                    encoded_state = encoded_state.repeat_interleave(actor_features.shape[0] // encoded_state.shape[0], dim=0)
             actor_features = torch.cat([actor_features, encoded_state], dim=-1)
+
+        # Recurrent network.
+        if self._use_rnn:
+            actor_features, rnn_states = self.rnn(actor_features, rnn_states, masks)
+
+        # Guard against NaNs in the actor features.
+        if torch.any(torch.isnan(actor_features)) or torch.any(torch.isinf(actor_features)):
+            print("Warning: NaNs or infinities in actor features during evaluation.")
+            actor_features = torch.nan_to_num(actor_features)
+
 
         action_log_probs, dist_entropy = self.act.evaluate_actions(actor_features,
                                                                    action, available_actions,
