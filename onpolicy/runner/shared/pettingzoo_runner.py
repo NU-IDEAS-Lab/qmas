@@ -193,7 +193,6 @@ class PettingzooRunner(Runner):
         use_prediction = (
             hasattr(self.policy, "predictors")
             and not self.all_args.prediction_disable
-            and episode > 0
             and self.all_args.episode_fraction_start_prediction <= episode_fraction
             and self.train_trajectory.ready()
             and (self.all_args.prediction_during_training or self.all_args.prediction_uq_injection_method != "none")
