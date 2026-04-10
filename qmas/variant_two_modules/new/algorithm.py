@@ -324,7 +324,10 @@ class QmasAlgorithm(Algorithm):
         # Reshape and repeat values for each agent.
         # The value function predictions are made once over the entire share_obs.
         # However, we need to compare them with per-agent returns.
-        values = values.reshape((values.shape[0], 1, 1)).repeat(1, self.policy.args.num_agents, 1).reshape((-1, 1))
+        # In the recurrent case share_obs is already indexed per-agent, so values
+        # already matches adv_targ in size — skip the repeat.
+        if values.shape[0] != adv_targ.shape[0]:
+            values = values.reshape((values.shape[0], 1, 1)).repeat(1, self.policy.args.num_agents, 1).reshape((-1, 1))
 
         # actor update
         imp_weights = torch.exp(action_log_probs - old_action_log_probs_batch)

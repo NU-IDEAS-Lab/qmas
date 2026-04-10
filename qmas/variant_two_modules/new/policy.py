@@ -90,8 +90,26 @@ class QmasPolicy(Policy):
                                                                  deterministic,
                                                                  global_obs=global_obs)
 
-        values, rnn_states_critic = self.critic(cent_obs, rnn_states_critic, masks)
+        # For the centralized critic, cent_obs is per-thread but rnn_states_critic and
+        # masks are stored per-agent. Slice to per-thread when sizes mismatch.
+        n_agents = self.args.num_agents
+        if rnn_states_critic.shape[0] == cent_obs.shape[0] * n_agents:
+            critic_rnn = rnn_states_critic[::n_agents]
+            critic_masks = masks[::n_agents]
+            values, updated_rnn = self.critic(cent_obs, critic_rnn, critic_masks)
+            rnn_states_critic = updated_rnn.repeat_interleave(n_agents, dim=0)
+        else:
+            values, rnn_states_critic = self.critic(cent_obs, rnn_states_critic, masks)
         return values, actions, action_log_probs, rnn_states_actor, rnn_states_critic
+
+    def get_values(self, cent_obs, rnn_states_critic, masks):
+        """Get value function predictions, handling centralized-V per-thread mismatch."""
+        n_agents = self.args.num_agents
+        if rnn_states_critic.shape[0] == cent_obs.shape[0] * n_agents:
+            values, _ = self.critic(cent_obs, rnn_states_critic[::n_agents], masks[::n_agents])
+        else:
+            values, _ = self.critic(cent_obs, rnn_states_critic, masks)
+        return values
 
 
     def act(self, obs, rnn_states_actor, masks, available_actions=None, deterministic=False, global_obs=None):

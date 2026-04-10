@@ -384,7 +384,13 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
         sampler = [rand[i * mini_batch_size:(i + 1) * mini_batch_size] for i in range(num_mini_batch)]
 
         share_obs = _cast(self.share_obs[:last_step], no_agent_dim=True)
-        obs = _cast(self.obs[:last_step])
+        if self.obs_object:
+            # Graph/object obs: np.array(NonTensorStack) → (T, N, M[, n_keys]).
+            # Reshape to (T, N*M, n_keys) for per-chunk indexing in the inner loop.
+            obs = np.array(self.obs[:last_step])
+            obs = obs.reshape(episode_length, n_rollout_threads * num_agents, -1)
+        else:
+            obs = _cast(self.obs[:last_step])
         actions = _cast(self.actions)
         action_log_probs = _cast(self.action_log_probs)
         advantages = _cast(advantages)
@@ -425,8 +431,16 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
 
                 ind = index * data_chunk_length
                 # size [T+1 N M Dim]-->[T N M Dim]-->[N,M,T,Dim]-->[N*M*T,Dim]-->[L,Dim]
-                share_obs_batch.append(share_obs[ind:ind + data_chunk_length])
-                obs_batch.append(obs[ind:ind + data_chunk_length])
+                # share_obs has no agent dim (per-thread only), so map ind to per-thread range
+                so_ind = ind % episode_length
+                share_obs_batch.append(share_obs[so_ind:so_ind + data_chunk_length])
+                if self.obs_object:
+                    # ind encodes (n_agent_idx * T + t_start) in (N*M, T) flat order.
+                    t_start = ind % episode_length
+                    n_agent_idx = ind // episode_length
+                    obs_batch.append(obs[t_start:t_start + data_chunk_length, n_agent_idx])
+                else:
+                    obs_batch.append(obs[ind:ind + data_chunk_length])
                 if has_global_obs:
                     global_obs_batch.append(global_obs[ind:ind + data_chunk_length])
                 actions_batch.append(actions[ind:ind + data_chunk_length])
@@ -469,6 +483,14 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
             obs_batch = _flatten(L, N, obs_batch)
             if has_global_obs:
                 global_obs_batch = _flatten(L, N, global_obs_batch)
+                global_obs_batch = torch.from_numpy(global_obs_batch).float()
+                if self.args.prediction_uq_injection_method == "append":
+                    # Mirror what compatibility_transform_sample does: append zeros as
+                    # uncertainty. When obs is object-typed (PyG graphs) the buffer
+                    # never stores observation_uncertainty, so zeros is always correct.
+                    global_obs_batch = torch.cat(
+                        [global_obs_batch, torch.zeros_like(global_obs_batch)], dim=-1
+                    )
             else:
                 global_obs_batch = None
             actions_batch = _flatten(L, N, actions_batch)
