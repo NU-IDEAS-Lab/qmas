@@ -56,6 +56,8 @@ args = [
 	"--prediction_ensemble_size", "3",
     "--state_encoder",
 
+    "--episode_fraction_start_prediction", "0.2",
+
 	"--n_rollout_threads", "21",
 	"--cuda",
 	"--cuda_idx", "4",
