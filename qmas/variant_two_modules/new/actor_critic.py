@@ -261,7 +261,7 @@ class QmasActor(nn.Module):
         # Guard against NaNs in the actor features.
         if torch.any(torch.isnan(actor_features)) or torch.any(torch.isinf(actor_features)):
             print("Warning: NaNs or infinities in actor features during forward pass.")
-            actor_features = torch.nan_to_num(actor_features)
+            actor_features = torch.nan_to_num(actor_features, nan=0.0, posinf=0.0, neginf=0.0)
 
         actions, action_log_probs = self.act(actor_features, available_actions, deterministic)
 
@@ -382,7 +382,7 @@ class QmasActor(nn.Module):
         # Guard against NaNs in the actor features.
         if torch.any(torch.isnan(actor_features)) or torch.any(torch.isinf(actor_features)):
             print("Warning: NaNs or infinities in actor features during evaluation.")
-            actor_features = torch.nan_to_num(actor_features)
+            actor_features = torch.nan_to_num(actor_features, nan=0.0, posinf=0.0, neginf=0.0)
 
 
         action_log_probs, dist_entropy = self.act.evaluate_actions(actor_features,

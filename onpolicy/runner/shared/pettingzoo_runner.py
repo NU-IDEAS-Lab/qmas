@@ -75,7 +75,7 @@ class PettingzooRunner(Runner):
             delta_steps = np.ones((self.n_rollout_threads, self.num_agents, 1), dtype=np.int32)
             for step in range(self.episode_length):
                 # Sample actions, collect values and probabilities.
-                values, actions, action_log_probs, rnn_states, rnn_states_critic, actions_env, uncertainty = self.collect(step)
+                values, actions, action_log_probs, rnn_states, rnn_states_critic, actions_env, uncertainty = self.collect(step, episode=episode, episodes=episodes)
                 
                 # Take a step in the environment and get the results.
                 obs, share_obs, rewards, dones, infos, available_actions = self.envs.step(actions_env)
@@ -182,16 +182,18 @@ class PettingzooRunner(Runner):
 
 
     @torch.no_grad()
-    def collect(self, step):
+    def collect(self, step, episode=None, episodes=None):
         share_obs, obs, global_obs, rnn_states, rnn_states_critic, masks, available_actions = self.buffer.compatibility_get_policy_input(step)
 
         uncertainty_now = None
 
         # If a predictor is available, replace obs with predictions from the trajectory buffers.
+        # Use episode-based fraction to stay consistent with the training condition in algorithm.py.
+        episode_fraction = (episode / episodes) if (episode is not None and episodes) else 0.0
         use_prediction = (
             hasattr(self.policy, "predictors")
             and not self.all_args.prediction_disable
-            and self.all_args.episode_fraction_start_prediction <= (step * self.episode_length * self.n_rollout_threads) / self.num_env_steps
+            and self.all_args.episode_fraction_start_prediction <= episode_fraction
             and self.train_trajectory.ready()
             and (self.all_args.prediction_during_training or self.all_args.prediction_uq_injection_method != "none")
         )
