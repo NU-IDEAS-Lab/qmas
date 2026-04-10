@@ -391,8 +391,8 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
             obs = obs.reshape(episode_length, n_rollout_threads * num_agents, -1)
         else:
             obs = _cast(self.obs[:last_step])
-        actions = _cast(self.actions)
-        action_log_probs = _cast(self.action_log_probs)
+        actions = _cast(self.actions[:last_step])
+        action_log_probs = _cast(self.action_log_probs[:last_step])
         advantages = _cast(advantages)
         value_preds = _cast(self.value_preds[:last_step])
         returns = _cast(self.returns[:last_step])
