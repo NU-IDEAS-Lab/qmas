@@ -325,7 +325,7 @@ class parallel_env(ParallelEnv):
             }) # type: ignore
         
         if observe_method in ["pyg"]:
-            if self.action_method == "neighbors":
+            if self.action_method in ["neighbors", "neighbors_with_comm_boolean"]:
                 edge_space = spaces.Box(
                     # weight, neighborID
                     low = np.array([0.0, -1.0], dtype=np.float32),
