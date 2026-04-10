@@ -31,6 +31,8 @@ def add_args(parser):
                         help="Weight of local reward.")
     parser.add_argument("--beta", type=float, default=1000.0,
                         help="Weight of global reward.")
+    parser.add_argument("--gamma", type=float, default=1.0,
+                        help="Weight of communication reward.")
     parser.add_argument("--graph_file", type=str,
                         default=os.path.join(os.path.dirname(patrolling_zoo.graphs.__file__), "cumberland.graph"), 
                         help="The path to the graph file.")
@@ -151,6 +153,7 @@ class parallel_env(ParallelEnv):
                  agent_speed = 1.0,
                  alpha = 10.0,
                  beta = 100.0,
+                 gamma = 1.0,
                  action_method = "full",
                  action_full_max_nodes = 40,
                  action_neighbors_max_degree = 15,
@@ -201,6 +204,7 @@ class parallel_env(ParallelEnv):
 
         self.alpha = alpha
         self.beta = beta
+        self.gamma = gamma
 
         # Create patrol graph.
         if graph_random:
@@ -914,6 +918,7 @@ class parallel_env(ParallelEnv):
                         if senders:
                             comms_requests[agent] = senders
                             info_dict["communication/requests_made"] += 1
+                        reward_dict[agent] += -1.0 * self.gamma
 
                 # Store this as the agent's last movement action.
                 agent.currentAction = action_movement
