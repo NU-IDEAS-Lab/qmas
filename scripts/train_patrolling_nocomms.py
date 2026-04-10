@@ -8,7 +8,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-	"--experiment_name", "patrolling-obs200-gnn2",
+	"--experiment_name", "patrolling-obs200-gnn1",
 	# "--experiment_name", "diffuser-patrolling-obs200-uqEnsemble3-pygNS-injectionAppend",
 	"--project_name", "qmas",
 	"--env_class", "patrolling_zoo.patrolling_zoo_v0.parallel_env",
@@ -38,7 +38,7 @@ args = [
 	"--algorithm_name", "mappo",
 	"--use_gnn_policy",
 	"--use_gnn_mlp_policy",
-	"--gnn_layer_N", "4",
+	"--gnn_layer_N", "1",
 	"--gnn_hidden_size", "128",
 	"--gnn_skip_connections",
 	"--gnn_neighbor_scoring",
