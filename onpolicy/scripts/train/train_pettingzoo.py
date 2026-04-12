@@ -18,6 +18,46 @@ from onpolicy.config import get_config
 from onpolicy.envs.pettingzoo.Pettingzoo_Env import PettingzooEnv
 from onpolicy.envs.env_wrappers import ShareSubprocVecEnv, ShareDummyVecEnv, SubprocVecEnv, DummyVecEnv
 
+def resolve_torch_device(all_args):
+    '''Resolves the requested torch device and falls back to CPU on CUDA init errors.'''
+
+    if not all_args.cuda:
+        torch.set_num_threads(all_args.n_training_threads)
+        return torch.device("cpu")
+
+    try:
+        if not torch.cuda.is_available():
+            raise RuntimeError("CUDA is not available")
+
+        device_count = torch.cuda.device_count()
+        if all_args.cuda_idx < 0 or all_args.cuda_idx >= device_count:
+            raise RuntimeError(
+                f"Requested cuda:{all_args.cuda_idx}, but only {device_count} CUDA device(s) are available."
+            )
+
+        device = torch.device(f"cuda:{all_args.cuda_idx}")
+        # Force a small allocation so bad drivers or invalid runtime state fail here.
+        torch.empty(1, device=device)
+
+        torch.set_num_threads(all_args.n_training_threads)
+        if all_args.cuda_deterministic:
+            torch.backends.cudnn.benchmark = False
+            torch.backends.cudnn.deterministic = True
+
+            # Set CUBLAS_WORKSPACE_CONFIG for reproducibility:
+            # https://docs.nvidia.com/cuda/cublas/index.html#results-reproducibility
+            os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
+
+            # Set PyTorch flags for reproducibility:
+            torch.use_deterministic_algorithms(True)
+
+        return device
+    except Exception as exc:
+        print(f"Falling back to CPU because CUDA initialization failed: {exc}")
+        all_args.cuda = False
+        torch.set_num_threads(all_args.n_training_threads)
+        return torch.device("cpu")
+
 
 def get_environment_module(all_args):
     ''' Dynamically imports correct environment class. '''
@@ -189,7 +229,7 @@ def validateArgs(all_args):
     env = env_class() # use default arguments
 
     # Check that the number of cuda devices selected matches number of predictors.
-    if all_args.cuda and torch.cuda.is_available() and len(all_args.cuda_idx_predictor) > 1:
+    if all_args.cuda and len(all_args.cuda_idx_predictor) > 1:
         if all_args.prediction_ensemble_size != len(all_args.cuda_idx_predictor):
             raise ValueError(f"Number of cuda devices for predictor {len(all_args.cuda_idx_predictor)} does not match prediction_ensemble_size {all_args.prediction_ensemble_size}.")
 
@@ -226,23 +266,7 @@ def main(args):
     torch._dynamo.config.compiled_autograd = True
     torch.backends.cudnn.benchmark = True
 
-    # cuda
-    if all_args.cuda and torch.cuda.is_available():
-        device = torch.device(f"cuda:{all_args.cuda_idx}")
-        torch.set_num_threads(all_args.n_training_threads)
-        if all_args.cuda_deterministic:
-            torch.backends.cudnn.benchmark = False
-            torch.backends.cudnn.deterministic = True
-
-            # Set CUBLAS_WORKSPACE_CONFIG for reproducibility:
-            # https://docs.nvidia.com/cuda/cublas/index.html#results-reproducibility
-            os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
-
-            # Set PyTorch flags for reproducibility:
-            torch.use_deterministic_algorithms(True)
-    else:
-        device = torch.device("cpu")
-        torch.set_num_threads(all_args.n_training_threads)
+    device = resolve_torch_device(all_args)
     print(f"Using device {device}")
 
     # run dir
@@ -298,7 +322,8 @@ def main(args):
 
     # seed
     torch.manual_seed(all_args.seed)
-    torch.cuda.manual_seed_all(all_args.seed)
+    if all_args.cuda:
+        torch.cuda.manual_seed_all(all_args.seed)
     np.random.seed(all_args.seed)
     random.seed(all_args.seed)
 

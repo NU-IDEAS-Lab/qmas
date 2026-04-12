@@ -1,6 +1,7 @@
 from onpolicy.scripts.train.train_pettingzoo import main
 
 import os
+import sys
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
@@ -12,7 +13,7 @@ args = [
 	"--num_extractors", "0",
     "--num_haulers", "0",
     "--num_prospectors", "0",
-    "--num_superbots", "1",
+    "--num_superbots", "3",
 
     "--hauler_capacity", "10",
 
@@ -25,7 +26,7 @@ args = [
 
     "--noisy_memory",
 
-    "--observation_radius", "10",
+    "--observation_radius", "8",
     # "--observation_mask",
     # "--available_actions_mask",
 
@@ -62,8 +63,8 @@ args = [
 
     "--n_rollout_threads", "50",
     "--threaded_training",
-    "--cuda",
-    # "--cuda_idx", "5",
+    # "--cuda",
+    # "--cuda_idx", "3",
     # "--cuda_idx_predictor", "7",
 
     "--save_interval", "200000",
@@ -72,4 +73,4 @@ args = [
     "--use_wandb",
 ]
 
-main(args)
+main(args + sys.argv[1:])

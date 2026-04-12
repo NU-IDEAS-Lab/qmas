@@ -16,7 +16,7 @@ from onpolicy.config import get_config
 from onpolicy.envs.pettingzoo.Pettingzoo_Env import PettingzooEnv
 from onpolicy.envs.env_wrappers import ShareSubprocVecEnv, ShareDummyVecEnv, DummyVecEnv, SubprocVecEnv
 
-from onpolicy.scripts.train.train_pettingzoo import parse_args, validateArgs as train_validateArgs, get_environment_class
+from onpolicy.scripts.train.train_pettingzoo import parse_args, validateArgs as train_validateArgs, get_environment_class, resolve_torch_device
 
 def validateArgs(all_args):
     ''' Validates the arguments. '''
@@ -63,24 +63,9 @@ def main(args):
     torch._dynamo.config.compiled_autograd = True
     torch.backends.cudnn.benchmark = True
 
-    # cuda
-    if all_args.cuda and torch.cuda.is_available():
-        device = torch.device(f"cuda:{all_args.cuda_idx}")
-        torch.set_num_threads(all_args.n_training_threads)
-        if all_args.cuda_deterministic:
-            torch.backends.cudnn.benchmark = False
-            torch.backends.cudnn.deterministic = True
-
-            # Set CUBLAS_WORKSPACE_CONFIG for reproducibility:
-            # https://docs.nvidia.com/cuda/cublas/index.html#results-reproducibility
-            os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
-
-            # Set PyTorch flags for reproducibility:
-            torch.use_deterministic_algorithms(True)
-    else:
+    device = resolve_torch_device(all_args)
+    if device.type == "cpu":
         print("choose to use cpu...")
-        device = torch.device("cpu")
-        torch.set_num_threads(all_args.n_training_threads)
 
     # run dir and video dir
     run_dir = Path(all_args.model_dir).parent.absolute()
@@ -105,7 +90,8 @@ def main(args):
     
     # seed
     torch.manual_seed(all_args.seed)
-    torch.cuda.manual_seed_all(all_args.seed)
+    if all_args.cuda:
+        torch.cuda.manual_seed_all(all_args.seed)
     np.random.seed(all_args.seed)
     random.seed(all_args.seed)
 

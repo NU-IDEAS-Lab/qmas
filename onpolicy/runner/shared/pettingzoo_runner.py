@@ -435,6 +435,51 @@ class PettingzooRunner(Runner):
             action=traj_actions.to(self.device),
         )
 
+    def _get_prediction_target(self, obs, infos, n_threads, share_obs=None):
+        """Get the full target tensor and visibility mask for the current prediction timestep."""
+
+        observation_global = np.array([info["observation_global"] for info in infos]) if "observation_global" in infos[0] else None
+        visibility_mask = np.array([info["visibility_mask"] for info in infos]) if "visibility_mask" in infos[0] else None
+        visibility_mask_global = np.array([info["visibility_mask_global"] for info in infos]) if "visibility_mask_global" in infos[0] else None
+        state_visibility_mask = np.array([info["state_visibility_mask"] for info in infos]) if "state_visibility_mask" in infos[0] else None
+
+        if observation_global is not None and self.all_args.state_encoder:
+            target = observation_global
+            target_visibility_mask = visibility_mask_global
+        elif share_obs is not None:
+            target = np.array(share_obs)
+            target_visibility_mask = state_visibility_mask
+        elif obs.dtype == object:
+            raise ValueError("Must have observation_global in infos to use object-type observations (e.g. pyg graph observations). Check that environment is providing this information.")
+        else:
+            target = obs
+            target_visibility_mask = visibility_mask
+
+        if target_visibility_mask is None:
+            target = np.array(target)
+            target_visibility_mask = np.ones_like(target, dtype=np.float32)
+
+        target = target.reshape((n_threads, self.num_agents, -1))
+        target_visibility_mask = target_visibility_mask.reshape((n_threads, self.num_agents, -1))
+        return target, target_visibility_mask
+
+    def _compute_prediction_errors(self, prediction, target, target_visibility_mask, n_threads, obs_shape):
+        """Compute prediction error on hidden entries and over the full target tensor."""
+
+        pred_now = prediction[:, -1].detach().cpu().reshape((n_threads, self.num_agents, *obs_shape))
+        target_now = torch.from_numpy(target).to(dtype=pred_now.dtype).reshape((n_threads, self.num_agents, *obs_shape))
+        visibility_now = torch.from_numpy(target_visibility_mask).to(dtype=pred_now.dtype).reshape((n_threads, self.num_agents, *obs_shape))
+
+        full_error = torch.abs(pred_now - target_now)
+        hidden_mask = 1.0 - visibility_now
+        hidden_count = hidden_mask.sum()
+        if hidden_count.item() > 0:
+            hidden_error_mean = (full_error * hidden_mask).sum() / hidden_count
+        else:
+            hidden_error_mean = torch.zeros((), dtype=pred_now.dtype)
+
+        return hidden_error_mean, full_error
+
     def _compute_predictions(self, trajectory_buffer, prediction_prev, n_threads, obs_shape):
         use_prediction = (
             hasattr(self.policy, "predictors")
@@ -442,7 +487,7 @@ class PettingzooRunner(Runner):
             and not self.all_args.prediction_disable
         )
         if not use_prediction:
-            return None, None, prediction_prev, None, False
+            return None, None, prediction_prev, False
 
         trajectory, visibility_mask = trajectory_buffer.get_trajectory()
         trajectory = trajectory.transpose(0, 1)
@@ -459,17 +504,7 @@ class PettingzooRunner(Runner):
         uncertainty = uncertainty.detach().cpu()
         prediction_prev = pred
 
-        pred_now = pred[:, -1].reshape((n_threads, self.num_agents, *obs_shape))
-        uncertainty_now = uncertainty[:, -1].reshape((n_threads, self.num_agents, *obs_shape))
-
-        transition_now = trajectory[:, -1].detach().cpu()
-        if self.all_args.prediction_history_include_actions:
-            act_size = int(np.prod(get_shape_from_act_space(self.buffer.act_space)))
-            transition_now = transition_now[:, act_size:]
-        transition_now = transition_now.reshape((n_threads, self.num_agents, *obs_shape))
-        prediction_error = torch.abs(pred_now - transition_now)
-
-        return pred, uncertainty, prediction_prev, prediction_error, True
+        return pred, uncertainty, prediction_prev, True
 
     def _get_prediction_obs_shape(self, obs, share_obs, infos):
         """Infer the tensor shape used by the predictor for the current rollout."""
@@ -534,6 +569,9 @@ class PettingzooRunner(Runner):
         for i_episode in range(self.all_args.eval_episodes):
             obs, share_obs, available_actions, infos = eval_env.reset(return_info=True)
             obs_shape = self._get_prediction_obs_shape(obs, share_obs, infos)
+            prediction_target, prediction_target_visibility = self._get_prediction_target(
+                obs, infos, self.n_eval_rollout_threads, share_obs=share_obs
+            )
             rnn_states = torch.zeros((self.n_eval_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=torch.float32)
             masks = torch.ones((self.n_eval_rollout_threads, self.num_agents, 1), dtype=torch.float32)
             self._seed_trajectory_buffer(eval_trajectory, obs, self.n_eval_rollout_threads, share_obs=share_obs)
@@ -547,12 +585,22 @@ class PettingzooRunner(Runner):
                 if np.any(aa == None):
                     aa = None
 
-                prediction, uncertainty, prediction_prev, prediction_error, use_prediction = self._compute_predictions(
+                prediction, uncertainty, prediction_prev, use_prediction = self._compute_predictions(
                     eval_trajectory,
                     prediction_prev,
                     self.n_eval_rollout_threads,
                     obs_shape,
                 )
+                prediction_error_mean = torch.zeros((), dtype=torch.float32)
+                prediction_trajectory_error = None
+                if use_prediction:
+                    prediction_error_mean, prediction_trajectory_error = self._compute_prediction_errors(
+                        prediction,
+                        prediction_target,
+                        prediction_target_visibility,
+                        self.n_eval_rollout_threads,
+                        obs_shape,
+                    )
 
                 obs_policy = self._format_policy_obs(obs)
                 global_obs_policy = self._format_policy_global_obs(infos)
@@ -578,18 +626,21 @@ class PettingzooRunner(Runner):
                 actions_env = [actions[idx, :, :].numpy() for idx in range(self.n_eval_rollout_threads)]
 
                 obs, share_obs, eval_rewards, dones, infos, available_actions = eval_env.step(actions_env)
+                prediction_target, prediction_target_visibility = self._get_prediction_target(
+                    obs, infos, self.n_eval_rollout_threads, share_obs=share_obs
+                )
 
                 _, obs = self._build_viz_mask(obs, infos, actions, self.n_eval_rollout_threads)
                 self._update_trajectory_buffer(eval_trajectory, obs, infos, actions, self.n_eval_rollout_threads, share_obs=share_obs)
 
                 # Add prediction error to infos for logging.
-                infos[0]["prediction_error_mean"] = prediction_error.mean().item() if prediction_error is not None else 0.0
-                infos[0]["prediction_trajectory_error_mean"] = prediction_error.mean().item() if prediction_error is not None else 0.0
+                infos[0]["prediction_error_mean"] = prediction_error_mean.item() if use_prediction else 0.0
+                infos[0]["prediction_trajectory_error_mean"] = prediction_trajectory_error.mean().item() if prediction_trajectory_error is not None else 0.0
 
                 # Add uncertainty to infos for logging.
                 infos[0]["prediction_uncertainty_mean"] = uncertainty_now.mean().item()
-                if prediction_error is not None:
-                    uncertainty_gap = uncertainty_now - prediction_error
+                if prediction_trajectory_error is not None:
+                    uncertainty_gap = uncertainty_now - prediction_trajectory_error
                     infos[0]["prediction_uncertainty_gap_mean"] = uncertainty_gap.mean().item()
                     infos[0]["prediction_uncertainty_gap_min"] = uncertainty_gap.min().item()
                     infos[0]["prediction_uncertainty_gap_max"] = uncertainty_gap.max().item()
@@ -636,6 +687,9 @@ class PettingzooRunner(Runner):
             # Reset the environment and get the initial observations.
             obs, share_obs, available_actions, infos = render_env.reset(return_info=True)
             obs_shape = self._get_prediction_obs_shape(obs, share_obs, infos)
+            prediction_target, prediction_target_visibility = self._get_prediction_target(
+                obs, infos, self.n_render_rollout_threads, share_obs=share_obs
+            )
             rnn_states = torch.zeros((self.n_render_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=torch.float32)
             masks = torch.ones((self.n_render_rollout_threads, self.num_agents, 1), dtype=torch.float32)
             self._seed_trajectory_buffer(render_trajectory, obs, self.n_render_rollout_threads, share_obs=share_obs)
@@ -654,17 +708,27 @@ class PettingzooRunner(Runner):
                 if np.any(aa == None):
                     aa = None
 
-                prediction, uncertainty, prediction_prev, prediction_error, use_prediction = self._compute_predictions(
+                prediction, uncertainty, prediction_prev, use_prediction = self._compute_predictions(
                     render_trajectory,
                     prediction_prev,
                     self.n_render_rollout_threads,
                     obs_shape,
                 )
+                prediction_error_mean = torch.zeros((), dtype=torch.float32)
+                prediction_trajectory_error = None
+                if use_prediction:
+                    prediction_error_mean, prediction_trajectory_error = self._compute_prediction_errors(
+                        prediction,
+                        prediction_target,
+                        prediction_target_visibility,
+                        self.n_render_rollout_threads,
+                        obs_shape,
+                    )
 
                 if use_prediction:
                     for agentIdx in range(self.num_agents):
-                        print(f"Mean Prediction Error ({agentIdx}): {prediction_error.mean():.2f}")
-                        print(f"Mean Trajectory Prediction Error ({agentIdx}): {prediction_error.mean():.2f}")
+                        print(f"Mean Prediction Error ({agentIdx}): {prediction_error_mean:.2f}")
+                        print(f"Mean Trajectory Prediction Error ({agentIdx}): {prediction_trajectory_error.mean():.2f}")
 
                 obs_policy = self._format_policy_obs(obs)
                 global_obs_policy = self._format_policy_global_obs(infos)
@@ -697,6 +761,9 @@ class PettingzooRunner(Runner):
                     print(f"ready")
 
                 obs, share_obs, render_rewards, dones, infos, available_actions = render_env.step(actions_env)
+                prediction_target, prediction_target_visibility = self._get_prediction_target(
+                    obs, infos, self.n_render_rollout_threads, share_obs=share_obs
+                )
 
                 _, obs = self._build_viz_mask(obs, infos, actions, self.n_render_rollout_threads)
                 self._update_trajectory_buffer(render_trajectory, obs, infos, actions, self.n_render_rollout_threads, share_obs=share_obs)

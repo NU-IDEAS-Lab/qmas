@@ -15,7 +15,7 @@ from onpolicy.config import get_config
 from onpolicy.envs.pettingzoo.Pettingzoo_Env import PettingzooEnv
 from onpolicy.envs.env_wrappers import ShareSubprocVecEnv, ShareDummyVecEnv, DummyVecEnv, SubprocVecEnv
 
-from onpolicy.scripts.train.train_pettingzoo import parse_args, validateArgs, get_environment_class
+from onpolicy.scripts.train.train_pettingzoo import parse_args, validateArgs, get_environment_class, resolve_torch_device
 
 def make_render_env(all_args):
     ''' Builds training environments for all threads. '''
@@ -51,18 +51,11 @@ def main(args):
     assert not (all_args.model_dir == None or all_args.model_dir == ""), ("set model_dir first")
     assert all_args.n_render_rollout_threads==1, ("only support to use 1 env to render.")
 
-    # cuda
-    if all_args.cuda and torch.cuda.is_available():
+    device = resolve_torch_device(all_args)
+    if device.type == "cuda":
         print("choose to use gpu...")
-        device = torch.device(f"cuda:{all_args.cuda_idx}")
-        torch.set_num_threads(all_args.n_training_threads)
-        if all_args.cuda_deterministic:
-            torch.backends.cudnn.benchmark = False
-            torch.backends.cudnn.deterministic = True
     else:
         print("choose to use cpu...")
-        device = torch.device("cpu")
-        torch.set_num_threads(all_args.n_training_threads)
 
     # run dir and video dir
     run_dir = Path(all_args.model_dir).parent.absolute()
@@ -82,7 +75,8 @@ def main(args):
     
     # seed
     torch.manual_seed(all_args.seed)
-    torch.cuda.manual_seed_all(all_args.seed)
+    if all_args.cuda:
+        torch.cuda.manual_seed_all(all_args.seed)
     np.random.seed(all_args.seed)
 
     # env init
