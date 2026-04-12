@@ -218,7 +218,12 @@ class PettingzooRunner(Runner):
 
             # Replace the observation with the prediction.
             if self.all_args.prediction_during_training:
-                obs = pred_now
+                if obs.dtype == object:
+                    # For GNN envs, the prediction cannot replace the graph obs directly.
+                    # Use it as global_obs for the state encoder instead.
+                    global_obs = pred_now
+                else:
+                    obs = pred_now
             
             # Inject uncertainty into the observation.
             if self.all_args.prediction_uq_injection_method == "append":
