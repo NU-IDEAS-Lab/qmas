@@ -507,8 +507,8 @@ class PettingzooRunner(Runner):
         for i_episode in range(episodes):
             # Reset the environment and get the initial observations.
             obs, share_obs, available_actions = env.reset()
-            rnn_states = torch.zeros((rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=torch.float32)
-            masks = torch.ones((rollout_threads, self.num_agents, 1), dtype=torch.float32)
+            rnn_states = torch.zeros((rollout_threads * self.num_agents, self.recurrent_N, self.hidden_size), dtype=torch.float32)
+            masks = torch.ones((rollout_threads * self.num_agents, 1), dtype=torch.float32)
             self._seed_trajectory_buffer(trajectory, obs, rollout_threads, share_obs=share_obs)
 
             dones = False
@@ -645,8 +645,8 @@ class PettingzooRunner(Runner):
         for i_episode in range(episodes):
             # Reset the environment and get the initial observations.
             obs, share_obs, available_actions = env.reset()
-            rnn_states = torch.zeros((rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=torch.float32)
-            masks = torch.ones((rollout_threads, self.num_agents, 1), dtype=torch.float32)
+            rnn_states = torch.zeros((rollout_threads * self.num_agents, self.recurrent_N, self.hidden_size), dtype=torch.float32)
+            masks = torch.ones((rollout_threads * self.num_agents, 1), dtype=torch.float32)
             self._seed_trajectory_buffer(trajectory, obs, rollout_threads, share_obs=share_obs)
 
             if self.all_args.save_gifs:        
