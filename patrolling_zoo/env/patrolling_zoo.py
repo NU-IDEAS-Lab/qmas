@@ -690,8 +690,13 @@ class parallel_env(ParallelEnv):
         if observe_method in ["pyg"]:
             obs_mask = None
 
+            # Convert vertices to a set.
+            vertices = set(vertices)
+            agents = set(agents)
+            agents.add(agent)
+
             # Copy pg map to g
-            g = deepcopy(self.pg.graph)
+            g = self.pg.graph.copy()
  
             # Get a list of last visit times for each node.
             lastVisits = [self.pg.getNodeVisitTime(i) for i in range(self.pg.graph.number_of_nodes())]
@@ -702,36 +707,22 @@ class parallel_env(ParallelEnv):
             allSame = maxIdleness == minIdleness
 
             # Set attributes of patrol graph nodes.
+            idleness_map = {}
+            node_type_map = {}
             for node in g.nodes:
-                # Add dummy lastNode and currentAction values as attributes in g for all nodes.
-                g.nodes[node]["lastNode"] = -1.0
-                g.nodes[node]["currentAction"] = -1.0
+                idleness_map[node] = 1.0 if allSame else self._minMaxNormalize(
+                    self.step_count - lastVisits[node], minimum=minIdleness, maximum=maxIdleness
+                )
+                node_type_map[node] = NODE_TYPE.OBSERVABLE_NODE if node in vertices else NODE_TYPE.UNOBSERVABLE_NODE
 
-                # Normalize idleness times for visible nodes
-                if allSame:
-                    g.nodes[node]["idlenessTime"] = 1.0
-                else:
-                    g.nodes[node]["idlenessTime"] = self._minMaxNormalize(
-                        self.step_count - lastVisits[node],
-                        minimum=minIdleness,
-                        maximum=maxIdleness
-                    )
-                        
-                if node in vertices:
-                    # Node is visible.
-                    g.nodes[node]["nodeType"] = NODE_TYPE.OBSERVABLE_NODE
-                else:
-                    # Node is not visible.
-                    g.nodes[node]["nodeType"] = NODE_TYPE.UNOBSERVABLE_NODE
-
-            # Ensure that we add a node for the current agent, even if it's dead.
-            if agent not in agents:
-                agentsPlusEgo = agents + [agent]
-            else:
-                agentsPlusEgo = agents
+            nx.set_node_attributes(g, -1.0, "lastNode")
+            nx.set_node_attributes(g, -1.0, "currentAction")
+            nx.set_node_attributes(g, idleness_map, "idlenessTime")
+            nx.set_node_attributes(g, node_type_map, "nodeType")
 
             # Traverse through all visible agents and add their positions as new nodes to g
-            for a in agentsPlusEgo:
+            agentnodes = set()
+            for a in agents:
                 # To avoid node ID conflicts, generate a unique node ID
                 agent_node_id = f"agent_{a.id}_pos"
                 g.add_node(
@@ -744,6 +735,7 @@ class parallel_env(ParallelEnv):
                     lastNode = g.nodes[a.lastNode]["id"] if a.lastNode in g.nodes else -1.0,
                     currentAction = a.currentAction if a in agents else -1.0
                 )
+                agentnodes.add(agent_node_id)
 
                 # Check if the agent has an edge that it is currently on
                 if a.edge is None:
@@ -772,7 +764,8 @@ class parallel_env(ParallelEnv):
                 g.edges[edge]["weight"] = self._minMaxNormalize(weights[edge], minimum=minWeight, maximum=maxWeight)
             
             # Turn g into a digraph, dg
-            dg = nx.DiGraph(g)
+            # dg = nx.DiGraph(g)
+            dg = g
 
             if self.action_method in ["neighbors", "neighbors_with_comm_boolean"]:
                 for i in dg.nodes:
@@ -789,8 +782,8 @@ class parallel_env(ParallelEnv):
                             idx += 1
 
             # Trim the graph to only include the nodes and edges that are visible to the agent.
-            subgraphNodes = vertices + [f"agent_{a.id}_pos" for a in agents]
-            subgraph = nx.subgraph(dg, subgraphNodes)
+            subgraph = nx.subgraph(dg, vertices | agentnodes)
+            subgraphNodes = list(subgraph.nodes)
             # subgraph = dg
             # subgraphNodes = list(g.nodes)
 
@@ -1050,9 +1043,9 @@ class parallel_env(ParallelEnv):
         # Interpret the action using the "neighbors" method.
         elif self.action_method in ["neighbors", "neighbors_with_comm_boolean"]:
             if agent.edge == None:
-                if action >= self.pg.graph.degree(agent.lastNode):
-                    raise ValueError(f"Invalid action {action} for agent {agent.name}. Node {agent.lastNode} has only {self.pg.graph.degree(agent.lastNode)} neighbors.")
-                dstNode = list(self.pg.graph.neighbors(agent.lastNode))[action]
+                if action >= self.pg.graph.out_degree(agent.lastNode):
+                    raise ValueError(f"Invalid action {action} for agent {agent.name}. Node {agent.lastNode} has only {self.pg.graph.out_degree(agent.lastNode)} neighbors.")
+                dstNode = list(self.pg.graph.successors(agent.lastNode))[action]
             else:
                 if action != agent.currentAction:
                     raise ValueError(f"Invalid action {action} for agent {agent.name}. Must complete action {agent.currentAction} first.")
@@ -1164,8 +1157,8 @@ class parallel_env(ParallelEnv):
             if agent.edge == None:
                 # All neighbors of the current node are available.
                 actionMap = np.zeros(num_nodes, dtype=np.float32)
-                # numNeighbors = self.pg.graph.degree(agent.lastNode) - 1 # subtract 1 since the self loop adds 2 to the degree
-                numNeighbors = self.pg.graph.degree(agent.lastNode)
+                # numNeighbors = self.pg.graph.out_degree(agent.lastNode) - 1 # subtract 1 since the self loop adds 2 to the degree
+                numNeighbors = self.pg.graph.out_degree(agent.lastNode)
                 actionMap[:numNeighbors] = 1.0
                 return actionMap
             else:
@@ -1182,7 +1175,7 @@ class parallel_env(ParallelEnv):
                     "movement": np.zeros(num_moves, dtype=np.float32),
                     "communication": np.array([1.0, 1.0], dtype=np.float32)
                 }
-                numNeighbors = self.pg.graph.degree(agent.lastNode)
+                numNeighbors = self.pg.graph.out_degree(agent.lastNode)
                 actionMap["movement"][:numNeighbors] = 1.0
             else:
                 # Only the current movement action is available (as it is still incomplete), but communication is still available.
