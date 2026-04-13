@@ -789,10 +789,10 @@ class parallel_env(ParallelEnv):
                             idx += 1
 
             # Trim the graph to only include the nodes and edges that are visible to the agent.
-            # subgraphNodes = vertices + [f"agent_{a.id}_pos" for a in agents]
-            # subgraph = nx.subgraph(g, subgraphNodes)
-            subgraph = dg
-            subgraphNodes = list(g.nodes)
+            subgraphNodes = vertices + [f"agent_{a.id}_pos" for a in agents]
+            subgraph = nx.subgraph(dg, subgraphNodes)
+            # subgraph = dg
+            # subgraphNodes = list(g.nodes)
 
             if self.action_method in ["neighbors", "neighbors_with_comm_boolean"]:
                 edge_attrs = ["weight", "neighborIndex"]
