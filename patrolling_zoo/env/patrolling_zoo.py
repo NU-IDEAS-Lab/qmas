@@ -774,7 +774,7 @@ class parallel_env(ParallelEnv):
             # Turn g into a digraph, dg
             dg = nx.DiGraph(g)
 
-            if self.action_method == "neighbors":
+            if self.action_method in ["neighbors", "neighbors_with_comm_boolean"]:
                 for i in dg.nodes:
                     # Add degree to the node features.
                     dg.nodes[i]["degree"] = dg.out_degree(i)
@@ -794,7 +794,7 @@ class parallel_env(ParallelEnv):
             subgraph = dg
             subgraphNodes = list(g.nodes)
 
-            if self.action_method == "neighbors":
+            if self.action_method in ["neighbors", "neighbors_with_comm_boolean"]:
                 edge_attrs = ["weight", "neighborIndex"]
                 node_attrs = ["nodeType", "idlenessTime", "degree"]
                 # node_attrs = ["id", "nodeType", "idlenessTime", "lastNode", "currentAction"]
