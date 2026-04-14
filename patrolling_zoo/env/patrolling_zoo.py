@@ -698,21 +698,24 @@ class parallel_env(ParallelEnv):
             # Copy pg map to g
             g = self.pg.graph.copy()
  
-            # Get a list of last visit times for each node.
-            lastVisits = [self.pg.getNodeVisitTime(i) for i in range(self.pg.graph.number_of_nodes())]
+            # Get a list of last visit times for each visible node.
+            lastVisits = {i: self.pg.getNodeVisitTime(i) for i in vertices}
             
             # Get min and max idleness times for normalization.
-            maxIdleness = self.step_count - min(lastVisits)
-            minIdleness = self.step_count - max(lastVisits)
+            maxIdleness = self.step_count - min(lastVisits.values())
+            minIdleness = self.step_count - max(lastVisits.values())
             allSame = maxIdleness == minIdleness
 
             # Set attributes of patrol graph nodes.
             idleness_map = {}
             node_type_map = {}
             for node in g.nodes:
-                idleness_map[node] = 1.0 if allSame else self._minMaxNormalize(
-                    self.step_count - lastVisits[node], minimum=minIdleness, maximum=maxIdleness
-                )
+                if node in vertices:
+                    idleness_map[node] = 1.0 if allSame else self._minMaxNormalize(
+                        self.step_count - lastVisits[node], minimum=minIdleness, maximum=maxIdleness
+                    )
+                else:
+                    idleness_map[node] = -1.0
                 node_type_map[node] = NODE_TYPE.OBSERVABLE_NODE if node in vertices else NODE_TYPE.UNOBSERVABLE_NODE
 
             nx.set_node_attributes(g, -1.0, "lastNode")
@@ -782,10 +785,9 @@ class parallel_env(ParallelEnv):
                             idx += 1
 
             # Trim the graph to only include the nodes and edges that are visible to the agent.
-            subgraph = nx.subgraph(dg, vertices | agentnodes)
+            # subgraph = nx.subgraph(dg, vertices | agentnodes)
+            subgraph = dg
             subgraphNodes = list(subgraph.nodes)
-            # subgraph = dg
-            # subgraphNodes = list(g.nodes)
 
             if self.action_method in ["neighbors", "neighbors_with_comm_boolean"]:
                 edge_attrs = ["weight", "neighborIndex"]

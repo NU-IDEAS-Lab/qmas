@@ -24,7 +24,7 @@ class QmasAlgorithm(R_MAPPO):
         # Assume policy.predictors is a list of predictor modules (ensemble)
         self.predictors = policy.predictors
         self.num_predictors = len(self.predictors)
-        self.prediction_horizon = self.predictors[0].prediction_horizon  # Assume all predictors have same horizon
+        self.prediction_horizon = args.prediction_history_window
         self.predictor_2d_conv = args.diffusion_model_type == "unet2d"
 
     def train(self, buffer, update_actor=True, update_critic=True, last_step=-1, episode=None, episodes=None):

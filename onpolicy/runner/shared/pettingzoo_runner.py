@@ -119,7 +119,7 @@ class PettingzooRunner(Runner):
                 self.env_infos = defaultdict(list)
 
             progress_bar.set_postfix({
-                "exp": self.experiment_name,
+                # "exp": self.experiment_name,
                 "timesteps": f"{total_num_steps}/{self.num_env_steps}",
                 "avg_ep_rewards": avg_episode_rewards,
                 "fps": int(total_num_steps / (end - start))
