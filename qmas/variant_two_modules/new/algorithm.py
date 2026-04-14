@@ -26,7 +26,7 @@ class QmasAlgorithm(Algorithm):
         self.use_threads = args.threaded_training
         self.predictors = policy.predictors
         self.num_predictors = len(self.predictors)
-        self.prediction_horizon = self.predictors[0].prediction_horizon  # Assume all predictors have same horizon
+        self.prediction_horizon = args.prediction_history_window
         self.predictor_2d_conv = args.diffusion_model_type == "unet2d"
 
         print(f"Initialized QmasAlgorithm with {self.num_predictors} predictors. Threaded training: {self.use_threads}")
@@ -56,7 +56,7 @@ class QmasAlgorithm(Algorithm):
         thread_exceptions_lock = threading.Lock()
 
         # Determine what to update.
-        update_predictor = not self.args.prediction_disable
+        update_predictor = not self.args.prediction_disable and self.predictors is not None and len(self.predictors) > 0
         if episode is not None and episodes is not None:
             frac = episode / episodes
             if frac < self.args.episode_fraction_start_prediction:
