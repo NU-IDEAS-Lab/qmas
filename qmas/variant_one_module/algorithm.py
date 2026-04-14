@@ -96,7 +96,7 @@ class QmasAlgorithmOneModule(R_MAPPO):
 
     def train_initialize_info(self, train_info):
         super().train_initialize_info(train_info)
-        train_info['diffusion_loss'] = torch.zeros(1, device=self.device)
+        train_info['diffuser_loss'] = torch.zeros(1, device=self.device)
 
     # ---------------------------------------------------------------------- #
     # Override train_sample to accumulate diffusion_loss                       #
@@ -112,7 +112,7 @@ class QmasAlgorithmOneModule(R_MAPPO):
         train_info['actor_grad_norm'] += actor_grad_norm
         train_info['critic_grad_norm'] += critic_grad_norm
         train_info['ratio'] += imp_weights.mean()
-        train_info['diffusion_loss'] += torch.tensor(diffusion_loss, device=self.device)
+        train_info['diffuser_loss'] += torch.tensor(diffusion_loss, device=self.device)
 
     # ---------------------------------------------------------------------- #
     # Core PPO + diffusion update (single backward pass)                       #
