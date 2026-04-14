@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-	"--experiment_name", "diffuser-patrolling-obs200-uqEnsemble3-pygNS",
+	"--experiment_name", "diffuser-patrolling-obs200-uqEnsemble3-pygNS-commsRL-injectionAppend",
 	# "--experiment_name", "diffuser-patrolling-obs200-uqEnsemble3-pygNS-injectionAppend",
 	"--project_name", "qmas",
 	"--env_class", "patrolling_zoo.patrolling_zoo_v0.parallel_env",
@@ -31,7 +31,7 @@ args = [
 
 	"--algorithm_class", "qmas.variant_two_modules.new.algorithm.QmasAlgorithm",
 	"--policy_class", "qmas.variant_two_modules.new.policy.QmasPolicy",
-	"--algorithm_name", "mappo",
+	"--algorithm_name", "rmappo",
 	"--use_gnn_policy",
 	"--use_gnn_mlp_policy",
 	"--gnn_layer_N", "10",
@@ -51,15 +51,17 @@ args = [
 
 	"--diffusion_model_type", "dit1d",
     "--prediction_uq_method", "ensemble",
-    # "--prediction_uq_injection_method", "append",
-    "--prediction_disable",
+    "--prediction_uq_injection_method", "append",
+    # "--prediction_disable",
 	"--prediction_ensemble_size", "3",
     "--state_encoder",
+
+    "--episode_fraction_start_prediction", "0.2",
 
 	"--n_rollout_threads", "21",
 	"--cuda",
 	"--cuda_idx", "4",
-    "--cuda_idx_predictor", "5",
+    "--cuda_idx_predictor", "6",
     "--threaded_training",
     "--n_training_threads", "16",
 

@@ -207,6 +207,8 @@ def validateArgs(all_args):
         all_args.prediction_uq_method = "estimation"
         print("Warning: --prediction_estimate_uncertainty is deprecated. Setting prediction_uq_method to estimation.")
 
+    assert all_args.n_rollout_threads % all_args.prediction_ensemble_size == 0, "n_rollout_threads must be divisible by prediction_ensemble_size."
+
     print("Pettingzoo arguments validated: base")
 
     # Validate environment arguments.
