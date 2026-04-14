@@ -92,6 +92,32 @@ class QmasPolicy(R_MAPPOPolicy):
         )
         return actions, rnn_states_actor
 
+    def restore(self, directory):
+        """Restore actor and critic from a saved model directory.
+
+        The ``fix_mask`` parameter inside each embedded predictor's diffuser is
+        saved with the batch shape it had at the last training step, which is
+        incompatible with the default shape initialised at construction time.
+        We reset every ``fix_mask`` entry in the state dict to the currently
+        initialised shape before calling ``load_state_dict``.
+        """
+        import os
+        actor_state_dict = torch.load(
+            os.path.join(directory, 'actor.pt'), map_location=self.device
+        )
+        # Reset any batch-sized fix_mask back to the predictor's init shape.
+        for i, predictor in enumerate(self.actor.predictors):
+            key = f"predictors.{i}.diffuser.fix_mask"
+            if key in actor_state_dict:
+                actor_state_dict[key] = predictor.diffuser.fix_mask
+        self.actor.load_state_dict(actor_state_dict)
+
+        if not self.args.use_render:
+            critic_state_dict = torch.load(
+                os.path.join(directory, 'critic.pt'), map_location=self.device
+            )
+            self.critic.load_state_dict(critic_state_dict)
+
     def evaluate_actions(self, cent_obs, obs, rnn_states_actor, rnn_states_critic,
                          action, masks, available_actions=None, active_masks=None,
                          global_obs=None):
