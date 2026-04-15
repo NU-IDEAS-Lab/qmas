@@ -1,0 +1,74 @@
+@startuml
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 20
+
+actor Caller
+participant "QmasPolicy" as P
+participant "QmasActorOneModule" as A
+participant "GNNBase / CNNBase\n/ MLPBase" as Base
+participant "StateEncoder\n(prediction_encoder)" as SE
+participant "RNNLayer\n[optional]" as RNN
+participant "ACTLayer" as ACT
+participant "QmasCritic" as C
+
+== get_actions(cent_obs, obs, rnn_states_actor, rnn_states_critic, masks, global_obs) ==
+
+Caller -> P : get_actions(...)
+
+P -> A : forward(obs, rnn_states_actor, masks,\navailable_actions, deterministic, global_obs)
+
+group _encode_local_obs(obs)
+  alt use_gnn
+    A -> Base : GNNBase(graph.x, edge_attr, edge_index)
+    Base --> A : node_feats
+    note right of A
+      gather agent node feat\n(or mean-pool / neighbor scoring)
+      cat with non-graph obs
+      [optional mlp0]
+    end note
+  else use_cnn
+    A -> Base : CNNBase(obs)
+    Base --> A : feats
+  else use_mlp
+    A -> Base : MLPBase(obs)
+    Base --> A : feats
+  end
+end
+
+group _encode_global_obs(actor_features, global_obs)
+  alt global_obs is None
+    A -> A : latent = zeros(batch, latent_dim)
+  else
+    A -> SE : forward(global_obs)
+    SE --> A : latent  [shape: (n_threads, latent_dim)]
+    note right of A
+      if latent batch < actor batch:
+        latent.repeat_interleave(n_agents)
+    end note
+  end
+  A -> A : actor_features = cat([local_feats, latent], dim=-1)
+end
+
+opt use_rnn
+  A -> RNN : forward(actor_features, rnn_states, masks)
+  RNN --> A : actor_features, rnn_states_actor (updated)
+end
+
+A -> ACT : forward(actor_features, available_actions, deterministic)
+ACT --> A : actions, action_log_probs
+
+A --> P : actions, action_log_probs, rnn_states_actor
+
+group Critic forward
+  note over P
+    if rnn_states_critic.shape[0] == cent_obs.shape[0] × n_agents:
+      stride critic inputs by n_agents (one RNN state per env thread)
+  end note
+  P -> C : forward(cent_obs, rnn_states_critic[::n_agents], masks[::n_agents])
+  C --> P : values, rnn_states_critic (updated)
+  note over P : repeat_interleave(n_agents) to restore per-agent shape
+end
+
+P --> Caller : values, actions, action_log_probs,\nrnn_states_actor, rnn_states_critic
+@enduml

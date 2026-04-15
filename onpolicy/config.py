@@ -388,6 +388,14 @@ def get_config():
                         choices=["none", "append"],
                         help="Method to inject uncertainty estimates into the policy input")
 
+    # One-module variant parameters.
+    parser.add_argument("--prediction_loss_coef", type=float, default=1.0,
+                        help="Coefficient for the intermediate prediction (reconstruction) loss "
+                             "used in the one-module variant (qmas.variant_one_module). "
+                             "This loss is added to the PPO actor loss before the single "
+                             "backward pass so that the prediction encoder is jointly "
+                             "optimised with the policy.")
+
     # Torch parameters.
     parser.add_argument("--torch_compile", action="store_true",
                         help="Whether to use torch.compile to compile the model.")

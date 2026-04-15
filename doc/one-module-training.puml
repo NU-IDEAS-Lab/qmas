@@ -1,0 +1,117 @@
+@startuml one-module-forward-pass-training
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 15
+skinparam BoxPadding 10
+
+actor "Environment" as Env
+participant "PettingzooRunner\n.collect(step)" as Runner
+participant "TrajectoryBuffer\n(train_trajectory)" as TB
+participant "QmasPolicy\n.get_prediction()" as PP
+participant "EmbeddedPredictor[k]\n.get_prediction()" as Pred
+participant "DiscreteDiffusionSDE\n.sample()" as Diff
+participant "QmasPolicy\n.get_actions()" as PA
+participant "QmasActorOneModule\n.forward()" as A
+participant "StateEncoder\n(prediction_encoder)" as SE
+participant "GNNBase / MLPBase\n/ CNNBase" as Base
+participant "RNNLayer\n[optional]" as RNN
+participant "ACTLayer" as ACT
+participant "QmasCritic" as C
+
+== Per environment step ==
+
+Env -> Runner : obs, global_obs, visibility_mask\n(from env.step / warmup)
+
+Runner -> TB : add(obs_or_global_obs, visibility_mask, action)
+note right of TB
+  rolling deque of length
+  prediction_history_window
+end note
+
+alt episode_fraction >= episode_fraction_start_prediction\nAND train_trajectory.ready()\nAND NOT prediction_disable
+  Runner -> TB : get_trajectory()
+  TB --> Runner : trajectory  [T, n_threads, D]\nvisibility_mask  [T, n_threads, D]
+  Runner -> Runner : transpose → [n_threads, T, D]
+
+  Runner -> PP : get_prediction(trajectory, visibility_mask,\nprediction_prev, has_sample_dim=True)
+
+  loop for each EmbeddedPredictor k in ensemble
+    PP -> Pred : normalize_trajectory(trajectory)
+    Pred --> PP : norm_traj
+    PP -> Diff : sample(norm_traj, fix_mask=visibility_mask,\ncondition_cfg, n_samples)
+    Diff --> PP : pred_k  [n_threads, T, D]
+    note right of Diff
+      EMA model used for inference
+      (use_ema=True during rollout)
+    end note
+  end
+
+  PP -> PP : prediction = mean over ensemble\nuncertainty = var over ensemble\n(zero if ensemble_size == 1)
+  PP --> Runner : prediction  [n_threads, T, D]\nuncertainty  [n_threads, T, D]
+
+  Runner -> Runner : pred_now   = prediction[:, -1]\nuncertainty_now = uncertainty[:, -1]
+  Runner -> Runner : store prediction as train_prediction_prev\n(autoregression next step)
+
+  alt prediction_during_training AND obs is dense tensor
+    Runner -> Runner : obs = pred_now\n(replace obs with prediction)
+  else prediction_during_training AND obs is GNN graph
+    Runner -> Runner : global_obs = pred_now\n(use as global context instead)
+  end
+
+  alt prediction_uq_injection_method == "append"
+    alt global_obs is not None
+      Runner -> Runner : global_obs = cat([global_obs, uncertainty_now], dim=-1)
+    else
+      Runner -> Runner : obs = cat([obs, uncertainty_now], dim=-1)
+    end
+  end
+
+else prediction_uq_injection_method == "append" AND predictor not yet active
+  Runner -> Runner : uncertainty_now = zeros_like(obs / global_obs)
+  Runner -> Runner : obs (or global_obs) = cat([..., zeros], dim=-1)
+  note right of Runner
+    pad with zeros until predictor
+    starts producing outputs
+  end note
+end
+
+== Actor / Critic forward pass (get_actions) ==
+
+Runner -> PA : get_actions(share_obs, obs,\nrnn_states_actor, rnn_states_critic,\nmasks, global_obs)
+
+PA -> A : forward(obs, rnn_states_actor, masks,\navailable_actions, deterministic, global_obs)
+
+group _encode_local_obs(obs)
+  A -> Base : encode local obs\n[GNN / CNN / MLP]
+  Base --> A : local_feats
+end
+
+group _encode_global_obs(local_feats, global_obs)
+  note over A
+    global_obs may be:
+    • prediction (pred_now)      if prediction_during_training + GNN obs
+    • real global_obs            otherwise
+    • cat([..., uncertainty_now]) if uq_injection == "append"
+  end note
+  A -> SE : forward(global_obs)
+  SE --> A : latent  [n_threads, latent_dim]
+  A -> A : actor_features = cat([local_feats, latent], dim=-1)
+end
+
+opt use_rnn
+  A -> RNN : forward(actor_features, rnn_states, masks)
+  RNN --> A : actor_features, rnn_states_actor (updated)
+end
+
+A -> ACT : forward(actor_features, available_actions, deterministic)
+ACT --> A : actions, action_log_probs
+A --> PA : actions, action_log_probs, rnn_states_actor
+
+PA -> C : forward(share_obs, rnn_states_critic[::n_agents],\nmasks[::n_agents])
+C --> PA : values, rnn_states_critic (updated)
+note right of PA : repeat_interleave(n_agents) to restore per-agent shape
+
+PA --> Runner : values, actions, action_log_probs,\nrnn_states_actor, rnn_states_critic
+
+@enduml
