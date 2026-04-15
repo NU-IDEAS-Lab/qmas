@@ -247,12 +247,16 @@ class PettingzooRunner(Runner):
             # Inject uncertainty into the observation.
             if self.all_args.prediction_uq_injection_method == "append":
                 if global_obs is not None:
-                    global_obs = torch.cat([global_obs, uncertainty_now], dim=-1)
+                    # The buffer slot was pre-padded to 2×D; assign uncertainty into
+                    # the second half in-place rather than concatenating.
+                    obs_dim = uncertainty_now.shape[-1]
+                    global_obs[..., obs_dim:] = uncertainty_now
                     update_global_obs = True
                 elif obs.dtype == object:
                     raise ValueError("Must have observation_global in infos to use object-type observations (e.g. pyg graph observations). Check that environment is providing this information.")
                 else:
-                    obs = torch.cat([obs, uncertainty_now], dim=-1)
+                    obs_dim = uncertainty_now.shape[-1]
+                    obs[..., obs_dim:] = uncertainty_now
                     update_obs = True
 
         values, action, action_log_prob, rnn_states, rnn_states_critic = self.trainer.policy.get_actions(
