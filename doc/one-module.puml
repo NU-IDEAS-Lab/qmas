@@ -1,0 +1,136 @@
+@startuml
+skinparam classAttributeIconSize 0
+skinparam groupInheritance 2
+
+' ─── External base classes ─────────────────────────────────────────────────
+package "onpolicy (base)" {
+    class R_MAPPOPolicy
+    class R_MAPPO
+    class R_Actor as "R_Actor\n(Actor)"
+    class Critic
+}
+
+' ─── variant_two_modules.new (reused components) ───────────────────────────
+package "variant_two_modules.new" {
+    class StateEncoder {
+        +forward(state): Tensor
+    }
+    class QmasCritic
+    class Predictor {
+        +prediction_horizon: int
+        +diffuser: DiscreteDiffusionSDE
+        +update_normalization_stats(obs)
+        +normalize_trajectory(obs): Tensor
+        +get_prediction(traj, mask, ...): Tensor
+    }
+    class UncertaintyBoundsEstimator
+}
+
+package "cleandiffuser" {
+    class DiscreteDiffusionSDE {
+        +fix_mask: nn.Parameter
+        +loss(x0): Tensor
+        +ema_update()
+        +sample(...)
+    }
+}
+
+' ─── variant_one_module ─────────────────────────────────────────────────────
+package "variant_one_module" {
+
+    class EmbeddedPredictor {
+        ' Internal diffuser optimizers disabled;\n' managed by actor_optimizer
+        --
+        Note: diffuser.manual_optimizers = {}
+    }
+
+    class QmasActorOneModule {
+        ' Local encoder (one of):
+        +base: GNNBase [if use_gnn]
+        +cnn: CNNBase [if use_cnn]
+        +mlp: MLPBase [if use_mlp]
+        --
+        ' Global obs encoder:
+        +prediction_encoder: StateEncoder
+        --
+        ' Diffusion ensemble:
+        +predictors: nn.ModuleList[EmbeddedPredictor]
+        --
+        ' Sequence model + policy head:
+        +rnn: RNNLayer [optional]
+        +act: ACTLayer
+        --
+        +forward(obs, rnn_states, masks, ...): actions
+        +evaluate_actions(obs, global_obs, ...): log_probs
+        -_encode_local_obs(obs): Tensor
+        -_encode_global_obs(feats, global_obs): Tensor
+    }
+
+    class QmasPolicy {
+        +actor: QmasActorOneModule
+        +critic: QmasCritic
+        +actor_optimizer: Adam
+        +critic_optimizer: Adam
+        +predictors: list[EmbeddedPredictor]
+        --
+        +get_actions(...): values, actions, log_probs
+        +evaluate_actions(...): values, log_probs, entropy
+        +get_values(...): values
+        +get_prediction(traj, mask, ...): prediction, uncertainty
+        +restore(directory)
+    }
+
+    class QmasAlgorithmOneModule {
+        +prediction_loss_coef: float
+        -_trajectory_iter: cycle[TensorDict]
+        -_update_predictor_this_epoch: bool
+        --
+        +train(buffer, ...): train_info
+        +ppo_update(sample, ...): losses
+        -_compute_diffusion_loss(traj_sample): Tensor
+        +prep_training()
+        +prep_rollout()
+    }
+}
+
+' ─── Inheritance ─────────────────────────────────────────────────────────────
+EmbeddedPredictor    --|> Predictor
+QmasActorOneModule   --|> R_Actor
+QmasCritic           --|> Critic
+QmasPolicy           --|> R_MAPPOPolicy
+QmasAlgorithmOneModule --|> R_MAPPO
+
+' ─── Composition ─────────────────────────────────────────────────────────────
+QmasPolicy          *-- QmasActorOneModule        : actor
+QmasPolicy          *-- QmasCritic                : critic
+QmasActorOneModule  *-- StateEncoder              : prediction_encoder
+QmasActorOneModule  *--  "1..*" EmbeddedPredictor : predictors (nn.ModuleList)
+Predictor           *-- DiscreteDiffusionSDE      : diffuser
+Predictor           o-- UncertaintyBoundsEstimator : [optional]
+
+' ─── Association ─────────────────────────────────────────────────────────────
+QmasAlgorithmOneModule --> QmasPolicy            : policy
+QmasPolicy             --> EmbeddedPredictor     : predictors (exposed ref)
+
+' ─── Training data flow note ─────────────────────────────────────────────────
+note bottom of QmasAlgorithmOneModule
+  **Single backward pass per PPO mini-batch:**
+  1. buffer.sample_trajectories() → cycling _trajectory_iter
+  2. actor forward → PPO surrogate loss
+  3. predictor.diffuser.loss(traj) → score-matching loss
+  4. total = ppo_loss + λ·diffusion_loss  (λ = prediction_loss_coef)
+  5. total.backward()
+  6. actor_optimizer.step()
+  7. predictor.diffuser.ema_update()
+end note
+
+note right of QmasActorOneModule
+  **Forward pass:**
+  local_obs → base encoder
+  global_obs → prediction_encoder → latent
+  concat(local_feats, latent) → [RNN] → ACT → actions
+
+  **All parameters** (encoder + diffusion backbone)
+  are covered by a **single actor_optimizer**.
+end note
+@enduml
