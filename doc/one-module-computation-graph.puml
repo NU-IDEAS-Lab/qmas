@@ -62,10 +62,10 @@ package "QmasActorOneModule  [actor_optimizer]" {
   ' ── Diffusion backbone (EmbeddedPredictor) ──────────────────────
   package "EmbeddedPredictor[k]  (×ensemble_size)\n[parameters owned by actor_optimizer]" {
 
-    rectangle "update_normalization_stats()\n[no_grad — bookkeeping only]" <<nograd>> as NORM_STATS
-    rectangle "normalize_trajectory(traj_batch)\n[no_grad]" <<nograd>> as NORM_TRAJ
+    rectangle "update_normalization_stats()\n[@no_grad — bookkeeping only]" <<nograd>> as NORM_STATS
+    rectangle "normalize_trajectory(traj_batch)\n(x − μ) / σ  — buffers, not params" as NORM_TRAJ
 
-    rectangle "norm_traj_batch\n[B·T, H, D]" <<tensor>> as NORM_TRAJ_OUT
+    rectangle "norm_traj_batch\n[B·T, H, D]  (input detached from buffer)" <<tensor>> as NORM_TRAJ_OUT
 
     rectangle "fix_mask  (visibility mask)\nnn.Parameter — no grad" <<nograd>> as FIX_MASK
 
@@ -139,7 +139,7 @@ ENTROPY    --> ENT_LOSS
 
 ' Diffusion loss path
 TRAJ_BATCH ..> NORM_STATS : no_grad
-TRAJ_BATCH ..> NORM_TRAJ  : no_grad
+TRAJ_BATCH --> NORM_TRAJ  : detached input
 NORM_TRAJ  --> NORM_TRAJ_OUT
 NORM_TRAJ_OUT --> DIFFUSER : x0
 FIX_MASK   ..> DIFFUSER   : fix_mask (masks unseen)

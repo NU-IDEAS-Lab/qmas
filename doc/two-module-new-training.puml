@@ -1,0 +1,162 @@
+@startuml two-module-new-training
+
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 15
+skinparam BoxPadding 10
+
+actor "Environment" as Env
+participant "PettingzooRunner\n.collect(step)" as Runner
+participant "TrajectoryBuffer\n(train_trajectory)" as TB
+participant "QmasPolicy\n.get_prediction()" as PP
+participant "Predictor[k]\n.get_prediction()" as Pred
+participant "DiscreteDiffusionSDE\n.sample()  [EMA]" as Diff
+participant "QmasPolicy\n.get_actions()" as PA
+participant "QmasActor\n.forward()" as A
+participant "StateEncoder\n[if --state_encoder]" as SE
+participant "QmasCritic" as C
+
+== Per environment step (rollout — @torch.no_grad) ==
+
+Env -> Runner : obs, global_obs, visibility_mask\n(from env.step / warmup)
+
+Runner -> TB : add(obs_or_global_obs, visibility_mask, action)
+note right of TB
+  rolling deque of length
+  prediction_history_window
+end note
+
+alt episode_fraction >= episode_fraction_start_prediction\nAND train_trajectory.ready()\nAND NOT prediction_disable
+  Runner -> TB : get_trajectory()
+  TB --> Runner : trajectory  [T, n_threads, D]\nvisibility_mask  [T, n_threads, D]
+  Runner -> Runner : transpose → [n_threads, T, D]
+
+  Runner -> PP : get_prediction(trajectory, visibility_mask,\nprediction_prev, has_sample_dim=True)
+
+  loop for each Predictor[k] in ensemble
+    PP -> Pred : normalize_trajectory(traj)
+    Pred --> PP : norm_traj
+    PP -> Diff : sample(norm_traj, fix_mask=visibility_mask)
+    Diff --> PP : pred_k  [n_threads, T, D]
+    note right of Diff : EMA model — no gradient
+  end
+
+  alt uq_method == "estimation"
+    PP -> Pred : get_uncertainty_bounds(traj)
+    Pred --> PP : lb, ub
+    PP -> PP : uncertainty = |ub − lb|
+  else uq_method == "ensemble" AND K > 1
+    PP -> PP : uncertainty = var across ensemble
+  else K == 1
+    PP -> PP : uncertainty = zeros_like(prediction)
+  end
+
+  PP --> Runner : prediction  [n_threads, T, D]\nuncertainty  [n_threads, T, D]
+
+  Runner -> Runner : pred_now       = prediction[:, -1]\nuncertainty_now = uncertainty[:, -1]\nstore as train_prediction_prev
+
+  alt prediction_during_training AND obs is dense tensor
+    Runner -> Runner : obs = pred_now
+  else prediction_during_training AND obs is GNN graph
+    Runner -> Runner : global_obs = pred_now
+  end
+
+  alt prediction_uq_injection_method == "append"
+    alt global_obs is not None
+      Runner -> Runner : global_obs = cat([global_obs, uncertainty_now], dim=-1)
+    else
+      Runner -> Runner : obs = cat([obs, uncertainty_now], dim=-1)
+    end
+  end
+
+else prediction_uq_injection_method == "append" AND predictor not yet active
+  Runner -> Runner : zeros = zeros_like(obs / global_obs)\nobs (or global_obs) = cat([..., zeros], dim=-1)
+  note right of Runner
+    pad with zeros until predictor
+    starts producing outputs
+  end note
+end
+
+Runner -> PA : get_actions(share_obs, obs,\nrnn_states, rnn_states_critic, masks, global_obs)
+
+PA -> A : forward(obs, rnn_states_actor, masks,\navailable_actions, deterministic, global_obs)
+
+opt state_encoder flag is set
+  A -> SE : forward(global_obs)
+  SE --> A : encoded_state
+end
+
+A --> PA : actions, action_log_probs, rnn_states_actor
+PA -> C : forward(cent_obs, rnn_states_critic[::n_agents], ...)
+C --> PA : values
+PA --> Runner : values, actions, action_log_probs, rnn_states
+
+== Training phase (after episode — base_runner.train()) ==
+
+participant "QmasAlgorithm\n.train(buffer)" as Algo
+participant "R_MAPPO\n.train()  [PPO phase]" as PPO
+participant "QmasAlgorithm\n.train_sample_diffuser()" as DiffTrain
+participant "DiscreteDiffusionSDE\n.update_diffusion()" as DiffUpdate
+
+Runner -> Algo : train(buffer, episode, episodes)
+
+note over Algo
+  Two phases — optionally in parallel threads
+  when args.threaded_training == True.
+  Each predictor[k] trains only on its
+  assigned thread_indices (ensemble split).
+end note
+
+par PPO phase  [Thread 1 or sequential]
+  Algo -> PPO : super().train(buffer,\n  update_actor, update_critic)
+  note over PPO
+    For each PPO epoch, for each mini-batch:
+      evaluate_actions(obs, global_obs, ...)
+      → PPO surrogate loss
+      → value loss
+      → combined backward
+      actor_optimizer.step()
+      critic_optimizer.step()
+  end note
+  PPO --> Algo : policy_info
+
+else Diffusion phase  [Thread 2 or sequential, if update_predictor]
+  loop for each diffusion_epoch
+    loop for each sample from buffer.sample_trajectories()
+      par for each Predictor[k]  [own sub-thread]
+        Algo -> DiffTrain : train_sample_diffuser(sample,\n  predictor[k], thread_indices=splits[k])
+        note over DiffTrain
+          select obs/state + visibility_mask
+          slice to thread_indices
+          rearrange → [B·T, H, D]
+          update_normalization_stats(traj)
+          normalize_trajectory(traj) → norm_traj
+          set predictor.diffuser.fix_mask = visibility_mask
+        end note
+        DiffTrain -> DiffUpdate : update_diffusion(x0=norm_traj)
+        note right of DiffUpdate
+          score-matching forward + backward
+          predictor's own optimizer.step()
+          ema_update()
+        end note
+        DiffUpdate --> DiffTrain : diffuser_loss
+
+        opt guide (OptimalityClassifier) is not None
+          DiffTrain -> DiffUpdate : update_classifier(x0=norm_traj, condition_cg=returns)
+          DiffUpdate --> DiffTrain : guide_loss
+        end
+
+        opt uq_method == "estimation"
+          DiffTrain -> DiffTrain : get_prediction() → predictions\ncompute prediction error\nuncertainty_bounds_estimator.loss()\nuncertainty_optimizer.step()
+        end
+
+        DiffTrain --> Algo : diffuser_loss, guide_loss, uncertainty_loss
+      end
+    end
+  end
+  Algo --> Algo : average losses across predictors + epochs
+end
+
+Algo --> Runner : train_info
+
+@enduml

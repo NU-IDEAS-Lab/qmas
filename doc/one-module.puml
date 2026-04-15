@@ -6,9 +6,10 @@ skinparam groupInheritance 2
 package "onpolicy (base)" {
     class R_MAPPOPolicy
     class R_MAPPO
-    class R_Actor as "R_Actor\n(Actor)"
     class Critic
 }
+
+class "nn.Module" as NNModule
 
 ' ─── variant_two_modules.new (reused components) ───────────────────────────
 package "variant_two_modules.new" {
@@ -95,7 +96,7 @@ package "variant_one_module" {
 
 ' ─── Inheritance ─────────────────────────────────────────────────────────────
 EmbeddedPredictor    --|> Predictor
-QmasActorOneModule   --|> R_Actor
+QmasActorOneModule   --|> NNModule
 QmasCritic           --|> Critic
 QmasPolicy           --|> R_MAPPOPolicy
 QmasAlgorithmOneModule --|> R_MAPPO

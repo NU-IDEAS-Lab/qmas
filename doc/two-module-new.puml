@@ -1,0 +1,169 @@
+@startuml two-module-new
+
+skinparam classAttributeIconSize 0
+skinparam groupInheritance 2
+
+' ─── External base classes ────────────────────────────────────────────────────
+package "onpolicy (base)" {
+    class R_MAPPOPolicy
+    class R_MAPPO
+    class Critic
+}
+
+class "nn.Module" as NNModule
+
+' ─── CleanDiffuser ────────────────────────────────────────────────────────────
+package "cleandiffuser" {
+    class DiscreteDiffusionSDE {
+        +fix_mask: nn.Parameter
+        +update_diffusion(x0): dict
+        +update_classifier(x0, condition_cg): dict
+        +ema_update()
+        +sample(...)
+    }
+    class OptimalityClassifier
+}
+
+' ─── variant_two_modules (base policy, v1) ────────────────────────────────────
+package "variant_two_modules (base)" {
+    class QmasPolicyBase as "QmasPolicy\n(variant_two_modules)" {
+        +actor: QmasActor
+        +critic: QmasCritic
+        +actor_optimizer: Adam
+        +critic_optimizer: Adam
+        +predictors: list[Predictor]
+        --
+        +get_actions(...): values, actions, log_probs
+        +evaluate_actions(...)
+        +get_prediction(traj, mask, ...): prediction, uncertainty
+    }
+}
+
+' ─── variant_two_modules.new ──────────────────────────────────────────────────
+package "variant_two_modules.new" {
+
+    class StateEncoder {
+        +forward(state): Tensor
+    }
+
+    class QmasActor {
+        Note: optional StateEncoder controlled by --state_encoder flag
+        --
+        +base: GNNBase [if use_gnn]
+        +neighbor_scorer: MLPLayer [if gnn_neighbor_scoring]
+        +mlp0: MLPLayer [if use_gnn_mlp]
+        +cnn: CNNBase [if use_cnn]
+        +mlp: MLPBase [if use_mlp]
+        +state_encoder: StateEncoder [if --state_encoder]
+        +rnn: RNNLayer [optional]
+        +act: ACTLayer
+        --
+        +forward(obs, rnn_states, masks,\n  available_actions, deterministic,\n  global_obs): actions
+        +evaluate_actions(obs, global_obs,\n  rnn_states, action, masks, ...): log_probs, entropy
+    }
+
+    class QmasCritic {
+        ' Pass-through subclass of base Critic
+    }
+
+    class UncertaintyBoundsEstimator {
+        +mlp: MLPLayer
+        --
+        +forward(x): (lower_bound, upper_bound)
+        +loss(pred, lb, ub): Tensor
+    }
+
+    class Predictor {
+        +prediction_horizon: int
+        +diffuser: DiscreteDiffusionSDE
+        +guide: OptimalityClassifier [optional]
+        +uncertainty_bounds_estimator: UncertaintyBoundsEstimator [optional]
+        +uncertainty_optimizer: Adam [if uq_method=estimation]
+        +obs_running_mean/var/count: buffer
+        --
+        +update_normalization_stats(obs)
+        +normalize_trajectory(obs): Tensor
+        +denormalize_trajectory(obs): Tensor
+        +get_prediction(traj, mask,\n  prediction_prev, has_sample_dim): Tensor
+        +get_uncertainty_bounds(traj): (lb, ub)
+    }
+
+    class QmasPolicy {
+        Note: predictors are INDEPENDENT nn.Modules —
+        NOT submodules of actor; each may live
+        on a separate GPU (cuda_idx_predictor[i])
+        --
+        +restore(directory)
+    }
+
+    class QmasAlgorithm {
+        +predictors: list[Predictor]
+        +num_predictors: int
+        +prediction_horizon: int
+        +use_threads: bool
+        --
+        +train(buffer, update_actor,\n  update_critic, ...): train_info
+        +ppo_update(sample, ...): losses
+        +train_sample_diffuser(sample, train_info,\n  predictor, thread_indices)
+        +prep_training()
+        +prep_rollout()
+    }
+}
+
+' ─── Inheritance ──────────────────────────────────────────────────────────────
+QmasActor            --|> NNModule
+QmasCritic           --|> Critic
+QmasPolicyBase       --|> R_MAPPOPolicy
+QmasPolicy           --|> QmasPolicyBase
+QmasAlgorithm        --|> R_MAPPO
+
+' ─── Composition ──────────────────────────────────────────────────────────────
+QmasPolicy  *-- QmasActor                    : actor
+QmasPolicy  *-- QmasCritic                   : critic
+QmasPolicy  o-- "1..*" Predictor             : predictors\n(separate devices)
+QmasActor   o-- StateEncoder                 : state_encoder [optional]
+Predictor   *-- DiscreteDiffusionSDE         : diffuser
+Predictor   o-- OptimalityClassifier         : guide [optional]
+Predictor   o-- UncertaintyBoundsEstimator   : uncertainty_bounds_estimator [optional]
+
+' ─── Association ──────────────────────────────────────────────────────────────
+QmasAlgorithm --> QmasPolicy      : policy
+QmasAlgorithm --> "1..*" Predictor : predictors (ref)
+
+' ─── Notes ────────────────────────────────────────────────────────────────────
+note bottom of QmasAlgorithm
+  **TWO independent backward passes per training epoch:**
+
+  Phase 1 — PPO update (actor + critic):
+    ppo_update() → PPO surrogate + value loss
+    combined backward → actor_optimizer.step()
+                      → critic_optimizer.step()
+
+  Phase 2 — Diffusion update (per predictor, own thread):
+    train_sample_diffuser(predictor[k])
+      predictor.diffuser.update_diffusion(x0)
+        → own internal backward + optimizer.step() + ema_update()
+      [optional] update_classifier(x0, returns)
+      [optional] uncertainty_optimizer.step()
+
+  Phases optionally run concurrently
+  (args.threaded_training = True)
+end note
+
+note right of QmasPolicy
+  Each Predictor[k] targets its own device:
+    device = cuda:cuda_idx_predictor[k]
+
+  UQ methods:
+  • "ensemble" — variance across K predictors
+  • "estimation" — UncertaintyBoundsEstimator
+end note
+
+note right of QmasActor
+  StateEncoder is gated by --state_encoder flag.
+  Without it, global_obs is unused by the actor;
+  obs shape is doubled if uq_injection == "append"
+  and state_encoder is disabled.
+end note
+
+@enduml

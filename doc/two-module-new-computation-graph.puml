@@ -1,0 +1,186 @@
+@startuml two-module-new-computation-graph
+
+skinparam rectangle {
+  BackgroundColor<<tensor>> #DDEEFF
+  BackgroundColor<<module>> #EEFFDD
+  BackgroundColor<<loss>> #FFEEDD
+  BackgroundColor<<nograd>> #F0F0F0
+  BorderColor<<nograd>> #AAAAAA
+  FontColor<<nograd>> #777777
+  BackgroundColor<<ema>> #FFF8E1
+}
+skinparam arrowColor #444444
+skinparam defaultFontSize 11
+
+legend top left
+  |= Fill |= Meaning |
+  |<#DDEEFF>   | Tensor / data |
+  |<#EEFFDD>   | nn.Module (has parameters) |
+  |<#FFEEDD>   | Loss scalar |
+  |<#F0F0F0>   | No-gradient path |
+  |<#FFF8E1>   | EMA copy (no grad) |
+  | →  | gradient flows |
+  | ⇢  | data only (detached / no_grad) |
+endlegend
+
+' ═══════════════════════════════════════════════════════════════════
+' PHASE 1 — PPO backward  (actor_optimizer + critic_optimizer)
+' Predictor is NOT part of this graph; actor has no diffusion params.
+' ═══════════════════════════════════════════════════════════════════
+
+rectangle "obs  [B·N, D_obs]" <<tensor>> as OBS
+rectangle "global_obs\n(may be replaced or UQ-appended)\n[B, D_global]" <<tensor>> as GOBS
+rectangle "share_obs  [B, D_shared]" <<nograd>> as SOBS
+rectangle "rnn_states_actor  [B·N, L, H]" <<nograd>> as RNN_IN
+
+package "QmasActor  [actor_optimizer]" {
+  rectangle "GNNBase / CNNBase / MLPBase\n(local encoder)" <<module>> as LOCAL_ENC
+  rectangle "local_feats  [B·N, H]" <<tensor>> as LOCAL_FEAT
+  rectangle "StateEncoder\n[if --state_encoder flag]" <<module>> as STATE_ENC
+  rectangle "encoded_state  [B·N, L]" <<tensor>> as ENC_STATE
+  rectangle "cat([local_feats, encoded_state])\n[B·N, H+L]  (or [B·N, H] without encoder)" <<tensor>> as CONCAT
+  rectangle "RNNLayer  [optional]" <<module>> as RNN_MOD
+  rectangle "actor_features  [B·N, H]" <<tensor>> as ACTOR_FEAT
+  rectangle "ACTLayer  (policy head)" <<module>> as ACT_MOD
+  rectangle "action_log_probs  log π(a|s)" <<tensor>> as LOG_PROBS
+  rectangle "dist_entropy" <<tensor>> as ENTROPY
+}
+
+package "QmasCritic  [critic_optimizer]" {
+  rectangle "Critic MLP / RNN" <<module>> as CRITIC_MOD
+  rectangle "values  V(s)" <<tensor>> as VALUES
+}
+
+rectangle "old_log_probs  (stored)" <<nograd>> as OLD_LOG
+rectangle "advantages  A(s,a)" <<nograd>> as ADV
+rectangle "returns  R" <<nograd>> as RETURNS
+rectangle "value_preds_old  (stored)" <<nograd>> as OLD_VALS
+
+rectangle "PPO surrogate loss\n−min(r·A, clip(r)·A)" <<loss>> as PPO_LOSS
+rectangle "−entropy · entropy_coef" <<loss>> as ENT_LOSS
+rectangle "actor_loss = PPO + entropy\n(no diffusion term in Phase 1)" <<loss>> as ACTOR_LOSS
+rectangle "value_loss · value_loss_coef" <<loss>> as VALUE_LOSS
+rectangle "total_loss = actor_loss + critic_loss\n.backward()" <<loss>> as TOTAL_LOSS
+
+OBS       --> LOCAL_ENC
+LOCAL_ENC --> LOCAL_FEAT
+GOBS      --> STATE_ENC   : [if --state_encoder]
+STATE_ENC --> ENC_STATE
+LOCAL_FEAT --> CONCAT
+ENC_STATE  --> CONCAT
+CONCAT    --> RNN_MOD     : [if use_rnn]
+RNN_MOD   --> ACTOR_FEAT
+CONCAT    --> ACTOR_FEAT  : [no rnn]
+ACTOR_FEAT --> ACT_MOD
+ACT_MOD   --> LOG_PROBS
+ACT_MOD   --> ENTROPY
+
+LOG_PROBS --> PPO_LOSS
+OLD_LOG   ..> PPO_LOSS    : imp_weights = exp(log π − log π_old)
+ADV       ..> PPO_LOSS
+ENTROPY   --> ENT_LOSS
+PPO_LOSS  --> ACTOR_LOSS
+ENT_LOSS  --> ACTOR_LOSS
+
+SOBS      ..> CRITIC_MOD
+CRITIC_MOD --> VALUES
+VALUES    --> VALUE_LOSS
+OLD_VALS  ..> VALUE_LOSS
+RETURNS   ..> VALUE_LOSS
+
+ACTOR_LOSS --> TOTAL_LOSS
+VALUE_LOSS --> TOTAL_LOSS
+
+rectangle "actor_optimizer.step()\nclip_grad_norm_(actor)" <<nograd>> as ACT_OPT
+rectangle "critic_optimizer.step()\nclip_grad_norm_(critic)" <<nograd>> as CRIT_OPT
+
+TOTAL_LOSS ..> ACT_OPT   : .backward() → gradients
+TOTAL_LOSS ..> CRIT_OPT  : .backward() → gradients
+
+note as N1
+  Phase 1 and Phase 2 may run concurrently
+  in separate threads (args.threaded_training).
+  The predictor's parameters are INDEPENDENT
+  of actor_optimizer — no shared gradient graph.
+end note
+
+' ═══════════════════════════════════════════════════════════════════
+' PHASE 2 — Diffusion backward  (predictor's own internal optimizer)
+' Each Predictor[k] lives on its own device; has its own Adam.
+' ═══════════════════════════════════════════════════════════════════
+
+rectangle "trajectory mini-batch\n(from buffer.sample_trajectories)\n[B·T, H, D]  — detached" <<nograd>> as TRAJ_BATCH
+
+package "Predictor[k]  (×ensemble_size)  [own device, own optimizer]" {
+
+  rectangle "update_normalization_stats()\n[@torch.no_grad — bookkeeping only]" <<nograd>> as NORM_STATS
+  rectangle "normalize_trajectory(traj)\n(x − μ) / σ  — μ, σ are buffers" as NORM_OP
+  rectangle "norm_traj  [B·T, H, D]\n(input detached from buffer)" <<tensor>> as NORM_TRAJ
+
+  rectangle "fix_mask = visibility_mask\nnn.Parameter, requires_grad=False" <<nograd>> as FIX_MASK
+
+  rectangle "DiscreteDiffusionSDE\n(JannerUNet1d / DiT1d / UNet2d)" <<module>> as DIFFUSER_K
+  rectangle "diffusion_loss_k\n[scalar]" <<loss>> as DIFF_LOSS_K
+  rectangle "predictor's own optimizer.step()\n+ ema_update()\n[inside update_diffusion()]" <<nograd>> as PRED_OPT
+  rectangle "EMA copy  [inference only]" <<ema>> as EMA_K
+
+  rectangle "UncertaintyBoundsEstimator\n[if uq_method == 'estimation']" <<module>> as UBE
+  rectangle "uncertainty_loss" <<loss>> as UBE_LOSS
+  rectangle "uncertainty_optimizer.step()" <<nograd>> as UBE_OPT
+
+  rectangle "OptimalityClassifier  (guide)\n[optional — if guide is not None]" <<module>> as GUIDE
+  rectangle "guide_loss" <<loss>> as GUIDE_LOSS
+  rectangle "guide optimizer step\n[inside update_classifier()]" <<nograd>> as GUIDE_OPT
+}
+
+TRAJ_BATCH ..> NORM_STATS
+TRAJ_BATCH --> NORM_OP     : detached input
+NORM_OP    --> NORM_TRAJ
+NORM_TRAJ  --> DIFFUSER_K  : .update_diffusion(x0)
+FIX_MASK   ..> DIFFUSER_K  : fix_mask (masks unseen steps)
+DIFFUSER_K --> DIFF_LOSS_K
+DIFF_LOSS_K ..> PRED_OPT   : backward (internal to CleanDiffuser)
+PRED_OPT   ..> EMA_K       : θ_ema ← τ·θ_ema + (1−τ)·θ
+
+NORM_TRAJ  ..> UBE         : predictions − norm_traj
+UBE        --> UBE_LOSS
+UBE_LOSS   ..> UBE_OPT
+
+NORM_TRAJ  --> GUIDE       : .update_classifier(x0, returns)
+GUIDE      --> GUIDE_LOSS
+GUIDE_LOSS ..> GUIDE_OPT
+
+' ═══════════════════════════════════════════════════════════════════
+' INFERENCE PATH  (@torch.no_grad, rollout collect)
+' ═══════════════════════════════════════════════════════════════════
+
+rectangle "TrajectoryBuffer\n[T, n_threads, D]  — detached" <<nograd>> as TRAJ_INF
+rectangle "normalize + mask\n(per predictor, own device)" <<nograd>> as NORM_INF
+rectangle "EMA sampler  .sample()\n[per predictor[k]]" <<ema>> as EMA_SAMPLE
+rectangle "pred_now  [n_threads, D]\n(mean over ensemble)" <<nograd>> as PRED_NOW
+
+rectangle "uncertainty_now  [n_threads, D]" <<nograd>> as UQ_NOW
+note right of UQ_NOW
+  ensemble: var across K preds
+  estimation: |ub − lb| from UBE
+  single predictor: zeros
+end note
+
+rectangle "obs' / global_obs'\n(replaced + UQ appended)" <<nograd>> as OBS_INF
+rectangle "actor.forward()  [no_grad]" <<nograd>> as ACT_INF
+rectangle "actions  [n_threads·N, D_act]" <<nograd>> as ACTS_OUT
+rectangle "critic.forward()  [no_grad]" <<nograd>> as CRIT_INF
+rectangle "values  [n_threads, 1]" <<nograd>> as VALS_OUT
+
+TRAJ_INF  ..> NORM_INF
+NORM_INF  ..> EMA_SAMPLE
+EMA_SAMPLE ..> PRED_NOW
+EMA_SAMPLE ..> UQ_NOW
+PRED_NOW  ..> OBS_INF    : replace obs (dense)\nor global_obs (GNN)
+UQ_NOW    ..> OBS_INF    : cat if uq_injection=="append"
+OBS_INF   ..> ACT_INF
+ACT_INF   ..> ACTS_OUT
+OBS_INF   ..> CRIT_INF
+CRIT_INF  ..> VALS_OUT
+
+@enduml
