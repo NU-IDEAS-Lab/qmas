@@ -135,7 +135,7 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
     @set_capture_non_tensor_stack(False)
     def insert(self, share_obs, obs, rnn_states_actor, rnn_states_critic, actions, action_log_probs,
                value_preds, rewards, masks, bad_masks=None, active_masks=None, delta_steps=None, available_actions=None,
-               visibility_mask=None, state_visibility_mask=None, observation_global=None, observation_uncertainty=None, legacy_mode=True):
+               visibility_mask=None, state_visibility_mask=None, observation_global=None, legacy_mode=True):
         """
         Insert data into the buffer.
         :param share_obs: (argparse.Namespace) arguments containing relevant model, policy, and env information.
@@ -167,8 +167,6 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
             delta_steps = np.ones_like(value_preds)
         if visibility_mask is None:
             visibility_mask = np.ones_like(obs, dtype=np.float32)
-        if observation_uncertainty is None and isinstance(obs, np.ndarray) and obs.dtype != object:
-            observation_uncertainty = np.zeros_like(obs, dtype=np.float32)
         
         obs = self.convert_input_to_tensor(obs)
         self.obs_object = isinstance(obs, NonTensorStack)
@@ -210,8 +208,6 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
             data['observation_global'] = observation_global #+1
         if state_visibility_mask is not None:
             data['state_visibility_mask'] = state_visibility_mask #+1
-        if observation_uncertainty is not None:
-            data['observation_uncertainty'] = observation_uncertainty #+1
 
         # In legacy mode, some data is added for timestep t, others for timestep t+1.
         if legacy_mode:
@@ -252,6 +248,11 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
         else:
             return torch.from_numpy(input).float()
 
+
+    def update_step(self, step, **fields):
+        """ Overwrite one or more fields for an existing buffer step in-place. """
+
+        self.storage[step].update(input_dict_or_td=fields, inplace=True)
 
     def after_update(self, last_step=-1):
         """ Reset/clear the buffer. Called after update to model. """
@@ -484,13 +485,6 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
             if has_global_obs:
                 global_obs_batch = _flatten(L, N, global_obs_batch)
                 global_obs_batch = torch.from_numpy(global_obs_batch).float()
-                if self.args.prediction_uq_injection_method == "append":
-                    # Mirror what compatibility_transform_sample does: append zeros as
-                    # uncertainty. When obs is object-typed (PyG graphs) the buffer
-                    # never stores observation_uncertainty, so zeros is always correct.
-                    global_obs_batch = torch.cat(
-                        [global_obs_batch, torch.zeros_like(global_obs_batch)], dim=-1
-                    )
             else:
                 global_obs_batch = None
             actions_batch = _flatten(L, N, actions_batch)
@@ -536,18 +530,6 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
             obs_batch = sample_obs.reshape(*index_shape, *sample_obs.shape[-1:])
         else:
             obs_batch = sample["obs"].reshape(*index_shape, *sample["obs"].shape[data_start_dim:])
-
-        if self.args.prediction_uq_injection_method == "append":
-            if "observation_uncertainty" in sample and isinstance(sample["observation_uncertainty"], torch.Tensor):
-                uncertainty_batch = sample["observation_uncertainty"].reshape(*index_shape, *sample["observation_uncertainty"].shape[data_start_dim:])
-            else:
-                target = global_obs_batch if global_obs_batch is not None else obs_batch
-                uncertainty_batch = torch.zeros_like(target)
-
-            if global_obs_batch is not None:
-                global_obs_batch = torch.cat([global_obs_batch, uncertainty_batch], dim=-1)
-            else:
-                obs_batch = torch.cat([obs_batch, uncertainty_batch], dim=-1)
 
         rnn_states_batch = sample["rnn_states_actor"].reshape(*index_shape, *sample["rnn_states_actor"].shape[data_start_dim:])
         rnn_states_critic_batch = sample["rnn_states_critic"].reshape(*index_shape, *sample["rnn_states_critic"].shape[data_start_dim:])

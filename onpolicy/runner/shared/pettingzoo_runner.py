@@ -75,7 +75,7 @@ class PettingzooRunner(Runner):
             delta_steps = np.ones((self.n_rollout_threads, self.num_agents, 1), dtype=np.int32)
             for step in range(self.episode_length):
                 # Sample actions, collect values and probabilities.
-                values, actions, action_log_probs, rnn_states, rnn_states_critic, actions_env, uncertainty = self.collect(step, episode=episode, episodes=episodes)
+                values, actions, action_log_probs, rnn_states, rnn_states_critic, actions_env = self.collect(step, episode=episode, episodes=episodes)
                 
                 # Take a step in the environment and get the results.
                 obs, share_obs, rewards, dones, infos, available_actions = self.envs.step(actions_env)
@@ -84,7 +84,7 @@ class PettingzooRunner(Runner):
                 delta_steps = np.array([info["deltaSteps"] for info in infos])
 
                 # insert data into buffer
-                data = obs, share_obs, rewards, dones, infos, values, actions, action_log_probs, rnn_states, rnn_states_critic, delta_steps, available_actions, uncertainty
+                data = obs, share_obs, rewards, dones, infos, values, actions, action_log_probs, rnn_states, rnn_states_critic, delta_steps, available_actions
                 self.insert(data)
 
             # Get certain stats.
@@ -149,6 +149,20 @@ class PettingzooRunner(Runner):
         observation_global = None
         if "observation_global" in infos[0]:
             observation_global = np.array([info["observation_global"] for info in infos])
+        # If UQ will be appended during rollout, pre-pad with zeros here so the
+        # buffer slot has the correct shape (2× obs_dim) from the start.
+        # collect() will overwrite this with [pred | uncertainty] on the first step.
+        if self.all_args.prediction_uq_injection_method == "append":
+            if obs.dtype == object:
+                if observation_global is None:
+                    raise ValueError("Must have observation_global in infos to use object-type observations (e.g. pyg graph observations). Check that environment is providing this information.")
+                observation_global = np.concatenate(
+                    [observation_global, np.zeros_like(observation_global)], axis=-1
+                )
+            else:
+                # Dense envs: UQ is appended to obs instead. Pre-pad obs with zeros so the
+                # buffer slot has the correct shape before collect() overwrites it.
+                obs = np.concatenate([obs, np.zeros_like(obs)], axis=-1)
 
         # Initialize buffer.
         self.buffer.insert(
@@ -186,6 +200,9 @@ class PettingzooRunner(Runner):
         share_obs, obs, global_obs, rnn_states, rnn_states_critic, masks, available_actions = self.buffer.compatibility_get_policy_input(step)
 
         uncertainty_now = None
+        pred_now = None
+        update_obs = False
+        update_global_obs = False
 
         # If a predictor is available, replace obs with predictions from the trajectory buffers.
         # Use episode-based fraction to stay consistent with the training condition in algorithm.py.
@@ -222,29 +239,21 @@ class PettingzooRunner(Runner):
                     # For GNN envs, the prediction cannot replace the graph obs directly.
                     # Use it as global_obs for the state encoder instead.
                     global_obs = pred_now
+                    update_global_obs = True
                 else:
                     obs = pred_now
+                    update_obs = True
             
             # Inject uncertainty into the observation.
             if self.all_args.prediction_uq_injection_method == "append":
                 if global_obs is not None:
                     global_obs = torch.cat([global_obs, uncertainty_now], dim=-1)
+                    update_global_obs = True
                 elif obs.dtype == object:
                     raise ValueError("Must have observation_global in infos to use object-type observations (e.g. pyg graph observations). Check that environment is providing this information.")
                 else:
                     obs = torch.cat([obs, uncertainty_now], dim=-1)
-        
-        # Handle case where UQ injection expected, but not yet available due to predictor not running.
-        elif self.all_args.prediction_uq_injection_method == "append":
-            uncertainty_now = None
-            if global_obs is not None:
-                uncertainty_now = torch.zeros_like(global_obs)
-                global_obs = torch.cat([global_obs, uncertainty_now], dim=-1)
-            elif obs.dtype == object:
-                raise ValueError("Must have observation_global in infos to use object-type observations (e.g. pyg graph observations). Check that environment is providing this information.")
-            else:
-                uncertainty_now = torch.zeros_like(obs)
-                obs = torch.cat([obs, uncertainty_now], dim=-1)
+                    update_obs = True
 
         values, action, action_log_prob, rnn_states, rnn_states_critic = self.trainer.policy.get_actions(
             share_obs,
@@ -266,19 +275,21 @@ class PettingzooRunner(Runner):
         rnn_states = rnn_states.detach().cpu().reshape((self.n_rollout_threads, self.num_agents, *rnn_states.shape[1:]))
         rnn_states_critic = rnn_states_critic.detach().cpu().reshape((self.n_rollout_threads, self.num_agents, *rnn_states_critic.shape[1:]))
 
-        # if actions.shape[-1] == 1:
-        #     actions_env = [actions[idx, :, 0].numpy() for idx in range(self.n_rollout_threads)]
-        # else:
-        #     actions_env = [actions[idx, :, :].numpy() for idx in range(self.n_rollout_threads)]
+        # The environment expects numpy-based actions.
         actions_env = [actions[idx, :, :].numpy() for idx in range(self.n_rollout_threads)]
+        
+        updates = {}
+        if update_obs:
+            updates["obs"] = obs.reshape((self.n_rollout_threads, self.num_agents, *obs.shape[1:]))
+        if update_global_obs:
+            updates["observation_global"] = global_obs.reshape((self.n_rollout_threads, self.num_agents, *global_obs.shape[1:]))
+        if updates:
+            self.buffer.update_step(step, **updates)
 
-        if uncertainty_now is not None:     
-            uncertainty_now = uncertainty_now.cpu().reshape((self.n_rollout_threads, self.num_agents, *uncertainty_now.shape[1:]))
-
-        return values, actions, action_log_probs, rnn_states, rnn_states_critic, actions_env, uncertainty_now
+        return values, actions, action_log_probs, rnn_states, rnn_states_critic, actions_env
 
     def insert(self, data):
-        obs, share_obs, rewards, dones, infos, values, actions, action_log_probs, rnn_states, rnn_states_critic, delta_steps, available_actions, uncertainty = data
+        obs, share_obs, rewards, dones, infos, values, actions, action_log_probs, rnn_states, rnn_states_critic, delta_steps, available_actions = data
         
         # update env_infos if done
         dones_env = np.all(dones, axis=-1)
@@ -288,9 +299,22 @@ class PettingzooRunner(Runner):
         if "visibility_mask" in infos[0]:
             visibility_mask = np.array([info["visibility_mask"] for info in infos])
         
-        observation_global = None
+        obs_raw = obs  # unpadded, for trajectory buffer
         if "observation_global" in infos[0]:
             observation_global = np.array([info["observation_global"] for info in infos])
+            observation_global_raw = observation_global  # unpadded, for trajectory buffer
+            # The buffer was initialized with zero-padded obs (2× size) in warmup().
+            # Pad the raw env obs here to match, so the storage set doesn't fail on shape.
+            if self.all_args.prediction_uq_injection_method == "append" and obs.dtype == object:
+                observation_global = np.concatenate(
+                    [observation_global, np.zeros_like(observation_global)], axis=-1
+                )
+        else:
+            observation_global = None
+            observation_global_raw = None
+            # Dense envs: pad obs with zeros for the same reason.
+            if obs.dtype != object and self.all_args.prediction_uq_injection_method == "append":
+                obs = np.concatenate([obs, np.zeros_like(obs)], axis=-1)
 
         # Get extra state information from infos.
         state_visibility_mask = None
@@ -303,6 +327,7 @@ class PettingzooRunner(Runner):
             if type(key) == str:
                 self.env_infos[key] = [i[key] for i in infos]
 
+        # Calculate masks.
         masks = torch.ones((self.n_rollout_threads, self.num_agents, 1))
         for i in range(self.n_rollout_threads):
             for agent_id in range(self.num_agents):
@@ -326,17 +351,17 @@ class PettingzooRunner(Runner):
             visibility_mask=visibility_mask,
             state_visibility_mask=state_visibility_mask,
             observation_global=observation_global,
-            observation_uncertainty=uncertainty,
         )
 
         # Update the trajectory buffer with the new transition.
+        # Use raw (unpadded) obs/global_obs so the predictor sees the correct observation size.
         self._apply_masks_and_update_trajectory(
             trajectory_buffer=self.train_trajectory,
-            obs=obs,
+            obs=obs_raw,
             infos=infos,
             actions=actions,
             n_threads=self.n_rollout_threads,
-            global_obs=observation_global
+            global_obs=observation_global_raw
         )
 
 
