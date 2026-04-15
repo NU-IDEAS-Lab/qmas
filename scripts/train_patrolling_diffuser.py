@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-	"--experiment_name", "diffuser-patrolling-obs200-uqEnsemble3-pygNS-commsRL-injectionAppend",
+	"--experiment_name", "diffuser-patrolling-obs200-uqEnsemble3-pygNS-commsRL0.5-injectionAppend",
 	# "--experiment_name", "diffuser-patrolling-obs200-uqEnsemble3-pygNS-injectionAppend",
 	"--project_name", "qmas",
 	"--env_class", "patrolling_zoo.patrolling_zoo_v0.parallel_env",
@@ -20,6 +20,7 @@ args = [
 	"--communication_probability", "0.0",
 	"--alpha", "1.0",
 	"--beta", "0.5",
+    "--reward_comms_penalty_weight", "0.5",
 	"--reward_method_terminal", "average",
 
 	"--graph_name", "milwaukee",
@@ -33,7 +34,7 @@ args = [
 	"--policy_class", "qmas.variant_two_modules.new.policy.QmasPolicy",
 	"--algorithm_name", "rmappo",
 	"--use_gnn_policy",
-	"--use_gnn_mlp_policy",
+	# "--use_gnn_mlp_policy",
 	"--gnn_layer_N", "10",
 	"--gnn_hidden_size", "128",
 	"--gnn_skip_connections",
@@ -50,18 +51,20 @@ args = [
 	"--seed", "0",
 
 	"--diffusion_model_type", "dit1d",
+    # "--prediction_history_window", "16",
+    # "--prediction_during_training",
     "--prediction_uq_method", "ensemble",
     "--prediction_uq_injection_method", "append",
     # "--prediction_disable",
 	"--prediction_ensemble_size", "3",
     "--state_encoder",
 
-    "--episode_fraction_start_prediction", "0.2",
+    # "--episode_fraction_start_prediction", "0.2",
 
-	"--n_rollout_threads", "21",
+	"--n_rollout_threads", "33",
 	"--cuda",
-	"--cuda_idx", "4",
-    "--cuda_idx_predictor", "6",
+	"--cuda_idx", "6",
+    "--cuda_idx_predictor", "4",
     "--threaded_training",
     "--n_training_threads", "16",
 
