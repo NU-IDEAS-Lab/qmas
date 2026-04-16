@@ -103,7 +103,11 @@ class Runner(object):
         else:
             self.policy = Policy(self.all_args, self.envs.observation_space[0], share_observation_space, self.envs.action_space[0], device = self.device)
 
-        if self.model_dir is not None:
+        # We are not restoring from a model, so let's save initial configuration.
+        if self.model_dir is None:
+            self._save_config(self.save_dir)
+        # Restore model from directory if specified.
+        else:
             self.restore(self.model_dir)
 
         # algorithm
@@ -161,7 +165,7 @@ class Runner(object):
         self.buffer.after_update()
         return train_infos
 
-    def save(self, episode=0, final=False):
+    def save(self, episode=0, final=False, quiet=False):
         """Save policy's actor and critic networks."""
 
         if self.all_args.save_checkpoints and not final:
@@ -180,16 +184,31 @@ class Runner(object):
             torch.save(policy_actor.state_dict(), str(save_dir) + "/actor.pt")
             policy_critic = self.trainer.policy.critic
             torch.save(policy_critic.state_dict(), str(save_dir) + "/critic.pt")
-        
-        # Export wandb config to file.
-        if self.all_args.use_wandb:
-            conf = dict(wandb.config)
-            with open(os.path.join(save_dir, 'config.yaml'), 'w') as f:
-                yaml.safe_dump(conf, f)
 
+        if not quiet:
+            print(f"Saved models to {save_dir}")
+
+        self._save_config(save_dir, quiet=quiet)
+
+    def _save_config(self, save_dir, quiet=False):
+        """Write config to a yaml file in save_dir.
+
+        Uses the wandb config when a run is active, otherwise falls back to
+        serializing self.all_args so the output format is identical.
+        """
+        if self.use_wandb and wandb.run is not None:
+            conf = dict(wandb.config)
+        else:
+            conf = vars(self.all_args)
+        with open(os.path.join(save_dir, 'config.yaml'), 'w') as f:
+            yaml.safe_dump(conf, f)
+
+        if not quiet:
+            print(f"Saved configuration to {os.path.join(save_dir, 'config.yaml')}")
 
     def restore(self, model_dir):
         """Restore policy's networks from a saved model."""
+
         if hasattr(self.policy, "restore") and callable(self.policy.restore):
             self.policy.restore(model_dir)
         else:
@@ -198,6 +217,7 @@ class Runner(object):
             if not self.all_args.use_render:
                 policy_critic_state_dict = torch.load(str(self.model_dir) + '/critic.pt')
                 self.policy.critic.load_state_dict(policy_critic_state_dict)
+        print(f"Restored models from {model_dir}")
 
     def log_train(self, train_infos, total_num_steps):
         """

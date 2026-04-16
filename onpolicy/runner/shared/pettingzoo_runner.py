@@ -23,10 +23,6 @@ from isru_zoo.env.isru_env import parallel_env_map_obs as pemo
 class PettingzooRunner(Runner):
     def __init__(self, config):
 
-        # The default restore functionality is broken. Disable it and do it ourselves.
-        model_dir = config['all_args'].model_dir
-        config['all_args'].model_dir = None
-
         super(PettingzooRunner, self).__init__(config)
 
         # Override the default replay buffer with our new TorchRL one.
@@ -45,13 +41,7 @@ class PettingzooRunner(Runner):
         self.train_prediction_prev = None
 
         self.env_infos = defaultdict(list)
-       
-        # Perform restoration.
-        config['all_args'].model_dir = model_dir
-        self.model_dir = config['all_args'].model_dir
-        if self.model_dir is not None:
-            self.restore(self.model_dir)
-        
+               
         if self.all_args.torch_compile:
             self.train_compiled = torch.compile(self.train, fullgraph=False)
 
@@ -106,7 +96,7 @@ class PettingzooRunner(Runner):
             
             # save model at every interval
             if episode == episodes - 1 or total_num_steps - last_save_step >= self.save_interval:
-                self.save(episode)
+                self.save(episode, quiet=True)
                 last_save_step = total_num_steps
 
             # log information
