@@ -225,27 +225,25 @@ class PettingzooRunner(Runner):
 
             # Replace the observation with the prediction.
             if self.all_args.prediction_during_training:
+                obs_dim = pred_now.shape[-1]
                 if obs.dtype == object:
                     # For GNN envs, the prediction cannot replace the graph obs directly.
                     # Use it as global_obs for the state encoder instead.
-                    global_obs = pred_now
+                    global_obs[..., :obs_dim] = pred_now
                     update_global_obs = True
                 else:
-                    obs = pred_now
+                    obs[..., :obs_dim] = pred_now
                     update_obs = True
             
             # Inject uncertainty into the observation.
             if self.all_args.prediction_uq_injection_method == "append":
+                obs_dim = uncertainty_now.shape[-1]
                 if global_obs is not None:
-                    # The buffer slot was pre-padded to 2×D; assign uncertainty into
-                    # the second half in-place rather than concatenating.
-                    obs_dim = uncertainty_now.shape[-1]
                     global_obs[..., obs_dim:] = uncertainty_now
                     update_global_obs = True
                 elif obs.dtype == object:
                     raise ValueError("Must have observation_global in infos to use object-type observations (e.g. pyg graph observations). Check that environment is providing this information.")
                 else:
-                    obs_dim = uncertainty_now.shape[-1]
                     obs[..., obs_dim:] = uncertainty_now
                     update_obs = True
 
