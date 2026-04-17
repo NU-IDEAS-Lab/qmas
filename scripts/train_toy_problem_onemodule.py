@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-    "--experiment_name", "toy-problem-onemodule",
+    "--experiment_name", "toy-problem-onemodule-predObs",
     "--project_name", "qmas",
     "--env_class", "toy_problem.toy_problem_v1.parallel_env",
     "--user_name", "ideas-mas",
@@ -34,12 +34,13 @@ args = [
     "--prediction_ensemble_size", "3",
     # "--prediction_disable",
     # "--prediction_uq_method", "estimation",
+    "--prediction_during_training",
 
     "--seed", "0",
 
     "--n_rollout_threads", "99",
     "--cuda",
-    "--cuda_idx", "3",
+    "--cuda_idx", "1",
     "--cuda_idx_predictor", "4",
     "--threaded_training",
     "--n_training_threads", "16",

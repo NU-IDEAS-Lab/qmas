@@ -55,12 +55,12 @@ args = [
 	"--prediction_ensemble_size", "3",
     "--state_encoder",
 
-    "--episode_fraction_start_prediction", "0.2",
+    # "--episode_fraction_start_prediction", "0.2",
 
 	"--n_rollout_threads", "21",
 	"--cuda",
-	"--cuda_idx", "5",
-    "--cuda_idx_predictor", "6",
+	"--cuda_idx", "6",
+    "--cuda_idx_predictor", "4",
     "--threaded_training",
     "--n_training_threads", "16",
 
