@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-	"--experiment_name", "diffuser-patrolling-obs200-uqEnsemble3-pygNS-commsRL0.5-injectionAppend",
+	"--experiment_name", "diffuser-patrolling-obs200-uqEnsemble3-pygNS-commsRL1.0-injectionAppend-predObs",
 	# "--experiment_name", "diffuser-patrolling-obs200-uqEnsemble3-pygNS-injectionAppend",
 	"--project_name", "qmas",
 	"--env_class", "patrolling_zoo.patrolling_zoo_v0.parallel_env",
@@ -20,7 +20,7 @@ args = [
 	"--communication_probability", "0.0",
 	"--alpha", "1.0",
 	"--beta", "0.5",
-    "--reward_comms_penalty_weight", "0.5",
+    "--reward_comms_penalty_weight", "1.0",
 	"--reward_method_terminal", "average",
 
 	"--graph_name", "milwaukee",
@@ -52,7 +52,7 @@ args = [
 
 	"--diffusion_model_type", "dit1d",
     # "--prediction_history_window", "16",
-    # "--prediction_during_training",
+    "--prediction_during_training",
     "--prediction_uq_method", "ensemble",
     "--prediction_uq_injection_method", "append",
     # "--prediction_disable",
@@ -63,8 +63,8 @@ args = [
 
 	"--n_rollout_threads", "33",
 	"--cuda",
-	"--cuda_idx", "6",
-    "--cuda_idx_predictor", "4",
+	"--cuda_idx", "3",
+    "--cuda_idx_predictor", "3",
     "--threaded_training",
     "--n_training_threads", "16",
 
