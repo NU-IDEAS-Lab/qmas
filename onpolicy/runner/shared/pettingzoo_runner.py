@@ -136,12 +136,16 @@ class PettingzooRunner(Runner):
         else:
             action_log_prob_shape = (self.n_rollout_threads, self.num_agents, 1)
 
+        # Use a dummy visibility mask.
+        visibility_mask = np.ones_like(obs, dtype=np.float32)
+
         observation_global = None
         if "observation_global" in infos[0]:
             observation_global = np.array([info["observation_global"] for info in infos])
         # If UQ will be appended during rollout, pre-pad with zeros here so the
         # buffer slot has the correct shape (2× obs_dim) from the start.
         # collect() will overwrite this with [pred | uncertainty] on the first step.
+        obs_full = None
         if self.all_args.prediction_uq_injection_method == "append":
             if obs.dtype == object:
                 if observation_global is None:
@@ -152,12 +156,14 @@ class PettingzooRunner(Runner):
             else:
                 # Dense envs: UQ is appended to obs instead. Pre-pad obs with zeros so the
                 # buffer slot has the correct shape before collect() overwrites it.
+                obs_full = obs
                 obs = np.concatenate([obs, np.zeros_like(obs)], axis=-1)
 
         # Initialize buffer.
         self.buffer.insert(
             share_obs=share_obs,
             obs=obs,
+            obs_full=obs_full,
             rnn_states_actor=np.zeros((self.n_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=np.float32),
             rnn_states_critic=np.zeros((self.n_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=np.float32),
             actions=np.zeros(actions_shape, dtype=np.float32),
@@ -172,6 +178,7 @@ class PettingzooRunner(Runner):
             delta_steps=np.ones((self.n_rollout_threads, self.num_agents, 1), dtype=np.int32),
             available_actions=available_actions,
             observation_global=observation_global,
+            visibility_mask=visibility_mask
         )
 
         # Reset and seed training trajectory buffer with the initial observations.
@@ -291,6 +298,7 @@ class PettingzooRunner(Runner):
         if "visibility_mask" in infos[0]:
             visibility_mask = np.array([info["visibility_mask"] for info in infos])
         
+        obs_full = None
         obs_raw = obs  # unpadded, for trajectory buffer
         if "observation_global" in infos[0]:
             observation_global = np.array([info["observation_global"] for info in infos])
@@ -306,6 +314,7 @@ class PettingzooRunner(Runner):
             observation_global_raw = None
             # Dense envs: pad obs with zeros for the same reason.
             if obs.dtype != object and self.all_args.prediction_uq_injection_method == "append":
+                obs_full = obs
                 obs = np.concatenate([obs, np.zeros_like(obs)], axis=-1)
 
         # Get extra state information from infos.
@@ -331,6 +340,7 @@ class PettingzooRunner(Runner):
         self.buffer.insert(
             share_obs=share_obs,
             obs=obs,
+            obs_full=obs_full,
             rnn_states_actor=rnn_states,
             rnn_states_critic=rnn_states_critic,
             actions=actions,

@@ -135,7 +135,7 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
     @set_capture_non_tensor_stack(False)
     def insert(self, share_obs, obs, rnn_states_actor, rnn_states_critic, actions, action_log_probs,
                value_preds, rewards, masks, bad_masks=None, active_masks=None, delta_steps=None, available_actions=None,
-               visibility_mask=None, state_visibility_mask=None, observation_global=None, legacy_mode=True):
+               visibility_mask=None, state_visibility_mask=None, observation_global=None, obs_full=None, legacy_mode=True):
         """
         Insert data into the buffer.
         :param share_obs: (argparse.Namespace) arguments containing relevant model, policy, and env information.
@@ -154,6 +154,7 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
         :param visibility_mask: (np.ndarray) visibility mask for agent observations, if applicable.
         :param state_visibility_mask: (np.ndarray) visibility mask for global state, if applicable.
         :param observation_global: (np.ndarray) globally-situated observations for each agent, if applicable.
+        :param obs_full: (np.ndarray) full observations for each agent, if applicable. Used for predictor training.
         :param legacy_mode: (bool) whether to use legacy mode for inserting data. Will use timesteps t and t+1.
         """
 
@@ -176,9 +177,10 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
         # Create the partial observation.
         visibility_mask = torch.from_numpy(visibility_mask).float()
         if self.args.observation_mask:
-            obs_full = obs.clone()
+            if obs_full is None:
+                obs_full = obs.clone()
             obs = obs * visibility_mask
-        else:
+        elif obs_full is None:
             obs_full = obs
 
         # Create a tensordict of all the data.
