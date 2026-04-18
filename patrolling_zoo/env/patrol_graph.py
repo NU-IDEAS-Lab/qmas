@@ -104,7 +104,7 @@ class PatrolGraph():
                 if i[1][j] > self.longestPathLength:
                     self.longestPathLength = i[1][j]
         
-        print(f"Finished generating random graph with {numNodes} nodes and degree {self.graph.degree()}.")
+        # print(f"Finished generating random graph with {numNodes} nodes and degree {self.graph.degree()}.")
 
 
     def reset(self, seed=None, randomizeIds=False, regenerateGraph=False):
