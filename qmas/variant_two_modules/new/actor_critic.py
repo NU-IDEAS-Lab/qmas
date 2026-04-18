@@ -1,3 +1,5 @@
+import functools
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -167,6 +169,49 @@ class QmasActor(nn.Module):
 
 
     def forward(self, obs, rnn_states, masks, available_actions=None, deterministic=False, global_obs=None):
+        
+        actor_features, rnn_states = self._forward(obs, rnn_states, masks, available_actions, global_obs)
+
+        actions, action_log_probs = self.act(actor_features, available_actions, deterministic)
+
+        return actions, action_log_probs, rnn_states
+
+
+    def evaluate_actions(self, obs, global_obs, rnn_states, action, masks, available_actions=None, active_masks=None):
+        """
+        Compute log probability and entropy of given actions.
+        :param obs: (torch.Tensor) observation inputs into network.
+        :param action: (torch.Tensor) actions whose entropy and log probability to evaluate.
+        :param rnn_states: (torch.Tensor) if RNN network, hidden states for RNN.
+        :param masks: (torch.Tensor) mask tensor denoting if hidden states should be reinitialized to zeros.
+        :param available_actions: (torch.Tensor) denotes which actions are available to agent
+                                                              (if None, all actions available)
+        :param active_masks: (torch.Tensor) denotes whether an agent is active or dead.
+
+        :return action_log_probs: (torch.Tensor) log probabilities of the input actions.
+        :return dist_entropy: (torch.Tensor) action distribution entropy for the given inputs.
+        """
+        action = check(action).to(**self.tpdv)
+        if active_masks is not None:
+            active_masks = check(active_masks).to(**self.tpdv)
+
+        actor_features, _ = self._forward(obs, rnn_states, masks, available_actions, global_obs)        
+
+        action_log_probs, dist_entropy = self.act.evaluate_actions(actor_features,
+                                                                   action, available_actions,
+                                                                   active_masks=
+                                                                   active_masks if self._use_policy_active_masks
+                                                                   else None)
+
+        return action_log_probs, dist_entropy
+
+
+    def _forward(self, obs, rnn_states, masks, available_actions=None, global_obs=None):
+        '''
+        This function performs the bulk of the forward pass to compute the features used for action selection or evaluation.
+        It is separated from the main forward function to allow reuse of the feature computation for both action selection and evaluation.
+        '''
+
         rnn_states = check(rnn_states).to(**self.tpdv)
         masks = check(masks).to(**self.tpdv)
         if available_actions is not None:
@@ -259,131 +304,7 @@ class QmasActor(nn.Module):
         if self._use_rnn:
             actor_features, rnn_states = self.rnn(actor_features, rnn_states, masks)
 
-        actions, action_log_probs = self.act(actor_features, available_actions, deterministic)
-
-        return actions, action_log_probs, rnn_states
-
-
-
-    def evaluate_actions(self, obs, global_obs, rnn_states, action, masks, available_actions=None, active_masks=None):
-        """
-        Compute log probability and entropy of given actions.
-        :param obs: (torch.Tensor) observation inputs into network.
-        :param action: (torch.Tensor) actions whose entropy and log probability to evaluate.
-        :param rnn_states: (torch.Tensor) if RNN network, hidden states for RNN.
-        :param masks: (torch.Tensor) mask tensor denoting if hidden states should be reinitialized to zeros.
-        :param available_actions: (torch.Tensor) denotes which actions are available to agent
-                                                              (if None, all actions available)
-        :param active_masks: (torch.Tensor) denotes whether an agent is active or dead.
-
-        :return action_log_probs: (torch.Tensor) log probabilities of the input actions.
-        :return dist_entropy: (torch.Tensor) action distribution entropy for the given inputs.
-        """
-        rnn_states = check(rnn_states).to(**self.tpdv)
-        action = check(action).to(**self.tpdv)
-        masks = check(masks).to(**self.tpdv)
-        if global_obs is not None:
-            global_obs = check(global_obs).to(**self.tpdv)
-        if available_actions is not None:
-            available_actions = check(available_actions).to(**self.tpdv)
-
-        if active_masks is not None:
-            active_masks = check(active_masks).to(**self.tpdv)
-
-        if self._use_gnn:
-            # Split observation into graph and non-graph components.
-            obs_graph = obs[:, self.obs_space_graph_idx]
-            nonGraphIdx = [i for i in range(obs.shape[1]) if i != self.obs_space_graph_idx]
-            obs_nongraph = obs[:, nonGraphIdx]
-            if len(obs_nongraph.shape) > 1 and obs_nongraph.shape[1] > 0:
-                # The non-graph data is stored as an object dtype. Need to convert to float32.
-                obs_non_graph_float = np.zeros((obs_nongraph.shape[0], *obs_nongraph[0, 0].shape), dtype=np.float32)
-                for i in range(obs_nongraph.shape[0]):
-                    obs_non_graph_float[i] = obs_nongraph[i, 0]
-                obs_nongraph = obs_non_graph_float
-            obs_nongraph = check(obs_nongraph.astype(np.float32)).to(**self.tpdv)
-
-            # Batch the graphs and pass through GNN.
-            graphs = Batch.from_data_list(obs_graph).to(self.device, "x", "edge_attr", "edge_index")
-            actor_features = self.base(graphs.x, graphs.edge_attr, graphs.edge_index)
-
-            # Restore the original shape of [batch_size, num_nodes (including agents), num_feats] from [batch_size*num_nodes, num_feats]
-            actor_features, _ = to_dense_batch(actor_features, graphs.batch.to(self.device))
-        
-            # Perform the neighbor scoring from Goeckner et al., DOI: 10.1109/IROS58592.2024.10802510
-            if hasattr(graphs, "neighbors") and self.args.gnn_neighbor_scoring:
-                # Pad actor_features to max neighbors.
-                if self.MAX_NODES - actor_features.shape[1] > 0:
-                    actor_features = F.pad(actor_features, (0, 0, 0, self.MAX_NODES - actor_features.shape[1]), mode='constant', value=0.0)
-
-                neighbors_mask = check(np.array(graphs.neighbors_mask)).to(**self.tpdv).bool()
-                # Extend the mask for the full feature size.
-                neighbors_mask = neighbors_mask.unsqueeze(2).repeat(1, 1, actor_features.shape[-1])
-                actor_features_masked = torch.where(neighbors_mask, actor_features, 0.0)
-                scores = self.neighbor_scorer(actor_features_masked)
-                
-                # Shift the scores to the correct position.
-                scores_shifted = torch.zeros((actor_features.shape[0], self.MAX_NEIGHBORS), **self.tpdv)
-                for i in range(actor_features.shape[0]):
-                    nbrs = check(np.array(graphs.neighbors[i])).to(**self.tpdv).int()
-                    scores_shifted[i, :nbrs.shape[0]] = scores[i, nbrs, 0]
-
-                actor_features = scores_shifted
-
-            # Perform evaluation only for a node of interest (typically agent position).
-            elif hasattr(graphs, "agent_idx"):
-                agent_idx = torch.from_numpy(np.array(graphs.agent_idx)).reshape(-1, 1).to(self.device)
-                actor_features = self.base.gatherNodeFeats(actor_features, agent_idx)
-            
-            # Use the entire graph as the actor features.
-            else:
-                actor_features = self.base.graphAggr(actor_features, aggr="max")
-
-            # Concatenate the graph and non-graph features.
-            actor_features = torch.cat([actor_features, obs_nongraph], dim=-1)
-
-            if self._use_gnn_mlp:
-                actor_features = self.mlp0(actor_features)
-        else:
-            obs = check(obs).to(**self.tpdv)
-            
-            actor_features = obs
-            if self._use_cnn:
-                actor_features = self.cnn(actor_features)
-            if self._use_attention:
-                actor_features = self.attention(actor_features)
-            if self._use_mlp:
-                actor_features = self.mlp(actor_features)
-
-        # Handle global observation.
-        if self._use_state_encoder:
-            if global_obs == None:
-                # If no global state is provided, use zeros.
-                batch_size = actor_features.shape[0]
-                encoded_state = torch.zeros((batch_size, self.args.state_encoder_output_dim), device=actor_features.device)
-            else:
-                global_obs = torch.nan_to_num(global_obs, nan=0.0, posinf=0.0, neginf=0.0)
-                # Encode the global state
-                encoded_state = self.state_encoder(global_obs)
-                # Repeat the encoded state for each agent if necessary.
-                if encoded_state.shape[0] < actor_features.shape[0]:
-                    if actor_features.shape[0] % encoded_state.shape[0] != 0:
-                        raise ValueError("Batch size of obs is not a multiple of batch size of share_obs.")
-                    encoded_state = encoded_state.repeat_interleave(actor_features.shape[0] // encoded_state.shape[0], dim=0)
-            actor_features = torch.cat([actor_features, encoded_state], dim=-1)
-
-        # Recurrent network.
-        if self._use_rnn:
-            actor_features, rnn_states = self.rnn(actor_features, rnn_states, masks)
-
-        action_log_probs, dist_entropy = self.act.evaluate_actions(actor_features,
-                                                                   action, available_actions,
-                                                                   active_masks=
-                                                                   active_masks if self._use_policy_active_masks
-                                                                   else None)
-
-        return action_log_probs, dist_entropy
-
+        return actor_features, rnn_states
 
 
 class QmasCritic(Critic):
