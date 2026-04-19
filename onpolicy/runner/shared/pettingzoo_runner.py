@@ -585,6 +585,10 @@ class PettingzooRunner(Runner):
                     # The prediction (from observation_global) can only feed the state encoder.
                     if use_prediction and obs.dtype != object:
                         obs_policy = prediction_now
+                        if self.all_args.prediction_uq_injection_method == "append":
+                            obs_policy = torch.cat([obs_policy, uncertainty_now], dim=-1)
+                    elif obs.dtype != object and self.all_args.prediction_uq_injection_method == "append":
+                        obs_policy = torch.cat([obs_policy, torch.zeros_like(obs_policy)], dim=-1)
 
 
                 actions, rnn_states = self.trainer.policy.act(
@@ -732,6 +736,10 @@ class PettingzooRunner(Runner):
                     # The prediction (from observation_global) can only feed the state encoder.
                     if use_prediction and obs.dtype != object:
                         obs_policy = prediction_now
+                        if self.all_args.prediction_uq_injection_method == "append":
+                            obs_policy = torch.cat([obs_policy, uncertainty_now], dim=-1)
+                    elif obs.dtype != object and self.all_args.prediction_uq_injection_method == "append":
+                        obs_policy = torch.cat([obs_policy, torch.zeros_like(obs_policy)], dim=-1)
 
 
                 actions, rnn_states = self.trainer.policy.act(
