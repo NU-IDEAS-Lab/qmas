@@ -485,20 +485,14 @@ class parallel_env(ParallelEnv):
             and "agent_graph_position" in self.state_space.spaces
         )
         if _prediction_supported:
-            pred_unflattened = []
-            pred_steps = predicted_positions.shape[0]
-            # for j in range(pred_steps): ### TEMP: We only care about the last step.
-            for j in range(pred_steps - 1, pred_steps):
-                pred_j = predicted_positions[j]
-                if hasattr(pred_j, 'numpy'):
-                    pred_j = pred_j.numpy()
-                p = spaces.unflatten(self.state_space, pred_j.flatten())
-                pred_unflattened.append(p)
+            pred_agent0 = predicted_positions[0]
+            if hasattr(pred_agent0, 'numpy'):
+                pred_agent0 = pred_agent0.numpy()
+            pred_unflattened = spaces.unflatten(self.state_space, pred_agent0.flatten())
 
             # Plot history of predictions from the perspective of agent 0.
             # state_space obs is a single-agent view (not keyed by agent at the top level).
-            agent_preds = pred_unflattened[-1]
-            graph_pos = agent_preds["agent_graph_position"]
+            graph_pos = pred_unflattened["agent_graph_position"]
             pos = nx.get_node_attributes(self.pg.graph, "pos")
 
             for i, agent in enumerate(self.possible_agents):
