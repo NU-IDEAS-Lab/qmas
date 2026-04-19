@@ -696,8 +696,8 @@ class parallel_env(ParallelEnv):
             lastVisits = {i: self.pg.getNodeVisitTime(i) for i in vertices}
             
             # Get min and max idleness times for normalization.
-            maxIdleness = self.step_count - min(lastVisits.values())
-            minIdleness = self.step_count - max(lastVisits.values())
+            maxIdleness = self.step_count - min(lastVisits.values()) if len(lastVisits) > 0 else 0
+            minIdleness = self.step_count - max(lastVisits.values()) if len(lastVisits) > 0 else 0
             allSame = maxIdleness == minIdleness
 
             # Set attributes of patrol graph nodes.
