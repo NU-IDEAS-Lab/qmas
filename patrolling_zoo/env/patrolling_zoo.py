@@ -493,18 +493,16 @@ class parallel_env(ParallelEnv):
             # Plot history of predictions from the perspective of agent 0.
             # state_space obs is a single-agent view (not keyed by agent at the top level).
             graph_pos = pred_unflattened["agent_graph_position"]
-            pos = nx.get_node_attributes(self.pg.graph, "pos")
 
             for i, agent in enumerate(self.possible_agents):
                 if agent in graph_pos:
-                    print(f"Agent {agent.name} prediction: {graph_pos[agent]}")
                     node_id_a = int(round(graph_pos[agent][0]))
                     node_id_b = int(round(graph_pos[agent][1]))
                     if node_id_a < 0 or node_id_b < 0 or node_id_a >= self.pg.graph.number_of_nodes() or node_id_b >= self.pg.graph.number_of_nodes():
                         continue
 
-                    posA = np.array(pos[node_id_a])
-                    posB = np.array(pos[node_id_b])
+                    posA = np.array(self.pg.graph.nodes[node_id_a]["pos"])
+                    posB = np.array(self.pg.graph.nodes[node_id_b]["pos"])
                     dist = self._dist(posA, posB)
                     if dist < 1e-6:
                         prediction = posA
