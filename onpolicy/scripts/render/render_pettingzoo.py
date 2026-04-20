@@ -106,7 +106,10 @@ def main(args):
         from onpolicy.runner.separated.pettingzoo_runner import PettingzooRunner as Runner
 
     runner = Runner(config)
-    runner.render()
+    try:
+        runner.render()
+    except KeyboardInterrupt:
+        pass
     
     # post process
     envs.close()

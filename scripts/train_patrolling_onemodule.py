@@ -1,22 +1,17 @@
-
-import torch
-torch.multiprocessing.set_sharing_strategy('file_system')
-
 from onpolicy.scripts.train.train_pettingzoo import main
 
 import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-	"--experiment_name", "patrolling-obs200-gnn1",
-	# "--experiment_name", "diffuser-patrolling-obs200-uqEnsemble3-pygNS-injectionAppend",
+	"--experiment_name", "onemodule-patrolling-obs200-uqEnsemble3-pygNS-commsRL-injectionAppend",
 	"--project_name", "qmas",
 	"--env_class", "patrolling_zoo.patrolling_zoo_v0.parallel_env",
 	"--user_name", "ideas-mas",
 
 	"--num_agents", "4",
 	"--agent_speed", "40.0",
-	"--action_method", "neighbors",
+	"--action_method", "neighbors_with_comm_boolean",
 	"--observe_method", "pyg",
 	"--observe_method_global", "adjacency",
 	"--observation_radius", "200.0",
@@ -31,14 +26,14 @@ args = [
 	"--num_env_steps", "1000000",
 	"--episode_length", "200",
 	"--max_cycles", "200",
-    "--num_mini_batch", "50",
+    "--num_mini_batch", "10",
 
-	"--algorithm_class", "qmas.variant_two_modules.new.algorithm.QmasAlgorithm",
-	"--policy_class", "qmas.variant_two_modules.new.policy.QmasPolicy",
-	"--algorithm_name", "mappo",
+	"--algorithm_class", "qmas.variant_one_module.algorithm.QmasAlgorithmOneModule",
+	"--policy_class", "qmas.variant_one_module.policy.QmasPolicy",
+	"--algorithm_name", "rmappo",
 	"--use_gnn_policy",
 	"--use_gnn_mlp_policy",
-	"--gnn_layer_N", "1",
+	"--gnn_layer_N", "10",
 	"--gnn_hidden_size", "128",
 	"--gnn_skip_connections",
 	"--gnn_neighbor_scoring",
@@ -50,20 +45,22 @@ args = [
 	"--share_policy",
 	"--use_ReLU",
 	"--hidden_size", "512",
-	"--layer_N", "2",
+	"--layer_N", "4",
 	"--seed", "0",
 
 	"--diffusion_model_type", "dit1d",
     "--prediction_uq_method", "ensemble",
-    # "--prediction_uq_injection_method", "append",
-    "--prediction_disable",
+    "--prediction_uq_injection_method", "append",
+    # "--prediction_disable",
 	"--prediction_ensemble_size", "3",
     "--state_encoder",
 
-	"--n_rollout_threads", "99",
+    "--episode_fraction_start_prediction", "0.2",
+
+	"--n_rollout_threads", "21",
 	"--cuda",
-	"--cuda_idx", "7",
-    "--cuda_idx_predictor", "7",
+	"--cuda_idx", "5",
+    "--cuda_idx_predictor", "6",
     "--threaded_training",
     "--n_training_threads", "16",
 

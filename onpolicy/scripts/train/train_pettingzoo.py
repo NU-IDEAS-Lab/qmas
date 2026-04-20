@@ -207,6 +207,8 @@ def validateArgs(all_args):
         all_args.prediction_uq_method = "estimation"
         print("Warning: --prediction_estimate_uncertainty is deprecated. Setting prediction_uq_method to estimation.")
 
+    assert all_args.n_rollout_threads % all_args.prediction_ensemble_size == 0, "n_rollout_threads must be divisible by prediction_ensemble_size."
+
     print("Pettingzoo arguments validated: base")
 
     # Validate environment arguments.
@@ -260,19 +262,20 @@ def main(args):
     # wandb
     if all_args.use_wandb:
         run = wandb.init(config=all_args,
-                            project=all_args.project_name,
-                            entity=all_args.user_name,
-                            notes=socket.gethostname(),
-                            name="-".join([
-                                all_args.algorithm_name,
-                                all_args.experiment_name,
-                                str(date_time),
-                                "seed" + str(all_args.seed)
-                            ]),
-                            group=all_args.env_name,
-                            dir=str(run_dir),
-                            job_type="training",
-                            reinit=True)
+            project=all_args.project_name,
+            entity=all_args.user_name,
+            notes=socket.gethostname(),
+            name="-".join([
+                all_args.algorithm_name,
+                all_args.experiment_name,
+                str(date_time),
+                "seed" + str(all_args.seed)
+            ]),
+            group=all_args.env_name,
+            dir=str(run_dir),
+            job_type="training",
+            reinit="finish_previous",
+        )
         run_dir = Path(wandb.run.dir)
     else:
         if not run_dir.exists():
@@ -323,13 +326,14 @@ def main(args):
         raise NotImplementedError("Pettingzoo wrapper does not yet support separate policies.")
         from onpolicy.runner.separated.pettingzoo_runner import PettingzooRunner as Runner
 
+    wandb_exit_code = 0
     try:
         runner = Runner(config)
         runner.run()
     except KeyboardInterrupt:
-        wandb.finish(exit_code=1)
+        wandb_exit_code = 1
         print("exit due to keyboard interrupt")
-
+    
     # post process
     envs.close()
     if all_args.use_eval and eval_envs is not envs:
@@ -339,7 +343,10 @@ def main(args):
     runner.save(final=True)
 
     if all_args.use_wandb:
-        run.finish()
+        try:
+            wandb.finish(exit_code=wandb_exit_code)
+        except Exception as e:
+            print(f"wandb run finish failed with exception type {type(e).__name__}")
     else:
         runner.writter.export_scalars_to_json(str(runner.log_dir + '/summary.json'))
         runner.writter.close()
