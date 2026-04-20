@@ -57,6 +57,10 @@ def add_args(parser):
                         help="How communication requests are handled: 'nearest' queries one nearby agent, "
                              "'broadcast' queries all other agents, "
                              "'full' provides all agents' observations.")
+    parser.add_argument("--observation_mode_global", type=str, default="coords",
+                        choices=["map", "coords"],
+                        help="Format for globally situated observation in info['observation_global']. "
+                            "'map' uses map layers, 'coords' uses coordinate-list features.")
     parser.add_argument("--render_mode", type=str, default="human",
                         choices=parallel_env.metadata["render_modes"],
                         help="The rendering mode for the environment.")
@@ -71,6 +75,113 @@ def validate_args(parsed_args):
         parsed_args.num_haulers + \
         parsed_args.num_prospectors + \
         parsed_args.num_superbots
+
+
+def flatten_coord_state(obs, mask):
+    '''Flatten coordinate-list global state to match vector-based model inputs.'''
+
+    obs = np.asarray(obs, dtype=np.float32).reshape(-1)
+    mask = np.asarray(mask, dtype=bool).reshape(-1)
+    return obs, mask
+
+
+def build_global_coord_state(env, agent=None, senders=set()):
+    '''Build an absolute coordinate-list state.
+
+    If ``agent`` is provided, the result is an agent-situated global estimate:
+    entity coordinates are expressed in the global frame, but coordinates that are
+    not currently known to the agent (or its communication senders) are masked out.
+    '''
+
+    def absolute_position(pos):
+        return np.asarray(pos, dtype=np.float32)
+
+    def empty_position():
+        return np.array([-100.0, -100.0], dtype=np.float32)
+
+    def row_mask(position_known):
+        return [True, bool(position_known), bool(position_known)]
+
+    observers = {agent, *senders} if agent is not None else None
+
+    def agent_position_known(other_agent):
+        if agent is None:
+            return True
+        return any(
+            np.linalg.norm(observer.position - other_agent.position) <= observer.observation_radius
+            for observer in observers
+        )
+
+    def resource_position_known(resource_pos):
+        if agent is None:
+            return True
+
+        resource_pos_int = tuple(np.asarray(resource_pos, dtype=np.int32))
+        if agent.mask_resources_observed[resource_pos_int]:
+            return True
+
+        return any(
+            observer.capabilities[CAP.PROSPECT] and observer.mask_resources_observed[resource_pos_int]
+            for observer in senders
+        )
+
+    rows = []
+    mask_rows = []
+
+    resource_type = float(len(AGENT_ROLE))
+    depot_type = float(len(AGENT_ROLE) + 1)
+
+    # Agent coordinates in a stable ordering.
+    for other_agent in env.possible_agents:
+        position_known = agent_position_known(other_agent)
+        pos = absolute_position(other_agent.position) if position_known else empty_position()
+        rows.append([
+            float(other_agent.role.value),
+            float(pos[0]),
+            float(pos[1]),
+        ])
+        mask_rows.append(row_mask(position_known))
+
+    # Depot coordinates are globally known.
+    for depot in env.possible_depots:
+        pos = absolute_position(depot.position)
+        rows.append([
+            depot_type,
+            float(pos[0]),
+            float(pos[1]),
+        ])
+        mask_rows.append(row_mask(True))
+
+    # Resource coordinates use a fixed number of slots per resource type.
+    for resource in env.possible_resources:
+        locations = np.argwhere(env.map_resources[resource] > 0).astype(np.float32)
+
+        if locations.shape[0] > 0:
+            sort_idx = np.lexsort((locations[:, 1], locations[:, 0]))
+            locations = locations[sort_idx]
+
+        max_count = resource.quantity_max
+        count = min(max_count, locations.shape[0])
+
+        for i in range(max_count):
+            if i < count:
+                position_known = resource_position_known(locations[i])
+                pos = absolute_position(locations[i]) if position_known else empty_position()
+            else:
+                position_known = False
+                pos = empty_position()
+
+            rows.append([
+                resource_type,
+                float(pos[0]),
+                float(pos[1]),
+            ])
+            mask_rows.append(row_mask(position_known))
+
+    obs = np.array(rows, dtype=np.float32)
+    mask = np.array(mask_rows, dtype=bool)
+
+    return obs, mask
 
 
 def env(*args, **kwargs):
@@ -111,6 +222,7 @@ class parallel_env(ParallelEnv):
             hauler_pickup_threshold: float = 1.5,
             noisy_memory: bool = False,
             communication_mode: str = "nearest",
+            observation_mode_global: str = "coords",
             movement_mode: str = "moore",
             render_mode: str = "human",
         ):
@@ -136,6 +248,7 @@ class parallel_env(ParallelEnv):
         self.hauler_pickup_threshold = hauler_pickup_threshold
         self.noisy_memory = noisy_memory
         self.communication_mode = communication_mode
+        self.observation_mode_global = observation_mode_global
         self.movement_mode = movement_mode
 
         # Set up entities.
@@ -878,7 +991,7 @@ class parallel_env(ParallelEnv):
         REWARD_COLLISION = -2.0
         REWARD_NO_EXPLORATION = -1.0
         REWARD_COMMUNICATION = -5.0
-        REWARD_NO_COMMUNICATION = 0.0
+        REWARD_NO_COMMUNICATION = 5.0
         REWARD_EXTRACTOR_ON_RESOURCE = 20.0
         REWARD_DEPOSIT = 0.0
         REWARD_EXTRACT = 100000.0
@@ -1105,7 +1218,7 @@ class parallel_env(ParallelEnv):
                     senders=senders_set
                 )
                 info_dict[agent]["observation_global"] = agent_observation_global
-                # info_dict[agent]["visibility_mask_global"] = fixed_mask_global
+                info_dict[agent]["visibility_mask_global"] = fixed_mask_global
 
             # Check whether anything new was explored.
             # visible_cells = self._get_visible_cell_count(agent)
@@ -1286,61 +1399,88 @@ class parallel_env_simple_obs(parallel_env):
     def observation_space(self, agent):
         ''' Returns the observation space for the given agent. '''
 
-        return spaces.Dict({
-            "agents": spaces.Dict({
-                a: spaces.Dict({
-                    "position": spaces.Box(
-                        low=-np.inf,
-                        high=np.inf,
-                        shape=(2,),
-                        dtype=np.float32
-                    ),
-                    "velocity": spaces.Box(
-                        low=-1,
-                        high=1,
-                        shape=(2,),
-                        dtype=np.float32
-                    ),
-                    "role": spaces.Box(
-                        low=0,
-                        high=len(AGENT_ROLE),
-                        shape=(1,),
-                        dtype=np.int32
-                    ),
-                    "cargo": spaces.Box(
-                        low=0,
-                        high=self.default_hauler_capacity,
-                        shape=(len(self.possible_resources),),
-                        dtype=np.float32
-                    ),
-                }) for a in self.possible_agents
-            }),
-            "depots": spaces.Dict({
-                depot: spaces.Dict({
-                    "position": spaces.Box(
-                        low=-np.inf,
-                        high=np.inf,
-                        shape=(2,),
-                        dtype=np.float32
-                    ),
-                    "stock": spaces.Box(
-                        low=0,
-                        high=np.inf,
-                        shape=(1,),
-                        dtype=np.float32
-                    ),
-                }) for depot in self.possible_depots
-            }),
-            "resources": spaces.Dict({
-                r: spaces.Box(
-                    low=-np.inf,
-                    high=np.inf,
-                    shape=(r.quantity_max, len(self.world_dims)),
-                    dtype=np.float32
-                ) for r in self.possible_resources
-            }),
-        })
+        num_rows = len(self.possible_agents) + len(self.possible_depots) + sum(r.quantity_max for r in self.possible_resources)
+        return spaces.Box(
+            low=-np.inf,
+            high=np.inf,
+            shape=(num_rows, 3),
+            dtype=np.float32
+        )
 
+    def observe(self, agent, senders=set()):
+        '''
+        Returns a coordinate-list observation with independent state variables.
+        '''
+
+        def relative_position(pos):
+            return (pos.astype(np.float32) - agent.position.astype(np.float32))
+
+        def unknown_position():
+            return np.array([-100.0, -100.0], dtype=np.float32)
+
+        _, map_mask = parallel_env_map_obs.observe(self, agent, senders=senders)
+
+        rows = []
+
+        # Agent coordinates (fixed number).
+        visibility_layer = parallel_env_map_obs.MAP_LAYERS.AGENTS_PROSPECTOR
+        resource_type = float(len(AGENT_ROLE))
+        depot_type = float(len(AGENT_ROLE) + 1)
+        for a in self.possible_agents:
+            pos = a.grid_position
+            is_visible = bool(map_mask[visibility_layer, pos[0], pos[1]])
+            rel_pos = relative_position(a.position) if is_visible else unknown_position()
+            rows.append([
+                float(a.role.value),
+                float(rel_pos[0]),
+                float(rel_pos[1]),
+            ])
+
+        # Depot coordinates (always globally visible in map observation)
+        for d in self.possible_depots:
+            rel_pos = relative_position(d.position)
+            rows.append([
+                depot_type,
+                float(rel_pos[0]),
+                float(rel_pos[1]),
+            ])
+
+        # Resource coordinates
+        for r in self.possible_resources:
+            locations = np.argwhere(self.map_resources[r] > 0)
+
+            if locations.shape[0] > 0:
+                observed_mask = agent.mask_resources_observed[locations[:, 0], locations[:, 1]]
+                locations = locations[observed_mask]
+
+            if locations.shape[0] > 0:
+                rel_locations = relative_position(locations.astype(np.float32))
+                dists = np.linalg.norm(rel_locations, axis=1)
+                rel_locations = rel_locations[np.argsort(dists)]
+            else:
+                rel_locations = np.zeros((0, 2), dtype=np.float32)
+
+            max_count = r.quantity_max
+            count = min(max_count, rel_locations.shape[0])
+
+            for i in range(max_count):
+                if i < count:
+                    rel_pos = rel_locations[i]
+                    is_visible = 1.0
+                else:
+                    rel_pos = unknown_position()
+                    is_visible = 0.0
+
+                rows.append([
+                    resource_type,
+                    float(rel_pos[0]),
+                    float(rel_pos[1]),
+                ])
+
+        obs = np.array(rows, dtype=np.float32)
+        fixed_mask = np.ones_like(obs, dtype=bool)
+
+        return obs, fixed_mask
 
     def _observe(self, agent, global_state=False):
         ''' Fills in the state/observation space for the given agent. '''
@@ -1352,12 +1492,7 @@ class parallel_env_simple_obs(parallel_env):
         def agent_obs(a):
             return {
                 "position": relative_position(a.position),
-                "velocity": a.velocity,
                 "role": np.array([a.role.value], dtype=np.int32),
-                "cargo": np.array(
-                    [a.cargo.get(r.resource_id, 0.0) for r in self.possible_resources],
-                    dtype=np.float32
-                ) / a.capabilities.get(CAP.CARRY_CAPACITY, 1.0),  # Normalize cargo by capacity
             }
 
         # Create the observation.
@@ -1366,7 +1501,6 @@ class parallel_env_simple_obs(parallel_env):
             "depots": {
                 d: {
                     "position": relative_position(d.position),
-                    "stock": np.array([d.stock], dtype=np.float32)
                 } for d in self.possible_depots
             },
             "resources": {}
@@ -1401,15 +1535,12 @@ class parallel_env_simple_obs(parallel_env):
             "agents": {
                 a: {
                     "position": np.ones_like(obs["agents"][a]["position"], dtype=bool),
-                    "velocity": np.ones_like(obs["agents"][a]["velocity"], dtype=bool),
                     "role": np.ones_like(obs["agents"][a]["role"], dtype=bool),
-                    "cargo": np.ones_like(obs["agents"][a]["cargo"], dtype=bool)
                 } for a in self.possible_agents
             },
             "depots": {
                 d: {
                     "position": np.ones_like(obs["depots"][d]["position"], dtype=bool),
-                    "stock": np.ones_like(obs["depots"][d]["stock"], dtype=bool)
                 } for d in self.possible_depots
             },
             "resources": {
@@ -1630,15 +1761,24 @@ class parallel_env_map_obs(parallel_env):
                 None or np.ndarray: None if render_mode is "human", otherwise an RGB array.
         '''
 
-        if pred is not None:
-            self.render_state(pred[-1, 0].numpy(), figsize=figsize)
-
         agent = self.agents[0]
         if agent.last_observation != None:
             # Use the prior observation if possible since this will contain communicated information.
             obs, fixed_mask = agent.last_observation
         else:
             obs, fixed_mask = self._observe(agent)
+
+        # Graph/simple observation variants still inherit this renderer, but their
+        # cached observations are not map tensors. Fall back to the generic world render.
+        if not isinstance(obs, np.ndarray):
+            return parallel_env.render(self, pred=pred, figsize=figsize, history_length=history_length, **kwargs)
+        if obs.dtype == object or fixed_mask is None or not isinstance(fixed_mask, np.ndarray):
+            return parallel_env.render(self, pred=pred, figsize=figsize, history_length=history_length, **kwargs)
+
+        if pred is not None:
+            pred_np = pred[-1, 0].detach().cpu().numpy() if hasattr(pred[-1, 0], "detach") else np.asarray(pred[-1, 0])
+            if pred_np.ndim >= 3:
+                self.render_state(pred_np, figsize=figsize)
 
         # Apply the visibility mask for rendering.
         obs *= fixed_mask
@@ -2152,19 +2292,39 @@ class parallel_env_partial_obs(parallel_env_map_obs):
     def state_space(self):
         ''' Returns the global state space. '''
 
-        return parallel_env_map_obs.observation_space(self, self.possible_agents[0])
+        if self.observation_mode_global == "map":
+            return parallel_env_map_obs.observation_space(self, self.possible_agents[0])
+        if self.observation_mode_global == "coords":
+            num_rows = len(self.possible_agents) + len(self.possible_depots) + sum(r.quantity_max for r in self.possible_resources)
+            return spaces.Box(
+                low=-np.inf,
+                high=np.inf,
+                shape=(num_rows * 3,),
+                dtype=np.float32,
+            )
+     
+        
 
 
     def _state(self):
         ''' Returns the global state and mask of the environment.'''
 
-        return parallel_env_map_obs._observe(self, self.possible_agents[0], global_state=True)
+        if self.observation_mode_global == "map":
+            return parallel_env_map_obs._observe(self, self.possible_agents[0], global_state=True)
+        if self.observation_mode_global == "coords":
+            obs, mask = build_global_coord_state(self)
+            return flatten_coord_state(obs, mask)
+       
 
 
     def get_observation_and_comms_situated(self, agent, senders=set()):
         ''' Returns a globally situated observation for the given agent. '''
 
-        return parallel_env_map_obs.observe(self, agent, senders=senders)
+        if self.observation_mode_global == "map":
+            return parallel_env_map_obs.observe(self, agent, senders=senders)
+        if self.observation_mode_global == "coords":
+            obs, mask = build_global_coord_state(self, agent=agent, senders=senders)
+            return flatten_coord_state(obs, mask)
 
 
     def render_observation(self, obs):
@@ -2201,6 +2361,11 @@ class parallel_env_graph_obs(parallel_env_map_obs):
 
 
     class NODE_TYPE(IntEnum):
+        RESOURCE = len(AGENT_ROLE)
+        DEPOT = auto()
+
+
+    class COORD_ENTITY_TYPE(IntEnum):
         RESOURCE = len(AGENT_ROLE)
         DEPOT = auto()
 
@@ -2343,21 +2508,39 @@ class parallel_env_graph_obs(parallel_env_map_obs):
         return obs, fixed_mask
 
 
+
     @property
     @functools.cache
     def state_space(self):
         ''' Returns the global state space. '''
 
-        return parallel_env_map_obs.observation_space(self, self.possible_agents[0])
-
+        if self.observation_mode_global == "map":
+            return parallel_env_map_obs.observation_space(self, self.possible_agents[0])
+        if self.observation_mode_global == "coords":
+            obs_space = parallel_env_simple_obs.observation_space(self, self.possible_agents[0])
+            return spaces.Box(
+                low=-np.inf,
+                high=np.inf,
+                shape=(int(np.prod(obs_space.shape)),),
+                dtype=np.float32,
+            )
+       
 
     def _state(self):
         ''' Returns the global state and mask of the environment.'''
 
-        return parallel_env_map_obs._observe(self, self.possible_agents[0], global_state=True)
+        if self.observation_mode_global == "map":
+            return parallel_env_map_obs._observe(self, self.possible_agents[0], global_state=True)
+        if self.observation_mode_global == "coords":
+            obs, mask = build_global_coord_state(self)
+            return flatten_coord_state(obs, mask)
 
 
     def get_observation_and_comms_situated(self, agent, senders=set()):
         ''' Returns a globally situated observation for the given agent. '''
 
-        return parallel_env_map_obs.observe(self, agent, senders=senders)
+        if self.observation_mode_global == "map":
+            return parallel_env_map_obs.observe(self, agent, senders=senders)
+        if self.observation_mode_global == "coords":
+            obs, mask = build_global_coord_state(self, agent=agent, senders=senders)
+            return flatten_coord_state(obs, mask)
