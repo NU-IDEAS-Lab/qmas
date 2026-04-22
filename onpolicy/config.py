@@ -203,6 +203,8 @@ def get_config():
                         default=False, help="Whether to use stacked_frames")
     parser.add_argument("--hidden_size", type=int, default=64,
                         help="Dimension of hidden layers for actor/critic networks") 
+    parser.add_argument("--critic_hidden_size", type=int, default=0,
+                        help="Dimension of hidden layers for critic networks. If 0, will be the same as --hidden_size")
     parser.add_argument("--layer_N", type=int, default=1,
                         help="Number of layers for actor/critic networks")
     parser.add_argument("--use_ReLU", action=argparse.BooleanOptionalAction,

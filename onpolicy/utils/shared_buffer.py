@@ -33,6 +33,7 @@ class SharedReplayBuffer(object):
         self.episode_length = args.episode_length
         self.n_rollout_threads = args.n_rollout_threads
         self.hidden_size = args.hidden_size
+        self.critic_rnn_hidden_size = args.critic_hidden_size
         self.recurrent_N = args.recurrent_N
         self.gamma = args.gamma
         self.gae_lambda = args.gae_lambda
@@ -64,7 +65,9 @@ class SharedReplayBuffer(object):
         self.rnn_states = np.zeros(
             (self.episode_length + 1, self.n_rollout_threads, num_agents, self.recurrent_N, self.hidden_size),
             dtype=np.float32)
-        self.rnn_states_critic = np.zeros_like(self.rnn_states)
+        self.rnn_states_critic = np.zeros(
+            (self.episode_length + 1, self.n_rollout_threads, num_agents, self.recurrent_N, self.critic_rnn_hidden_size),
+            dtype=np.float32)
 
         self.value_preds = np.zeros(
             (self.episode_length + 1, self.n_rollout_threads, num_agents, 1), dtype=np.float32)

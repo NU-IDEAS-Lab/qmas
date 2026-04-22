@@ -209,6 +209,10 @@ def validateArgs(all_args):
 
     assert all_args.n_rollout_threads % all_args.prediction_ensemble_size == 0, "n_rollout_threads must be divisible by prediction_ensemble_size."
 
+    # 0 means "same as hidden_size".
+    if all_args.critic_hidden_size == 0:
+        all_args.critic_hidden_size = all_args.hidden_size
+
     print("Pettingzoo arguments validated: base")
 
     # Validate environment arguments.

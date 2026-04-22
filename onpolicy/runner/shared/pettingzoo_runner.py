@@ -165,7 +165,7 @@ class PettingzooRunner(Runner):
             obs=obs,
             obs_full=obs_full,
             rnn_states_actor=np.zeros((self.n_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=np.float32),
-            rnn_states_critic=np.zeros((self.n_rollout_threads, self.num_agents, self.recurrent_N, self.hidden_size), dtype=np.float32),
+            rnn_states_critic=np.zeros((self.n_rollout_threads, self.num_agents, self.recurrent_N, self.critic_hidden_size), dtype=np.float32),
             actions=np.zeros(actions_shape, dtype=np.float32),
             action_log_probs=np.zeros(action_log_prob_shape, dtype=np.float32),
 
@@ -334,7 +334,7 @@ class PettingzooRunner(Runner):
             for agent_id in range(self.num_agents):
                 if dones[i, agent_id]:
                     rnn_states[i][agent_id] = torch.zeros((self.recurrent_N, self.hidden_size))
-                    rnn_states_critic[i][agent_id] = torch.zeros((self.recurrent_N, self.hidden_size))
+                    rnn_states_critic[i][agent_id] = torch.zeros((self.recurrent_N, self.critic_hidden_size))
                     masks[i, agent_id] = torch.zeros(1)
 
         self.buffer.insert(
