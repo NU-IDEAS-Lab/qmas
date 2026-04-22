@@ -74,7 +74,7 @@ class PatrolGraph():
                 self.longestPathLength = i[1][j]
 
 
-    def generateRandomGraph(self, numNodes, radius=35, sizeX=200.0, sizeY=200.0, seed=None):
+    def generateRandomGraph(self, numNodes, radius=75, sizeX=500.0, sizeY=500.0, seed=None):
         ''' Generates a random graph with the given parameters. '''
 
         connected = False
