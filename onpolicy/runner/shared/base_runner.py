@@ -39,6 +39,7 @@ class Runner(object):
         self.n_render_rollout_threads = self.all_args.n_render_rollout_threads
         self.use_linear_lr_decay = self.all_args.use_linear_lr_decay
         self.hidden_size = self.all_args.hidden_size
+        self.critic_hidden_size = self.all_args.critic_hidden_size
         self.use_wandb = self.all_args.use_wandb
         self.use_render = self.all_args.use_render
         self.recurrent_N = self.all_args.recurrent_N

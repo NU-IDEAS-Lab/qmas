@@ -299,7 +299,7 @@ class R_Critic(nn.Module):
     """
     def __init__(self, args, cent_obs_space, device=torch.device("cpu")):
         super(R_Critic, self).__init__()
-        self.hidden_size = args.hidden_size
+        self.hidden_size = args.critic_hidden_size
         self._use_orthogonal = args.use_orthogonal
         self._use_naive_recurrent_policy = args.use_naive_recurrent_policy
         self._use_recurrent_policy = args.use_recurrent_policy
@@ -322,7 +322,7 @@ class R_Critic(nn.Module):
             input_dim = np.prod(obs_shape)
 
             if self._use_cnn:
-                self.cnn = CNNBase(args, obs_shape, mode='cnn')
+                self.cnn = CNNBase(args, obs_shape, mode='cnn', hidden_size=self.hidden_size)
                 input_dim = self.hidden_size
 
             if self._use_attention:            
@@ -330,7 +330,7 @@ class R_Critic(nn.Module):
                 input_dim = input_dim
 
             if self._use_mlp:
-                self.mlp = MLPBase(args, input_dim)
+                self.mlp = MLPBase(args, input_dim, hidden_size=self.hidden_size)
                 input_dim = self.hidden_size
 
         if self._use_naive_recurrent_policy or self._use_recurrent_policy:
