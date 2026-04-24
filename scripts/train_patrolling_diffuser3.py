@@ -4,7 +4,8 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-    "--experiment_name", "diffuser-patrolling-obs200-obsPredUQ-commsRL0.1-rwdNew",
+    "--experiment_name", "diffuser-patrolling-random-obs200-obsPredUQ-commsRL0.1-rwdNew-128x3",
+    # "--experiment_name", "diffuser-patrolling-obs200-uqEnsemble3-pygNS-injectionAppend",
     "--project_name", "qmas",
     "--env_class", "patrolling_zoo.patrolling_zoo_v0.parallel_env",
     "--user_name", "ideas-mas",
@@ -23,8 +24,9 @@ args = [
     "--reward_method_terminal", "none",
     "--reward_interval", "1",
 
-    "--graph_name", "milwaukee",
-    "--graph_file", "../patrolling_zoo/graphs/milwaukee.graph",
+    # "--graph_name", "milwaukee",
+    # "--graph_file", "../patrolling_zoo/graphs/milwaukee.graph",
+    "--graph_random",
     "--num_env_steps", "1000000",
     "--episode_length", "200",
     "--max_cycles", "200",
@@ -35,8 +37,8 @@ args = [
     "--algorithm_name", "rmappo",
     "--use_gnn_policy",
     # "--use_gnn_mlp_policy",
-    "--gnn_layer_N", "10",
-    "--gnn_hidden_size", "128",
+    "--gnn_layer_N", "5",
+    "--gnn_hidden_size", "32",
     "--gnn_skip_connections",
     "--gnn_neighbor_scoring",
     # "--use_recurrent_policy",
@@ -46,8 +48,10 @@ args = [
     "--skip_steps",
     "--share_policy",
     "--use_ReLU",
-    "--hidden_size", "512",
-    "--layer_N", "4",
+    "--hidden_size", "128",
+    "--layer_N", "3",
+    "--use_linear_lr_decay",
+    # "--ppo_epoch", "5",
     "--seed", "0",
 
     "--diffusion_model_type", "dit1d",
@@ -59,12 +63,12 @@ args = [
     "--prediction_ensemble_size", "3",
     "--state_encoder",
 
-    # "--episode_fraction_start_prediction", "0.2",
+    # "--episode_fraction_start_prediction", "0.0",
 
-    "--n_rollout_threads", "33",
+    "--n_rollout_threads", "66",
     "--cuda",
-    "--cuda_idx", "6",
-    "--cuda_idx_predictor", "6",
+    "--cuda_idx", "2",
+    # "--cuda_idx_predictor", "6",
     "--threaded_training",
     "--n_training_threads", "16",
 

@@ -58,6 +58,7 @@ def add_args(parser):
                              "may request a broadcast from all other agents, who respond by "
                              "sharing their local observations.")
     parser.add_argument("--observe_method", type=str, default="adjacency", 
+                        choices=["adjacency", "coordinates", "pyg"],
                         help="the observation method to use")
     parser.add_argument("--observe_method_global", type=str, default="", 
                         help="the observation method to use for global observation")
@@ -290,7 +291,7 @@ class parallel_env(ParallelEnv):
         # Add to the dictionary depending on the observation method.
 
         # Add agent id.
-        if observe_method in ["adjacency"]:
+        if observe_method in ["adjacency", "coordinates"]:
             state_space["agent_id"] = spaces.Box(
                 low = -1,
                 high = len(self.possible_agents),
@@ -298,7 +299,7 @@ class parallel_env(ParallelEnv):
             )
 
         # Add vertex idleness time.
-        if observe_method in ["adjacency"]:
+        if observe_method in ["adjacency", "coordinates"]:
             state_space["vertex_state"] = spaces.Dict({
                 v: spaces.Box(
                     low = -1.0,
@@ -321,6 +322,28 @@ class parallel_env(ParallelEnv):
                 a: spaces.Box(
                     low = np.array([-1.0, -1.0, -1.0], dtype=np.float32),
                     high = np.array([self.pg.graph.number_of_nodes(), self.pg.graph.number_of_nodes(), 1.0], dtype=np.float32),
+                ) for a in self.possible_agents
+            }) # type: ignore
+
+        # Add vertex 2D coordinates.
+        if observe_method in ["coordinates"]:
+            state_space["vertex_position"] = spaces.Dict({
+                v: spaces.Box(
+                    low = -np.inf,
+                    high = np.inf,
+                    shape=(2,),
+                    dtype=np.float32,
+                ) for v in range(self.pg.graph.number_of_nodes())
+            }) # type: ignore
+
+        # Add agent 2D coordinates.
+        if observe_method in ["coordinates"]:
+            state_space["agent_position"] = spaces.Dict({
+                a: spaces.Box(
+                    low = -np.inf,
+                    high = np.inf,
+                    shape=(2,),
+                    dtype=np.float32,
                 ) for a in self.possible_agents
             }) # type: ignore
         
@@ -632,12 +655,12 @@ class parallel_env(ParallelEnv):
         obs_mask = {}
 
         # Add agent ID.
-        if observe_method in ["adjacency"]:
+        if observe_method in ["adjacency", "coordinates"]:
             obs["agent_id"] = agent.id
             obs_mask["agent_id"] = np.array([True], dtype=bool)
 
         # Add vertex idleness time (raw).
-        if observe_method in ["adjacency"]:
+        if observe_method in ["adjacency", "coordinates"]:
             obs["vertex_state"] = {}
             obs_mask["vertex_state"] = {}
 
@@ -645,6 +668,24 @@ class parallel_env(ParallelEnv):
             for node in range(self.pg.graph.number_of_nodes()):
                 obs["vertex_state"][node] = self.pg.getNodeIdlenessTime(node, self.step_count)
                 obs_mask["vertex_state"][node] = np.array([node in vertices], dtype=bool)
+
+        # Add vertex 2D coordinates.
+        if observe_method in ["coordinates"]:
+            obs["vertex_position"] = {}
+            obs_mask["vertex_position"] = {}
+
+            for node in range(self.pg.graph.number_of_nodes()):
+                obs["vertex_position"][node] = np.array(self.pg.getNodePosition(node), dtype=np.float32)
+                obs_mask["vertex_position"][node] = np.array([node in vertices], dtype=bool)
+
+        # Add agent 2D coordinates.
+        if observe_method in ["coordinates"]:
+            obs["agent_position"] = {}
+            obs_mask["agent_position"] = {}
+
+            for a in self.possible_agents:
+                obs["agent_position"][a] = np.array(a.position, dtype=np.float32)
+                obs_mask["agent_position"][a] = np.ones(2, dtype=bool) if a in agents else np.zeros(2, dtype=bool)
 
         # Add weighted adjacency matrix (normalized).
         if observe_method in ["adjacency"]:
@@ -828,7 +869,7 @@ class parallel_env(ParallelEnv):
 
         # If getting the global state, set the fixed/visible mask to 0 for everything
         if global_state:
-            if observe_method == "adjacency":
+            if observe_method in ["adjacency", "coordinates"]:
                 for key in obs_mask:
                     if type(obs_mask[key]) == dict:
                         for subkey in obs_mask[key]:

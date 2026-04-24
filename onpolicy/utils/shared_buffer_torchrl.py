@@ -179,7 +179,8 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
         if self.args.observation_mask:
             if obs_full is None:
                 obs_full = obs.clone()
-            obs = obs * visibility_mask
+            if not self.obs_object:
+                obs = obs * visibility_mask
         elif obs_full is None:
             obs_full = obs
 
