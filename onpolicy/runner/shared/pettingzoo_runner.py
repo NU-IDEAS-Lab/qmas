@@ -297,6 +297,9 @@ class PettingzooRunner(Runner):
         visibility_mask = None
         if "visibility_mask" in infos[0]:
             visibility_mask = np.array([info["visibility_mask"] for info in infos])
+        visibility_mask_global = None
+        if "visibility_mask_global" in infos[0]:
+            visibility_mask_global = np.array([info["visibility_mask_global"] for info in infos])
         
         obs_full = None
         obs_raw = obs  # unpadded, for trajectory buffer
@@ -309,6 +312,14 @@ class PettingzooRunner(Runner):
                 observation_global = np.concatenate(
                     [observation_global, np.zeros_like(observation_global)], axis=-1
                 )
+            # Apply visibility mask to global obs before storing in the buffer.
+            if self.all_args.observation_mask and visibility_mask_global is not None:
+                # Pad the mask with ones to match the (possibly UQ-padded) observation shape.
+                mask = visibility_mask_global
+                if mask.shape[-1] < observation_global.shape[-1]:
+                    pad = np.ones((*mask.shape[:-1], observation_global.shape[-1] - mask.shape[-1]), dtype=np.float32)
+                    mask = np.concatenate([mask, pad], axis=-1)
+                observation_global = observation_global * mask
         else:
             observation_global = None
             observation_global_raw = None
