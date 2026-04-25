@@ -25,7 +25,7 @@ args = [
 
     "--graph_name", "milwaukee",
     "--graph_file", "../patrolling_zoo/graphs/milwaukee.graph",
-    "--num_env_steps", "200000",
+    "--num_env_steps", "300000",
     "--episode_length", "200",
     "--max_cycles", "200",
     "--num_mini_batch", "10",
