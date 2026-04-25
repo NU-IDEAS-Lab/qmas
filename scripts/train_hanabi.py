@@ -31,7 +31,7 @@ args = [
     "--ppo_epoch", "15",
 
     "--diffusion_model_type", "dit1d",
-    "--prediction_ensemble_size", "1",
+    "--prediction_ensemble_size", "5",
     "--prediction_history_window", "4",
     "--prediction_disable",
 

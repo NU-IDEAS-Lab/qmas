@@ -113,6 +113,28 @@ class parallel_env(ParallelEnv):
         obs_space = self._base_env.observation_space(any_agent)["observation"]
         self.OBS_SIZE = obs_space.shape[0]
 
+        # ============================
+        # Compute observation encoding offsets
+        # ============================
+        bits_per_card = colors * ranks
+        max_deck_size = sum([3, 2, 2, 2, 1]) * colors
+
+        hands_section = (players - 1) * hand_size * bits_per_card + players
+        board_section = (max_deck_size - players * hand_size) + \
+                        (colors * ranks) + max_information_tokens + max_life_tokens
+        discard_section = max_deck_size
+        last_action_section = players + 4 + players + colors + ranks + \
+                              hand_size + hand_size + bits_per_card + 2
+
+        self._observation_type = hanabi_observation_type
+        self._card_knowledge_start = hands_section + board_section + \
+                                     discard_section + last_action_section
+        self._bits_per_card = bits_per_card
+        self._bits_per_knowledge = bits_per_card + colors + ranks
+
+        self._firework_start = hands_section + (max_deck_size - players * hand_size)
+        self._life_token_start = self._firework_start + colors * ranks + max_information_tokens
+
         # ---- Gym spaces ----
         self.observation_spaces = {
             agent: spaces.Box(
@@ -153,24 +175,22 @@ class parallel_env(ParallelEnv):
         )
 
     # ----------------------------------------------------------------------
-    # Visibility mask = all ones
+    # Visibility mask: hide own card identity, keep hints visible
     # ----------------------------------------------------------------------
 
     def _compute_visibility_mask(self, agent):
         obs = self._last_obs[agent]["observation"]
         mask = np.ones_like(obs, dtype=bool)
 
-        # Own cards' true identity bits are firs
+        if self._observation_type != "seer":
+            return mask
 
-        # Mask index 308-657 as False
-        # This includes revealed knowledge about own cards and others' cards
-        # mask[308:658] = False
+        ck_start = self._card_knowledge_start
+        for card_idx in range(self.hand_size):
+            card_offset = ck_start + card_idx * self._bits_per_knowledge
+            mask[card_offset : card_offset + self._bits_per_card] = False
 
-        # Mask index 308-482 as False
-        # This includes revealed knowledge about own cards only
-        mask[308:483] = False
-
-        return mask 
+        return mask
 
     # ----------------------------------------------------------------------
     # Strip action mask
@@ -288,22 +308,32 @@ class parallel_env(ParallelEnv):
         assert np.all(score_np >= 0) , "Scores should be non-negative in Hanabi."
         assert np.all(score_np <= self.colors * self.ranks) , "Scores should not exceed maximum possible in Hanabi."
 
+        game_lost = self._is_game_lost()
+
         if episode_end:
-            # print(f"[Episode End Final Score = {final_score}, Game Lost = {game_lost}")
-            # print(f"[Steps to finish the game] Total Steps = {self.step_count}")
             if self.log_file != "":
                 with open(self.log_file, 'a') as f:
-                    f.write(f"{score_avg},{self.step_count}\n")
+                    f.write(f"{score_avg},{game_lost},{self.step_count}\n")
             self.agents = []
 
         info = {}
-        
+
         mask = self._compute_visibility_mask(self.possible_agents[0])
         info["state_visibility_mask"] = mask
         info["score"] = score_avg
-        info["steps_to_finish"] = self.step_count # only final value is meaningful
+        info["game_lost"] = game_lost
+        info["steps_to_finish"] = self.step_count
 
         return clean, reward_dict, done_dict, trunc_dict, info
+
+    # ----------------------------------------------------------------------
+    # Check if game is lost (all life tokens depleted)
+    # ----------------------------------------------------------------------
+
+    def _is_game_lost(self):
+        obs0 = self._last_obs[self.possible_agents[0]]["observation"]
+        life_tokens = obs0[self._life_token_start:self._life_token_start + self.max_life_tokens]
+        return life_tokens.sum() == 0
 
     # ----------------------------------------------------------------------
     # render() / close()
