@@ -600,7 +600,7 @@ class parallel_env(ParallelEnv):
         return state
 
 
-    def observe(self, agent, radius=None, allow_done_agents=False, senders=None):
+    def observe(self, agent, radius=None, allow_done_agents=False, senders=set()):
         ''' Returns the observation for the given agent.'''
 
         return self._populateStateSpace(self.observe_method, agent, radius, allow_done_agents, senders=senders)
@@ -612,41 +612,29 @@ class parallel_env(ParallelEnv):
         return self.available_actions_dict[agent]
 
 
-    def _populateStateSpace(self, observe_method, agent, radius, allow_done_agents, global_state=False, senders=None):
+    def _populateStateSpace(self, observe_method, agent, radius, allow_done_agents, global_state=False, senders=set()):
         ''' Returns a populated state/observation space.'''
 
         if radius == None:
             radius = agent.observationRadius
 
+        # Determine list of allowed agents.
         if allow_done_agents:
-            agentList = self.possible_agents
+            agentList = set(self.possible_agents)
         else:
-            agentList = self.agents
+            agentList = set(self.agents)
 
         # Calculate the list of visible agents and vertices.
-        vertices = [v for v in self.pg.graph.nodes if self._dist(self.pg.getNodePosition(v), agent.position) <= radius]
-        agents = [a for a in agentList if self._dist(a.position, agent.position) <= radius]
+        vertices = set()
+        agents = set([agent]) | (senders & agentList)
+        observers = copy(agents)
 
-        # Perform communication.
-        for a in agentList:
-            if a != agent and self.comms_model.canReceive(a, agent):
-                if a not in agents:
-                    agents.append(a)
-                for v in self.pg.graph.nodes:
-                    if self._dist(self.pg.getNodePosition(v), a.position) <= radius:
-                        if v not in vertices:
-                            vertices.append(v)
-
-        # Request-based communication: include data broadcast by each responding agent.
-        if senders:
-            for a in senders:
-                if a in agentList:
-                    if a not in agents:
-                        agents.append(a)
-                    for v in self.pg.graph.nodes:
-                        if self._dist(self.pg.getNodePosition(v), a.position) <= a.observationRadius:
-                            if v not in vertices:
-                                vertices.append(v)
+        # Include data broadcast by each transmitting agent (and the ego agent).
+        for a in observers:
+            obs_v = set(v for v in self.pg.graph.nodes if self._dist(self.pg.getNodePosition(v), a.position) <= radius)
+            vertices |= obs_v
+            obs_a = set(ag for ag in agentList if self._dist(ag.position, a.position) <= radius)
+            agents |= obs_a
         
         agents = sorted(agents, key=lambda a: a.id)
         vertices = sorted(vertices)
@@ -935,18 +923,11 @@ class parallel_env(ParallelEnv):
                 if not self.action_space(agent).contains(action):
                     raise ValueError(f"Invalid action {action} of type {type(action)} provided.")
 
+                # Get the agent's movement action.
                 if self.action_method in ["full", "neighbors"]:
                     action_movement = int(action)
-                # Handle communication request for neighbors_with_comm_boolean.
                 elif self.action_method == "neighbors_with_comm_boolean":
                     action_movement = int(action["movement"])
-                    action_communication = bool(action["communication"])
-                    if action_communication:
-                        senders = {other for other in self.agents if other is not agent}
-                        if senders:
-                            comms_requests[agent] = senders
-                            info_dict["communication/requests_made"] += 1
-                        reward_dict[agent] += -1.0 * self.reward_comms_penalty_weight
 
                 # Store this as the agent's last movement action.
                 agent.currentAction = action_movement
@@ -981,6 +962,24 @@ class parallel_env(ParallelEnv):
                     # The agent has exceeded its movement budget for this step.
                     if stepSize <= 0.0:
                         break
+                
+                # Handle communication.
+                if self.action_method in ["full", "neighbors"]:
+                    # Hack - we are doing broadcast-based requests, so always receive from all agents.
+                    if self.comms_model.canReceive(None, agent):
+                        senders = set(other for other in self.agents if other is not agent)
+                        if senders:
+                            comms_requests[agent] = senders
+                            info_dict["communication/requests_made"] += 1
+                elif self.action_method == "neighbors_with_comm_boolean":
+                    action_movement = int(action["movement"])
+                    action_communication = bool(action["communication"])
+                    if action_communication:
+                        senders = set(other for other in self.agents if other is not agent)
+                        if senders:
+                            comms_requests[agent] = senders
+                            info_dict["communication/requests_made"] += 1
+                        reward_dict[agent] += -1.0 * self.reward_comms_penalty_weight
 
         # Record the average idleness time at this step.
         avg = self._minMaxNormalize(self.pg.getAverageIdlenessTime(self.step_count), minimum=0.0, maximum=self.step_count)
@@ -988,10 +987,15 @@ class parallel_env(ParallelEnv):
 
         # Perform observations.
         for agent in self.possible_agents:
-            senders = comms_requests.get(agent, None)
+            # Determine which agents have sent an observation via comms.
+            senders = comms_requests.get(agent, set())
+
+            # Local observation.
             obs, obs_mask = self.observe(agent, senders=senders)
             obs_dict[agent] = obs
             info_dict[agent]["visibility_mask"] = obs_mask
+
+            # Global observation.
             og, vmg = self._populateStateSpace(self.observe_method_global, agent, radius=None, allow_done_agents=False, senders=senders)
             info_dict[agent]["observation_global"] = og
             info_dict[agent]["visibility_mask_global"] = vmg
