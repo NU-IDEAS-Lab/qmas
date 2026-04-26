@@ -240,7 +240,7 @@ class QmasAlgorithm(Algorithm):
 
         # Update running stats from training trajectories and train in normalized space.
         predictor.update_normalization_stats(trajectories)
-        trajectories = predictor.normalize_trajectory(trajectories)
+        trajectories_normalized = predictor.normalize_trajectory(trajectories)
 
         # Update the fix_mask. This determines which parts of the trajectory are fixed and which are predicted.
         # This applies to both update_diffusion and update_classifier.
@@ -248,7 +248,7 @@ class QmasAlgorithm(Algorithm):
 
         # Update diffuser model.
         diffuser_loss = predictor.diffuser.update_diffusion(
-            x0=trajectories,
+            x0=trajectories_normalized,
         )['diffusion_loss']
         train_info['diffuser_loss'] += diffuser_loss
 
@@ -279,7 +279,7 @@ class QmasAlgorithm(Algorithm):
         # Update guide model.
         if predictor.diffuser.classifier is not None:
             guide_loss = predictor.diffuser.update_classifier(
-                x0=trajectories,
+                x0=trajectories_normalized,
                 condition_cg=returns_batch
             )['classifier_loss']
             train_info['guide_loss'] += guide_loss
