@@ -135,7 +135,8 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
     @set_capture_non_tensor_stack(False)
     def insert(self, share_obs, obs, rnn_states_actor, rnn_states_critic, actions, action_log_probs,
                value_preds, rewards, masks, bad_masks=None, active_masks=None, delta_steps=None, available_actions=None,
-               visibility_mask=None, state_visibility_mask=None, observation_global=None, observation_uncertainty=None, legacy_mode=True):
+               visibility_mask=None, state_visibility_mask=None, visibility_mask_global=None, observation_global=None,
+               observation_uncertainty=None, legacy_mode=True):
         """
         Insert data into the buffer.
         :param share_obs: (argparse.Namespace) arguments containing relevant model, policy, and env information.
@@ -153,6 +154,7 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
         :param delta_steps: (np.ndarray) number of steps since last update.
         :param visibility_mask: (np.ndarray) visibility mask for agent observations, if applicable.
         :param state_visibility_mask: (np.ndarray) visibility mask for global state, if applicable.
+        :param visibility_mask_global: (np.ndarray) visibility mask for globally-situated observations, if applicable.
         :param observation_global: (np.ndarray) globally-situated observations for each agent, if applicable.
         :param legacy_mode: (bool) whether to use legacy mode for inserting data. Will use timesteps t and t+1.
         """
@@ -210,6 +212,8 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
             data['observation_global'] = observation_global #+1
         if state_visibility_mask is not None:
             data['state_visibility_mask'] = state_visibility_mask #+1
+        if visibility_mask_global is not None:
+            data['visibility_mask_global'] = visibility_mask_global #+1
         if observation_uncertainty is not None:
             data['observation_uncertainty'] = observation_uncertainty #+1
 
