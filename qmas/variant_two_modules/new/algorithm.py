@@ -176,11 +176,7 @@ class QmasAlgorithm(Algorithm):
     def train_sample_diffuser(self, sample, train_info, predictor, thread_indices=None):
         ''' Performs update for a single sample for a given predictor. '''
         
-        if "observation_global" in sample and "visibility_mask_global" in sample:
-            key_obs = "observation_global"
-            key_visibility = "visibility_mask_global"
-            individual_obs = True
-        elif "state_visibility_mask" in sample:
+        if "state_visibility_mask" in sample:
             key_obs = "share_obs"
             key_visibility = "state_visibility_mask"
             individual_obs = False
