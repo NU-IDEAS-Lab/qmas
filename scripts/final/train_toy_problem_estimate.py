@@ -31,7 +31,7 @@ args = [
     "--layer_N", "2",
 
     "--diffusion_model_type", "dit1d",
-    "--prediction_ensemble_size", "3",
+    # "--prediction_ensemble_size", "3",
     # "--prediction_disable",
     "--prediction_uq_method", "estimation",
 
@@ -39,8 +39,8 @@ args = [
 
     "--n_rollout_threads", "300",
     "--cuda",
-    "--cuda_idx", "4",
-    "--cuda_idx_predictor", "4",
+    "--cuda_idx", "3",
+    "--cuda_idx_predictor", "3",
     "--threaded_training",
     "--n_training_threads", "16",
 

@@ -77,11 +77,24 @@ class PatrolGraph():
     def generateRandomGraph(self, numNodes, radius=75, sizeX=500.0, sizeY=500.0, seed=None):
         ''' Generates a random graph with the given parameters. '''
 
-        connected = False
-        while not connected:
-            pos = {i: (random.uniform(0.0, sizeX), random.uniform(0.0, sizeY)) for i in range(numNodes)}
-            undirected = nx.random_geometric_graph(numNodes, radius, pos=pos, seed=seed)
-            connected = nx.is_connected(undirected)
+        pos = {i: (random.uniform(0.0, sizeX), random.uniform(0.0, sizeY)) for i in range(numNodes)}
+        undirected = nx.random_geometric_graph(numNodes, radius, pos=pos, seed=seed)
+
+        # Connect any isolated components by bridging the nearest pair of nodes across components.
+        while not nx.is_connected(undirected):
+            components = list(nx.connected_components(undirected))
+            best_dist = float('inf')
+            best_u, best_v = None, None
+            for i, comp_a in enumerate(components):
+                for comp_b in components[i+1:]:
+                    for u in comp_a:
+                        for v in comp_b:
+                            d = self._dist(undirected.nodes[u]['pos'], undirected.nodes[v]['pos'])
+                            if d < best_dist:
+                                best_dist = d
+                                best_u, best_v = u, v
+            undirected.add_edge(best_u, best_v)
+
         self.graph = nx.DiGraph(undirected)  # Convert to DiGraph (adds both directions automatically)
         
         self.graphDimension = numNodes
