@@ -233,9 +233,7 @@ class PettingzooRunner(Runner):
             # Replace the observation with the prediction.
             if self.all_args.prediction_during_training:
                 obs_dim = pred_now.shape[-1]
-                if obs.dtype == object:
-                    # For GNN envs, the prediction cannot replace the graph obs directly.
-                    # Use it as global_obs for the state encoder instead.
+                if (self.all_args.state_encoder and global_obs is not None) or obs.dtype == object:
                     global_obs[..., :obs_dim] = pred_now
                     update_global_obs = True
                 else:
@@ -554,10 +552,19 @@ class PettingzooRunner(Runner):
         prediction_prev = None  # For autoregression
         for i_episode in range(episodes):
             # Reset the environment and get the initial observations.
-            obs, share_obs, available_actions = env.reset()
+            obs, share_obs, available_actions, reset_infos = env.reset(return_info=True)
             rnn_states = torch.zeros((rollout_threads * self.num_agents, self.recurrent_N, self.hidden_size), dtype=torch.float32)
             masks = torch.ones((rollout_threads * self.num_agents, 1), dtype=torch.float32)
             self._seed_trajectory_buffer(trajectory, obs, rollout_threads, share_obs=share_obs)
+
+            # Fallback (masked) observation_global used when prediction is not yet available.
+            if "observation_global" in reset_infos[0]:
+                obs_global_fallback = np.array([info["observation_global"] for info in reset_infos])
+                if self.all_args.observation_mask and "visibility_mask_global" in reset_infos[0]:
+                    viz_mask_global_reset = np.array([info["visibility_mask_global"] for info in reset_infos])
+                    obs_global_fallback = obs_global_fallback * viz_mask_global_reset
+            else:
+                obs_global_fallback = None
 
             dones = False
             j = -1
@@ -594,7 +601,14 @@ class PettingzooRunner(Runner):
                     if self.all_args.prediction_uq_injection_method == "append":
                         global_obs = torch.cat([global_obs, uncertainty_now], dim=-1)
                 else:
-                    global_obs = None
+                    if self.all_args.state_encoder and obs_global_fallback is not None:
+                        global_obs = torch.from_numpy(
+                            obs_global_fallback.reshape(rollout_threads * self.num_agents, *obs_global_fallback.shape[2:])
+                        ).float()
+                        if self.all_args.prediction_uq_injection_method == "append":
+                            global_obs = torch.cat([global_obs, torch.zeros_like(global_obs)], dim=-1)
+                    else:
+                        global_obs = None
                     # For GNN envs (object-dtype obs), the prediction cannot replace the graph obs directly.
                     # The prediction (from observation_global) can only feed the state encoder.
                     if use_prediction and obs.dtype != object:
@@ -633,6 +647,9 @@ class PettingzooRunner(Runner):
                             obs = obs * viz_mask_local
                         if observation_global is not None and viz_mask_global is not None:
                             observation_global = observation_global * viz_mask_global
+
+                # Save the current masked observation_global for use as fallback in the next step.
+                obs_global_fallback = observation_global
 
                 # Add prediction error to infos for logging.
                 infos[0]["prediction_error_mean"] = prediction_error.mean().item() if prediction_error is not None else 0.0
@@ -696,10 +713,19 @@ class PettingzooRunner(Runner):
         prediction_prev = None  # For autoregression
         for i_episode in range(episodes):
             # Reset the environment and get the initial observations.
-            obs, share_obs, available_actions = env.reset()
+            obs, share_obs, available_actions, reset_infos = env.reset(return_info=True)
             rnn_states = torch.zeros((rollout_threads * self.num_agents, self.recurrent_N, self.hidden_size), dtype=torch.float32)
             masks = torch.ones((rollout_threads * self.num_agents, 1), dtype=torch.float32)
             self._seed_trajectory_buffer(trajectory, obs, rollout_threads, share_obs=share_obs)
+
+            # Fallback (masked) observation_global used when prediction is not yet available.
+            if "observation_global" in reset_infos[0]:
+                obs_global_fallback = np.array([info["observation_global"] for info in reset_infos])
+                if self.all_args.observation_mask and "visibility_mask_global" in reset_infos[0]:
+                    viz_mask_global_reset = np.array([info["visibility_mask_global"] for info in reset_infos])
+                    obs_global_fallback = obs_global_fallback * viz_mask_global_reset
+            else:
+                obs_global_fallback = None
 
             if self.all_args.save_gifs:        
                 frames = []
@@ -745,7 +771,14 @@ class PettingzooRunner(Runner):
                     if self.all_args.prediction_uq_injection_method == "append":
                         global_obs = torch.cat([global_obs, uncertainty_now], dim=-1)
                 else:
-                    global_obs = None
+                    if self.all_args.state_encoder and obs_global_fallback is not None:
+                        global_obs = torch.from_numpy(
+                            obs_global_fallback.reshape(rollout_threads * self.num_agents, *obs_global_fallback.shape[2:])
+                        ).float()
+                        if self.all_args.prediction_uq_injection_method == "append":
+                            global_obs = torch.cat([global_obs, torch.zeros_like(global_obs)], dim=-1)
+                    else:
+                        global_obs = None
                     # For GNN envs (object-dtype obs), the prediction cannot replace the graph obs directly.
                     # The prediction (from observation_global) can only feed the state encoder.
                     if use_prediction and obs.dtype != object:
@@ -784,6 +817,9 @@ class PettingzooRunner(Runner):
                             obs = obs * viz_mask_local
                         if observation_global is not None and viz_mask_global is not None:
                             observation_global = observation_global * viz_mask_global
+
+                # Save the current masked observation_global for use as fallback in the next step.
+                obs_global_fallback = observation_global
 
                 reward_total += rewards[0].sum()
 
