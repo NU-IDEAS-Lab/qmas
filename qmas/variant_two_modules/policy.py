@@ -65,7 +65,7 @@ class QmasPolicy(R_MAPPOPolicy):
             self.predictors.append(predictor)
 
 
-    def get_prediction(self, trajectory, visibility_mask=None, prediction_prev=None):
+    def get_prediction(self, trajectory, visibility_mask=None, prediction_prev=None, return_member_preds=False):
         """
         Get a prediction from the ensemble of predictors.
         Args:
@@ -78,21 +78,22 @@ class QmasPolicy(R_MAPPOPolicy):
         """
 
         predictions = []
-        for predictor in self.predictors:
-            if prediction_prev is not None:
-                prediction_prev = prediction_prev.to(predictor.device)
+        for i, predictor in enumerate(self.predictors):
+            member_prev = None if prediction_prev is None else prediction_prev[i].to(predictor.device)
             pred = predictor.get_prediction(
                 trajectory.clone().to(predictor.device),
                 visibility_mask.clone().to(predictor.device),
-                prediction_prev)
+                member_prev)
             predictions.append(pred.unsqueeze(0).to(self.device))
-        predictions = torch.cat(predictions, dim=0)  # Shape: (num_predictors, T, D_out)
+        predictions = torch.cat(predictions, dim=0)  # Shape: (num_predictors, 1, T, D_out)
         prediction = predictions.mean(dim=0)
         if predictions.shape[0] > 1:
             uncertainty = predictions.var(dim=0)
         else:
             uncertainty = torch.zeros_like(prediction)
 
+        if return_member_preds:
+            return prediction, uncertainty, predictions.detach()
         return prediction, uncertainty
 
 
