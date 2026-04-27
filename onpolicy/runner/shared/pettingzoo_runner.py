@@ -504,14 +504,11 @@ class PettingzooRunner(Runner):
         uncertainty_now = uncertainty[:, -1].reshape((n_threads, self.num_agents, *obs_shape))
 
         transition_now = trajectory[:, -1].detach().cpu()
-        visibility_now = visibility_mask[:, -1].detach().cpu()
         if self.all_args.prediction_history_include_actions:
             act_size = int(np.prod(get_shape_from_act_space(self.buffer.act_space)))
             transition_now = transition_now[:, act_size:]
-            visibility_now = visibility_now[:, act_size:]
         transition_now = transition_now.reshape((n_threads, self.num_agents, *obs_shape))
-        visibility_now = visibility_now.reshape((n_threads, self.num_agents, *obs_shape))
-        prediction_error = torch.abs(pred_now - transition_now) * visibility_now
+        prediction_error = torch.abs(pred_now - transition_now)
 
         return pred, uncertainty, prediction_prev, prediction_error, True
 
