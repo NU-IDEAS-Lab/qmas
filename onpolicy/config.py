@@ -203,6 +203,8 @@ def get_config():
                         default=False, help="Whether to use stacked_frames")
     parser.add_argument("--hidden_size", type=int, default=64,
                         help="Dimension of hidden layers for actor/critic networks") 
+    parser.add_argument("--critic_hidden_size", type=int, default=0,
+                        help="Dimension of hidden layers for critic networks. If 0, will be the same as --hidden_size")
     parser.add_argument("--layer_N", type=int, default=1,
                         help="Number of layers for actor/critic networks")
     parser.add_argument("--use_ReLU", action=argparse.BooleanOptionalAction,
@@ -387,6 +389,14 @@ def get_config():
     parser.add_argument("--prediction_uq_injection_method", type=str, default="none",
                         choices=["none", "append"],
                         help="Method to inject uncertainty estimates into the policy input")
+
+    # One-module variant parameters.
+    parser.add_argument("--prediction_loss_coef", type=float, default=1.0,
+                        help="Coefficient for the intermediate prediction (reconstruction) loss "
+                             "used in the one-module variant (qmas.variant_one_module). "
+                             "This loss is added to the PPO actor loss before the single "
+                             "backward pass so that the prediction encoder is jointly "
+                             "optimised with the policy.")
 
     # Torch parameters.
     parser.add_argument("--torch_compile", action="store_true",

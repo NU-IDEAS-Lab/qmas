@@ -209,12 +209,12 @@ class UNetLayer(nn.Module):
 
 
 class CNNBase(nn.Module):
-    def __init__(self, args, obs_shape, mode='unet'):
+    def __init__(self, args, obs_shape, mode='unet', hidden_size=None):
         super(CNNBase, self).__init__()
 
         self._use_orthogonal = args.use_orthogonal
         self._use_ReLU = args.use_ReLU
-        self.hidden_size = args.hidden_size
+        self.hidden_size = hidden_size if hidden_size is not None else args.hidden_size
 
         MODES = {
             'cnn': CNNLayer,

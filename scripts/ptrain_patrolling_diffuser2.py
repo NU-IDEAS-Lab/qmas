@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-    "--experiment_name", "diffuser-patrolling-random-obs100-coords",
+    "--experiment_name", "diffuser-patrolling-random-obs200-obsPredUQ-commsRL0.1-rwdNew",
     # "--experiment_name", "diffuser-patrolling-obs200-uqEnsemble3-pygNS-injectionAppend",
     "--project_name", "qmas",
     "--env_class", "patrolling_zoo.patrolling_zoo_v0.parallel_env",
@@ -14,13 +14,13 @@ args = [
     "--agent_speed", "40.0",
     "--action_method", "neighbors_with_comm_boolean",
     "--observe_method", "pyg",
-    "--observe_method_global", "coordinates",
-    "--observation_radius", "100.0",
+    "--observe_method_global", "adjacency",
+    "--observation_radius", "200.0",
     "--communication_model", "none",
     "--communication_probability", "0.0",
     "--alpha", "1.0",
     "--beta", "0.1",
-    "--reward_comms_penalty_weight", "0.1",
+    # "--reward_comms_penalty_weight", "0.1",
     "--reward_method_terminal", "none",
     "--reward_interval", "1",
 
@@ -49,10 +49,7 @@ args = [
     "--share_policy",
     "--use_ReLU",
     "--hidden_size", "64",
-    "--critic_hidden_size", "512",
     "--layer_N", "3",
-    "--use_linear_lr_decay",
-    "--ppo_epoch", "5",
     "--seed", "0",
 
     "--diffusion_model_type", "dit1d",
@@ -66,17 +63,36 @@ args = [
 
     # "--episode_fraction_start_prediction", "0.0",
 
-    "--n_rollout_threads", "66",
+    "--n_rollout_threads", "33",
     "--cuda",
-    "--cuda_idx", "1",
+    # "--cuda_idx", "2",
     # "--cuda_idx_predictor", "6",
     "--threaded_training",
     "--n_training_threads", "16",
 
-    "--save_interval", "100000",
-    "--save_checkpoints",
+    "--save_interval", "10000",
     "--results_dir", "/data/group/mas/qmas/results",
     "--use_wandb",
 ]
 
-main(args)
+# Run using multiple different seeds in different processes.
+import multiprocessing
+from copy import copy
+
+threads = []
+cuda_idx = [1, 2, 3, 4, 5, 6]
+
+penalty_weights = [0.0, 0.25, 0.5, 0.75, 1.0, 1.5]
+
+for i in range(len(cuda_idx)):
+    args_modified = copy(args)
+    args_modified += ["--reward_comms_penalty_weight", str(penalty_weights[i]),]
+    args_modified += ["--experiment_name", f"diffuser-patrolling-random-obs200-obsPredUQ-commsRL{penalty_weights[i]}-rwdNew",]
+
+    args_modified += ["--cuda_idx", str(cuda_idx[i])]
+    p = multiprocessing.Process(target=main, args=(args_modified,))
+    p.start()
+    threads.append(p)
+
+for t in threads:
+    t.join()

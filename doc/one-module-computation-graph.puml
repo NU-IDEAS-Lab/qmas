@@ -1,0 +1,208 @@
+@startuml one-module-computation-graph
+
+skinparam rectangle {
+  BackgroundColor<<tensor>> #DDEEFF
+  BackgroundColor<<module>> #EEFFDD
+  BackgroundColor<<loss>> #FFEEDD
+  BackgroundColor<<buffer>> #F5F5F5
+  BackgroundColor<<nograd>> #F0F0F0
+  BorderColor<<nograd>> #AAAAAA
+  FontColor<<nograd>> #777777
+  BackgroundColor<<ema>> #FFF8E1
+}
+
+skinparam arrowColor #444444
+skinparam defaultFontSize 11
+
+legend top left
+  |= Fill |= Meaning |
+  |<#DDEEFF>   | Tensor / data |
+  |<#EEFFDD>   | nn.Module (has parameters) |
+  |<#FFEEDD>   | Loss scalar |
+  |<#F5F5F5>   | Buffer / storage |
+  |<#F0F0F0>   | No-gradient path |
+  |<#FFF8E1>   | EMA copy (no grad) |
+  | →  | gradient flows |
+  | ⇢  | data only (detached / no_grad) |
+endlegend
+
+' ═══════════════════════════════════════════════════════════════════
+' INPUTS
+' ═══════════════════════════════════════════════════════════════════
+
+rectangle "obs\n[B·N, D_obs]" <<tensor>> as OBS
+rectangle "global_obs / pred_now\n[B, D_global]  (may include\n‖uncertainty_now)" <<tensor>> as GOBS
+rectangle "rnn_states_actor\n[B·N, L, H]" <<nograd>> as RNN_IN
+rectangle "share_obs\n[B, D_shared]" <<nograd>> as SOBS
+rectangle "actions (stored)\n[B·N, D_act]" <<nograd>> as ACT_IN
+
+rectangle "trajectory mini-batch\n(from buffer.sample_trajectories)\n[B·T, H, D]  — detached" <<nograd>> as TRAJ_BATCH
+
+' ═══════════════════════════════════════════════════════════════════
+' ACTOR BRANCH  (actor_optimizer owns all parameters below)
+' ═══════════════════════════════════════════════════════════════════
+
+package "QmasActorOneModule  [actor_optimizer]" {
+
+  rectangle "GNNBase / CNNBase\n/ MLPBase\n(local encoder)" <<module>> as LOCAL_ENC
+  rectangle "local_feats\n[B·N, H]" <<tensor>> as LOCAL_FEAT
+
+  rectangle "StateEncoder\n(prediction_encoder)" <<module>> as STATE_ENC
+  rectangle "latent\n[B·N, L]" <<tensor>> as LATENT
+
+  rectangle "cat([local_feats, latent])\n[B·N, H+L]" <<tensor>> as CONCAT
+
+  rectangle "RNNLayer\n[optional]" <<module>> as RNN_MOD
+  rectangle "actor_features\n[B·N, H]" <<tensor>> as ACTOR_FEAT
+
+  rectangle "ACTLayer\n(policy head)" <<module>> as ACT_MOD
+  rectangle "action_log_probs\nlog π(a|s)\n[B·N, 1]" <<tensor>> as LOG_PROBS
+  rectangle "dist_entropy\n[scalar]" <<tensor>> as ENTROPY
+
+  ' ── Diffusion backbone (EmbeddedPredictor) ──────────────────────
+  package "EmbeddedPredictor[k]  (×ensemble_size)\n[parameters owned by actor_optimizer]" {
+
+    rectangle "update_normalization_stats()\n[no_grad — bookkeeping only]" <<nograd>> as NORM_STATS
+    rectangle "normalize_trajectory(traj_batch)\n[no_grad]" <<nograd>> as NORM_TRAJ
+
+    rectangle "norm_traj_batch\n[B·T, H, D]" <<tensor>> as NORM_TRAJ_OUT
+
+    rectangle "fix_mask  (visibility mask)\nnn.Parameter — no grad" <<nograd>> as FIX_MASK
+
+    rectangle "DiscreteDiffusionSDE\n(JannerUNet1d / DiT1d / UNet2d)\n[score-matching backbone]" <<module>> as DIFFUSER
+
+    rectangle "score_matching_loss_k\n[scalar — differentiable]" <<loss>> as DIFF_LOSS_K
+
+    rectangle "EMA copy of diffuser\n[detached — inference only]" <<ema>> as EMA
+
+  }
+
+}
+
+' ═══════════════════════════════════════════════════════════════════
+' CRITIC BRANCH  (critic_optimizer owns all parameters below)
+' ═══════════════════════════════════════════════════════════════════
+
+package "QmasCritic  [critic_optimizer]" {
+  rectangle "Critic MLP / RNN" <<module>> as CRITIC_MOD
+  rectangle "values  V(s)\n[B, 1]" <<tensor>> as VALUES
+}
+
+' ═══════════════════════════════════════════════════════════════════
+' LOSS COMPOSITION
+' ═══════════════════════════════════════════════════════════════════
+
+rectangle "PPO surrogate loss\n–min(r·A, clip(r)·A)\n[scalar]" <<loss>> as PPO_LOSS
+rectangle "–entropy · entropy_coef\n[scalar]" <<loss>> as ENT_LOSS
+rectangle "Σ score_matching_loss_k / K\n· prediction_loss_coef\n[scalar]" <<loss>> as DIFF_LOSS_TOTAL
+
+rectangle "actor_loss\n= PPO + entropy + λ·diffusion\n[scalar — single backward]" <<loss>> as ACTOR_LOSS
+
+rectangle "value_loss · value_loss_coef\n[scalar]" <<loss>> as VALUE_LOSS_SCALED
+rectangle "total_loss = actor_loss + critic_loss\n.backward()" <<loss>> as TOTAL_LOSS
+
+' ═══════════════════════════════════════════════════════════════════
+' STORED QUANTITIES FROM ROLLOUT BUFFER (no gradient)
+' ═══════════════════════════════════════════════════════════════════
+
+rectangle "old_log_probs  (stored)\n[B·N, 1]" <<nograd>> as OLD_LOG
+rectangle "advantages  A(s,a)\n[B·N, 1]" <<nograd>> as ADV
+rectangle "returns  R\n[B, 1]" <<nograd>> as RETURNS
+rectangle "value_preds_old  (stored)\n[B, 1]" <<nograd>> as OLD_VALS
+
+' ═══════════════════════════════════════════════════════════════════
+' CONNECTIONS — TRAINING (gradient flows)
+' ═══════════════════════════════════════════════════════════════════
+
+OBS      --> LOCAL_ENC    : forward
+LOCAL_ENC --> LOCAL_FEAT
+
+GOBS     --> STATE_ENC    : forward
+STATE_ENC --> LATENT
+
+LOCAL_FEAT --> CONCAT
+LATENT     --> CONCAT
+
+CONCAT   --> RNN_MOD      : [if use_rnn]
+RNN_MOD  --> ACTOR_FEAT
+CONCAT   --> ACTOR_FEAT   : [no rnn]
+
+ACTOR_FEAT --> ACT_MOD    : evaluate_actions
+ACT_MOD    --> LOG_PROBS
+ACT_MOD    --> ENTROPY
+
+' PPO loss path
+LOG_PROBS  --> PPO_LOSS
+OLD_LOG    ..> PPO_LOSS   : imp_weights = exp(log π – log π_old)
+ADV        ..> PPO_LOSS
+ENTROPY    --> ENT_LOSS
+
+' Diffusion loss path
+TRAJ_BATCH ..> NORM_STATS : no_grad
+TRAJ_BATCH ..> NORM_TRAJ  : no_grad
+NORM_TRAJ  --> NORM_TRAJ_OUT
+NORM_TRAJ_OUT --> DIFFUSER : x0
+FIX_MASK   ..> DIFFUSER   : fix_mask (masks unseen)
+DIFFUSER   --> DIFF_LOSS_K : .loss(x0)
+
+' Loss aggregation
+PPO_LOSS       --> ACTOR_LOSS
+ENT_LOSS       --> ACTOR_LOSS
+DIFF_LOSS_K    --> DIFF_LOSS_TOTAL
+DIFF_LOSS_TOTAL --> ACTOR_LOSS
+
+SOBS   ..> CRITIC_MOD
+CRITIC_MOD --> VALUES
+VALUES --> VALUE_LOSS_SCALED
+OLD_VALS ..> VALUE_LOSS_SCALED
+RETURNS  ..> VALUE_LOSS_SCALED
+
+ACTOR_LOSS        --> TOTAL_LOSS
+VALUE_LOSS_SCALED --> TOTAL_LOSS
+
+' ═══════════════════════════════════════════════════════════════════
+' OPTIMIZER STEP & EMA UPDATE
+' ═══════════════════════════════════════════════════════════════════
+
+rectangle "actor_optimizer.step()\n+ clip_grad_norm_(actor)" <<nograd>> as ACT_OPT
+rectangle "critic_optimizer.step()\n+ clip_grad_norm_(critic)" <<nograd>> as CRIT_OPT
+rectangle "diffuser.ema_update()\n(copies θ → θ_ema)" <<nograd>> as EMA_UPDATE
+
+TOTAL_LOSS ..> ACT_OPT   : .backward() → gradients
+TOTAL_LOSS ..> CRIT_OPT  : .backward() → gradients
+ACT_OPT    ..> EMA_UPDATE : after step
+
+EMA_UPDATE ..> EMA        : θ_ema ← τ·θ_ema + (1–τ)·θ
+
+' ═══════════════════════════════════════════════════════════════════
+' INFERENCE PATH  (rollout / collect — @torch.no_grad)
+' ═══════════════════════════════════════════════════════════════════
+
+rectangle "trajectory window\n(TrajectoryBuffer)\n[T, n_threads, D]  — detached" <<nograd>> as TRAJ_INF
+
+rectangle "normalize + mask\n[no_grad]" <<nograd>> as NORM_INF
+rectangle "EMA diffuser\n.sample()\n[inference only]" <<ema>> as EMA_SAMPLE
+rectangle "pred_now  [n_threads, D]\n(mean over ensemble)" <<nograd>> as PRED_NOW
+rectangle "uncertainty_now  [n_threads, D]\n(var over ensemble, 0 if K=1)" <<nograd>> as UQ_NOW
+
+rectangle "obs' / global_obs'\n[optionally replaced +\nUQ appended]" <<nograd>> as OBS_INF
+
+rectangle "actor.forward()\n[no_grad]" <<nograd>> as ACT_INF
+rectangle "actions  [n_threads·N, D_act]" <<nograd>> as ACTIONS_OUT
+rectangle "critic.forward()\n[no_grad]" <<nograd>> as CRIT_INF
+rectangle "values  [n_threads, 1]" <<nograd>> as VALUES_OUT
+
+TRAJ_INF  ..> NORM_INF
+NORM_INF  ..> EMA_SAMPLE  : norm_traj
+EMA_SAMPLE ..> PRED_NOW
+EMA_SAMPLE ..> UQ_NOW
+
+PRED_NOW  ..> OBS_INF     : replace obs (dense)\nor global_obs (GNN)
+UQ_NOW    ..> OBS_INF     : cat if uq_injection=="append"
+
+OBS_INF   ..> ACT_INF
+ACT_INF   ..> ACTIONS_OUT
+OBS_INF   ..> CRIT_INF
+CRIT_INF  ..> VALUES_OUT
+
+@enduml

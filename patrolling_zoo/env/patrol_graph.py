@@ -14,7 +14,7 @@ class NODE_TYPE(IntEnum):
 class PatrolGraph():
     
     def __init__(self, filepath = None, numNodes = 40):
-        self.graph = nx.Graph()
+        self.graph = nx.DiGraph()
         if filepath is None:
             self.generateRandomGraph(numNodes)
         else:
@@ -58,6 +58,7 @@ class PatrolGraph():
                     direction = str(file.readline()) # not useful!
                     cost = int(file.readline()) # we no longer use this cost value, as it does not correspond to the actual euclidean distance.
                     self.graph.add_edge(i, j)
+                    self.graph.add_edge(j, i)
         
         # Set a weight on each edge which corresponds to the actual euclidean distance.
         for edge in self.graph.edges:
@@ -73,14 +74,28 @@ class PatrolGraph():
                 self.longestPathLength = i[1][j]
 
 
-    def generateRandomGraph(self, numNodes, radius=35, sizeX=200.0, sizeY=200.0, seed=None):
+    def generateRandomGraph(self, numNodes, radius=75, sizeX=500.0, sizeY=500.0, seed=None):
         ''' Generates a random graph with the given parameters. '''
 
-        connected = False
-        while not connected:
-            pos = {i: (random.uniform(0.0, sizeX), random.uniform(0.0, sizeY)) for i in range(numNodes)}
-            self.graph = nx.random_geometric_graph(numNodes, radius, pos=pos, seed=seed)
-            connected = nx.is_connected(self.graph)
+        pos = {i: (random.uniform(0.0, sizeX), random.uniform(0.0, sizeY)) for i in range(numNodes)}
+        undirected = nx.random_geometric_graph(numNodes, radius, pos=pos, seed=seed)
+
+        # Connect any isolated components by bridging the nearest pair of nodes across components.
+        while not nx.is_connected(undirected):
+            components = list(nx.connected_components(undirected))
+            best_dist = float('inf')
+            best_u, best_v = None, None
+            for i, comp_a in enumerate(components):
+                for comp_b in components[i+1:]:
+                    for u in comp_a:
+                        for v in comp_b:
+                            d = self._dist(undirected.nodes[u]['pos'], undirected.nodes[v]['pos'])
+                            if d < best_dist:
+                                best_dist = d
+                                best_u, best_v = u, v
+            undirected.add_edge(best_u, best_v)
+
+        self.graph = nx.DiGraph(undirected)  # Convert to DiGraph (adds both directions automatically)
         
         self.graphDimension = numNodes
         self.widthPixels = sizeX
@@ -102,7 +117,7 @@ class PatrolGraph():
                 if i[1][j] > self.longestPathLength:
                     self.longestPathLength = i[1][j]
         
-        print(f"Finished generating random graph with {numNodes} nodes and degree {self.graph.degree()}.")
+        # print(f"Finished generating random graph with {numNodes} nodes and degree {self.graph.degree()}.")
 
 
     def reset(self, seed=None, randomizeIds=False, regenerateGraph=False):

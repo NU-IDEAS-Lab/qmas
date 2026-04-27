@@ -1,15 +1,10 @@
-
-import torch
-torch.multiprocessing.set_sharing_strategy('file_system')
-
 from onpolicy.scripts.train.train_pettingzoo import main
 
 import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-	"--experiment_name", "patrolling-obs200-commsRL-penalty1.0",
-	# "--experiment_name", "diffuser-patrolling-obs200-uqEnsemble3-pygNS-injectionAppend",
+	"--experiment_name", "onemodule-patrolling-obs200-uqEnsemble3-pygNS-commsRL-injectionAppend",
 	"--project_name", "qmas",
 	"--env_class", "patrolling_zoo.patrolling_zoo_v0.parallel_env",
 	"--user_name", "ideas-mas",
@@ -33,8 +28,8 @@ args = [
 	"--max_cycles", "200",
     "--num_mini_batch", "10",
 
-	"--algorithm_class", "qmas.variant_two_modules.new.algorithm.QmasAlgorithm",
-	"--policy_class", "qmas.variant_two_modules.new.policy.QmasPolicy",
+	"--algorithm_class", "qmas.variant_one_module.algorithm.QmasAlgorithmOneModule",
+	"--policy_class", "qmas.variant_one_module.policy.QmasPolicy",
 	"--algorithm_name", "rmappo",
 	"--use_gnn_policy",
 	"--use_gnn_mlp_policy",
@@ -55,15 +50,17 @@ args = [
 
 	"--diffusion_model_type", "dit1d",
     "--prediction_uq_method", "ensemble",
-    # "--prediction_uq_injection_method", "append",
-    "--prediction_disable",
-	# "--prediction_ensemble_size", "3",
+    "--prediction_uq_injection_method", "append",
+    # "--prediction_disable",
+	"--prediction_ensemble_size", "3",
     "--state_encoder",
 
-	"--n_rollout_threads", "30",
+    "--episode_fraction_start_prediction", "0.2",
+
+	"--n_rollout_threads", "21",
 	"--cuda",
 	"--cuda_idx", "5",
-    "--cuda_idx_predictor", "5",
+    "--cuda_idx_predictor", "6",
     "--threaded_training",
     "--n_training_threads", "16",
 

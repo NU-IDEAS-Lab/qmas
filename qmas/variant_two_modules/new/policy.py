@@ -189,6 +189,7 @@ class QmasPolicy(Policy):
             # Predict uncertainty using a separate estimator network.
             uncertainty_lb, uncertainty_ub = predictor.get_uncertainty_bounds(trajectory.unsqueeze(0))
             uncertainty = torch.abs(uncertainty_ub - uncertainty_lb)
+            uncertainty = uncertainty.reshape_as(prediction)
         elif predictions.shape[dim_ensemble] > 1:
             # Predict uncertainty as the variance across ensemble predictions.
             uncertainty = predictions.var(dim=dim_ensemble)

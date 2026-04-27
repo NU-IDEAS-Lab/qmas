@@ -13,7 +13,7 @@ args = [
 	"--num_extractors", "0",
     "--num_haulers", "0",
     "--num_prospectors", "0",
-    "--num_superbots", "2",
+    "--num_superbots", "1",
 
     "--hauler_capacity", "10",
 
@@ -26,7 +26,7 @@ args = [
 
     "--noisy_memory",
 
-    "--observation_radius", "7",
+    "--observation_radius", "3",
     # "--observation_mask",
     # "--available_actions_mask",
 
