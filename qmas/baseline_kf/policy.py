@@ -25,7 +25,7 @@ class QmasPolicy(R_MAPPOPolicy):
         )]
 
 
-    def get_prediction(self, trajectory, visibility_mask=None, prediction_prev=None, has_sample_dim=False):
+    def get_prediction(self, trajectory, visibility_mask=None, prediction_prev=None, has_sample_dim=False, return_member_preds=False):
         """
         Get a prediction from the ensemble of predictors.
         Args:

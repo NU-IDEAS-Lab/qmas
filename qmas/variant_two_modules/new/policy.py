@@ -156,7 +156,7 @@ class QmasPolicy(Policy):
         return values, action_log_probs, dist_entropy
 
 
-    def get_prediction(self, trajectory, visibility_mask=None, prediction_prev=None, has_sample_dim=False):
+    def get_prediction(self, trajectory, visibility_mask=None, prediction_prev=None, has_sample_dim=False, return_member_preds=False):
         """
         Get a prediction from the ensemble of predictors.
         Args:
@@ -171,17 +171,15 @@ class QmasPolicy(Policy):
         dim_ensemble = 0
 
         predictions = []
-        for predictor in self.predictors:
-            if prediction_prev is not None:
-                prediction_prev = prediction_prev.to(predictor.device)
+        for i, predictor in enumerate(self.predictors):
+            member_prev = None if prediction_prev is None else prediction_prev[i].to(predictor.device)
             pred = predictor.get_prediction(
                 trajectory.detach().to(predictor.device),
                 visibility_mask.detach().to(predictor.device),
-                prediction_prev,
+                member_prev,
                 has_sample_dim=has_sample_dim
             )
-            pred = pred.unsqueeze(0)
-            predictions.append(pred.to(self.device))
+            predictions.append(pred.unsqueeze(0).to(self.device))
         predictions = torch.cat(predictions, dim=dim_ensemble)
         prediction = predictions.mean(dim=dim_ensemble)
 
@@ -196,4 +194,6 @@ class QmasPolicy(Policy):
         else:
             uncertainty = torch.zeros_like(prediction)
 
+        if return_member_preds:
+            return prediction, uncertainty, predictions.detach()
         return prediction, uncertainty

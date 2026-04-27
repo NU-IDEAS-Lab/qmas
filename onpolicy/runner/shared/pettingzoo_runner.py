@@ -216,14 +216,15 @@ class PettingzooRunner(Runner):
             trajectory, visibility_mask = self.train_trajectory.get_trajectory()
             trajectory = trajectory.transpose(0, 1)
             visibility_mask = visibility_mask.transpose(0, 1)
-            pred, uncertainty = self.trainer.policy.get_prediction(
+            pred, uncertainty, member_preds = self.trainer.policy.get_prediction(
                 trajectory=trajectory,
                 visibility_mask=visibility_mask,
                 prediction_prev=self.train_prediction_prev,
-                has_sample_dim=True
+                has_sample_dim=True,
+                return_member_preds=True
             )
             pred = pred.detach().cpu()
-            self.train_prediction_prev = pred
+            self.train_prediction_prev = member_preds.detach().cpu()
             uncertainty = uncertainty.detach().cpu()
 
             # Get the currrent state.
@@ -489,16 +490,17 @@ class PettingzooRunner(Runner):
         trajectory = trajectory.transpose(0, 1)
         visibility_mask = visibility_mask.transpose(0, 1)
 
-        pred, uncertainty = self.trainer.policy.get_prediction(
+        pred, uncertainty, member_preds = self.trainer.policy.get_prediction(
             trajectory=trajectory,
             visibility_mask=visibility_mask,
             prediction_prev=prediction_prev,
             has_sample_dim=True,
+            return_member_preds=True,
         )
 
         pred = pred.detach().cpu()
         uncertainty = uncertainty.detach().cpu()
-        prediction_prev = pred
+        prediction_prev = member_preds.detach().cpu()
 
         pred_now = pred[:, -1].reshape((n_threads, self.num_agents, *obs_shape))
         uncertainty_now = uncertainty[:, -1].reshape((n_threads, self.num_agents, *obs_shape))
