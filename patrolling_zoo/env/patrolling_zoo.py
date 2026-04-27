@@ -80,6 +80,8 @@ def add_args(parser):
                         help="the probability of successful communication")
     parser.add_argument("--regenerate_graph_on_reset", action=argparse.BooleanOptionalAction, default=False,
                         help="Whether to regenerate the graph on reset.")
+    parser.add_argument("--regenerate_graph_every", type=int, default=20,
+                        help="The number of steps after which to regenerate the graph.")
     parser.add_argument("--max_nodes", type=int, default=50,
                         help="The maximum number of nodes in a single graph observation.")
     parser.add_argument("--max_neighbors", type=int, default=10,
@@ -172,6 +174,7 @@ class parallel_env(ParallelEnv):
                  max_neighbors: int = 15,
                  reward_interval: int = -1,
                  regenerate_graph_on_reset: bool = False,
+                 regenerate_graph_every: int = 20,
                  graph_random = False,
                  graph_random_nodes = 40,
                  graph_file = os.path.join(os.path.dirname(patrolling_zoo.graphs.__file__), "cumberland.graph"),
@@ -198,6 +201,7 @@ class parallel_env(ParallelEnv):
         self.attrition_times = attrition_fixed_times
         self.attrition_min_agents = attrition_min_agents
         self.regenerate_graph_on_reset = regenerate_graph_on_reset
+        self.regenerate_graph_every = regenerate_graph_every
         self.max_nodes = max_nodes
         self.max_neighbors = max_neighbors
 
@@ -394,7 +398,7 @@ class parallel_env(ParallelEnv):
             random.seed(seed)
 
         # Reset the graph.
-        regenerateGraph = self.regenerate_graph_on_reset and self.reset_count % 20 == 0
+        regenerateGraph = self.regenerate_graph_on_reset and self.reset_count % self.regenerate_graph_every == 0
         randomizeIds = regenerateGraph
         self.pg.reset(seed, randomizeIds=randomizeIds, regenerateGraph=regenerateGraph)
 
