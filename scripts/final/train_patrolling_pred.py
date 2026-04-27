@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-    "--experiment_name", "patrolling-pred-draft1",
+    "--experiment_name", "patrolling-random-pred-draft1",
     "--project_name", "qmas",
     "--env_class", "patrolling_zoo.patrolling_zoo_v0.parallel_env",
     "--user_name", "ideas-mas",
@@ -23,9 +23,12 @@ args = [
     "--reward_method_terminal", "none",
     "--reward_interval", "1",
 
-    "--graph_name", "milwaukee",
-    "--graph_file", "../patrolling_zoo/graphs/milwaukee.graph",
-    "--num_env_steps", "300000",
+    # "--graph_name", "milwaukee",
+    # "--graph_file", "../patrolling_zoo/graphs/milwaukee.graph",
+    "--graph_random",
+    "--regenerate_graph_on_reset",
+
+    "--num_env_steps", "1000000",
     "--episode_length", "200",
     "--max_cycles", "200",
     "--num_mini_batch", "10",
@@ -66,7 +69,7 @@ args = [
 
     "--n_rollout_threads", "66",
     "--cuda",
-    "--cuda_idx", "3",
+    "--cuda_idx", "5",
     # "--cuda_idx_predictor", "6",
     "--threaded_training",
     "--n_training_threads", "16",
