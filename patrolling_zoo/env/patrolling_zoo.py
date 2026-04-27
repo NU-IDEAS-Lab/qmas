@@ -66,6 +66,10 @@ def add_args(parser):
                         help="the size (squared) to which the bitmap should be scaled for observation")
     parser.add_argument("--observation_radius", type=float, default=999999, 
                         help="the observable radius for each agent")
+    parser.add_argument("--observation_radius_random_min", type=float, default=0.0,
+                        help="the minimum random observable radius for each agent")
+    parser.add_argument("--observation_radius_random_max", type=float, default=0.0,
+                        help="the maximum random observable radius for each agent")
     parser.add_argument("--attrition_method", type=str, default="none", 
                         help="the method to use for agent attrition")
     parser.add_argument("--attrition_fixed_times", type=list, default=[], 
@@ -162,6 +166,8 @@ class parallel_env(ParallelEnv):
                  action_neighbors_max_degree = 15,
                  reward_method_terminal = "average",
                  observation_radius = np.inf,
+                 observation_radius_random_min = 0.0,
+                 observation_radius_random_max = 0.0,
                  observe_method = "adjacency",
                  observe_method_global = "",
                  observe_bitmap_size = 50,
@@ -186,7 +192,9 @@ class parallel_env(ParallelEnv):
 
         # Configuration.
         self.requireExplicitVisit = require_explicit_visit
-        self.observationRadius = observation_radius
+        self.observation_radius = observation_radius
+        self.observation_radius_random_min = observation_radius_random_min
+        self.observation_radius_random_max = observation_radius_random_max
         self.max_cycles = max_cycles
         self.comms_model = CommunicationModel(model=communication_model, p=communication_probability)
         self.action_method = action_method
@@ -224,7 +232,7 @@ class parallel_env(ParallelEnv):
             PatrolAgent(i, startingPositions[i],
                         speed = agent_speed,
                         startingNode = self.agentOrigins[i],
-                        observationRadius = self.observationRadius,
+                        observationRadius = self.observation_radius,
                         max_nodes = self.max_nodes
             ) for i in range(num_agents)
         ]
@@ -402,6 +410,12 @@ class parallel_env(ParallelEnv):
         randomizeIds = regenerateGraph
         self.pg.reset(seed, randomizeIds=randomizeIds, regenerateGraph=regenerateGraph)
 
+        # Randomize the observation radius.
+        if self.observation_radius_random_max > self.observation_radius_random_min:
+            self.observation_radius = np.random.uniform(self.observation_radius_random_min, self.observation_radius_random_max)
+
+        print(f"Reset: Using observation radius {self.observation_radius:.2f}")
+
         # Reset the information about idleness over time.
         self.avgIdlenessTimes = []
 
@@ -415,6 +429,7 @@ class parallel_env(ParallelEnv):
         for agent in self.possible_agents:
             agent.startingPosition = startingPositions[agent.id]
             agent.startingNode = self.agentOrigins[agent.id]
+            agent.observationRadius = self.observation_radius
             agent.reset()
         
         # Reset other state.
