@@ -2,13 +2,13 @@ import plotly.graph_objects as go
 import plotly.express as px
 import numpy as np
 
-def sorted_experiments(series, data):
-    """Return experiments in a series sorted by observation_radius attribute."""
-    return sorted(data[series], key=lambda exp: data[series][exp].attrs['observation_radius'])
+def sorted_experiments(series, data, key):
+    """Return experiments in a series sorted by the specified attribute."""
+    return sorted(data[series], key=lambda exp: data[series][exp].attrs[key])
 
-def get_x_radii(series, data):
-    """Read the observation_radius attribute for each experiment, sorted ascending."""
-    return [data[series][exp].attrs['observation_radius'] for exp in sorted_experiments(series, data)]
+def get_x_radii(series, data, key):
+    """Read the specified attribute for each experiment, sorted ascending."""
+    return [data[series][exp].attrs[key] for exp in sorted_experiments(series, data, key)]
 
 
 def _hex_to_rgba(color, alpha=0.2):
@@ -35,11 +35,11 @@ def plot(plots, timesteps=None):
 
         if is_time_series:
             series_names = list(y_data.keys())
-            series_names = [name.split(" ")[0] for name in series_names]
+            series_names = [name.split(" | ")[0] for name in series_names]
             series_names = set(series_names)
             series_colors = {name: color for name, color in zip(series_names, px.colors.qualitative.Plotly)}
             for series, tests in y_data.items():
-                series_name = series.split(" ")[0]
+                series_name = series.split(" | ")[0]
                 color = series_colors.get(series_name, '#888888')
                 for test_name, values in tests.items():
                     x_local = np.arange(1, len(values) + 1)
