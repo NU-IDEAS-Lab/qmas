@@ -391,6 +391,14 @@ class parallel_env(ParallelEnv):
             )
             state_space["graph"].node_type_idx = node_type_idx
         
+        # Add observation radius (all observation modes).
+        state_space["observation_radius"] = spaces.Box(
+            low=0.0,
+            high=np.inf,
+            shape=(1,),
+            dtype=np.float32,
+        )
+
         if type(state_space) == dict:
             state_space = spaces.Dict(state_space)
         
@@ -413,8 +421,6 @@ class parallel_env(ParallelEnv):
         # Randomize the observation radius.
         if self.observation_radius_random_max > self.observation_radius_random_min:
             self.observation_radius = np.random.uniform(self.observation_radius_random_min, self.observation_radius_random_max)
-
-        print(f"Reset: Using observation radius {self.observation_radius:.2f}")
 
         # Reset the information about idleness over time.
         self.avgIdlenessTimes = []
@@ -870,6 +876,10 @@ class parallel_env(ParallelEnv):
 
             obs["graph"] = data
 
+        # Add observation radius (all observation modes).
+        obs["observation_radius"] = np.array([agent.observationRadius], dtype=np.float32)
+        if obs_mask is not None:
+            obs_mask["observation_radius"] = np.array([True], dtype=bool)
 
         if (type(obs) == dict and obs == {}) or (type(obs) != dict and len(obs) < 1):
             raise ValueError(f"Invalid observation method {observe_method}")
