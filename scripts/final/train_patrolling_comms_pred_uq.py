@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-    "--experiment_name", "patrolling-randomOR-comms-pred-uq-draft1",
+    "--experiment_name", "patrolling-randomOR-comms-pred-uqstd-draft1",
     "--project_name", "qmas",
     "--env_class", "patrolling_zoo.patrolling_zoo_v0.parallel_env",
     "--user_name", "ideas-mas",

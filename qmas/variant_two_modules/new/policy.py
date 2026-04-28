@@ -190,7 +190,7 @@ class QmasPolicy(Policy):
             uncertainty = uncertainty.reshape_as(prediction)
         elif predictions.shape[dim_ensemble] > 1:
             # Predict uncertainty as the variance across ensemble predictions.
-            uncertainty = predictions.var(dim=dim_ensemble)
+            uncertainty = predictions.std(dim=dim_ensemble)
         else:
             uncertainty = torch.zeros_like(prediction)
 

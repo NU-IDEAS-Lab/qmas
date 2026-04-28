@@ -169,7 +169,7 @@ class QmasPolicy(R_MAPPOPolicy):
         prediction = predictions.mean(dim=dim_ensemble)
 
         if predictions.shape[dim_ensemble] > 1:
-            uncertainty = predictions.var(dim=dim_ensemble)
+            uncertainty = predictions.std(dim=dim_ensemble)
         else:
             uncertainty = torch.zeros_like(prediction)
 
