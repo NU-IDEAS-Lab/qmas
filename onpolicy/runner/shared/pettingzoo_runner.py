@@ -477,7 +477,7 @@ class PettingzooRunner(Runner):
         #     action=traj_actions,
         # )
 
-    def _compute_predictions(self, trajectory_buffer, prediction_prev, n_threads, obs_shape):
+    def _compute_predictions(self, trajectory_buffer, prediction_prev, n_threads, obs_shape, ground_truth_obs=None):
         use_prediction = (
             hasattr(self.policy, "predictors")
             and trajectory_buffer.ready()
@@ -505,12 +505,21 @@ class PettingzooRunner(Runner):
         pred_now = pred[:, -1].reshape((n_threads, self.num_agents, *obs_shape))
         uncertainty_now = uncertainty[:, -1].reshape((n_threads, self.num_agents, *obs_shape))
 
-        transition_now = trajectory[:, -1].detach().cpu()
-        if self.all_args.prediction_history_include_actions:
-            act_size = int(np.prod(get_shape_from_act_space(self.buffer.act_space)))
-            transition_now = transition_now[:, act_size:]
-        transition_now = transition_now.reshape((n_threads, self.num_agents, *obs_shape))
-        prediction_error = torch.abs(pred_now - transition_now)
+        if ground_truth_obs is not None:
+            # Use the unmasked ground truth (provided by the caller from infos before masking).
+            # This allows measuring prediction error for unobserved positions too.
+            ground_truth_now = torch.from_numpy(ground_truth_obs).float().reshape((n_threads, self.num_agents, *obs_shape))
+            prediction_error = torch.abs(pred_now - ground_truth_now)
+        else:
+            # Fall back to the masked trajectory entry. Unobserved entries are zeroed, so
+            # only include positions where ground truth was actually observed.
+            transition_now = trajectory[:, -1].detach().cpu()
+            if self.all_args.prediction_history_include_actions:
+                act_size = int(np.prod(get_shape_from_act_space(self.buffer.act_space)))
+                transition_now = transition_now[:, act_size:]
+            transition_now = transition_now.reshape((n_threads, self.num_agents, *obs_shape))
+            visibility_mask_now = visibility_mask[:, -1].detach().cpu().reshape((n_threads, self.num_agents, *obs_shape))
+            prediction_error = torch.abs(pred_now - transition_now) * visibility_mask_now
 
         return pred, uncertainty, prediction_prev, prediction_error, True
 
@@ -565,6 +574,9 @@ class PettingzooRunner(Runner):
             else:
                 obs_global_fallback = None
 
+            # Unmasked ground truth from the previous step, used to compute true prediction error.
+            ground_truth_obs_prev = None
+
             dones = False
             j = -1
             while not np.all(dones):
@@ -579,6 +591,7 @@ class PettingzooRunner(Runner):
                     prediction_prev,
                     rollout_threads,
                     obs_shape,
+                    ground_truth_obs=ground_truth_obs_prev,
                 )
 
                 if use_prediction:
@@ -636,6 +649,8 @@ class PettingzooRunner(Runner):
                 obs, share_obs, rewards, dones, infos, available_actions = env.step(actions_env)
 
                 observation_global = np.array([info["observation_global"] for info in infos]) if "observation_global" in infos[0] else None
+                # Save unmasked ground truth before masking, for use as prediction error reference next step.
+                ground_truth_obs_prev = observation_global.copy() if observation_global is not None else None
                 if hasattr(self.policy, "predictors") and not self.all_args.prediction_disable:
                     obs, observation_global = self._apply_masks_and_update_trajectory(trajectory, obs, infos, actions, rollout_threads, global_obs=observation_global)
                 else:
@@ -731,6 +746,9 @@ class PettingzooRunner(Runner):
                 image = self.envs.envs[0].env.unwrapped.observation()[0]["frame"]
                 frames.append(image)
 
+            # Unmasked ground truth from the previous step, used to compute true prediction error.
+            ground_truth_obs_prev = None
+
             dones = False
             reward_total = 0.0
             while not np.all(dones):
@@ -745,6 +763,7 @@ class PettingzooRunner(Runner):
                     prediction_prev,
                     rollout_threads,
                     obs_shape,
+                    ground_truth_obs=ground_truth_obs_prev,
                 )
 
                 if use_prediction:
@@ -806,6 +825,8 @@ class PettingzooRunner(Runner):
                 obs, share_obs, rewards, dones, infos, available_actions = env.step(actions_env)
 
                 observation_global = np.array([info["observation_global"] for info in infos]) if "observation_global" in infos[0] else None
+                # Save unmasked ground truth before masking, for use as prediction error reference next step.
+                ground_truth_obs_prev = observation_global.copy() if observation_global is not None else None
                 if hasattr(self.policy, "predictors") and not self.all_args.prediction_disable:
                     obs, observation_global = self._apply_masks_and_update_trajectory(trajectory, obs, infos, actions, rollout_threads, global_obs=observation_global)
                 else:
