@@ -961,6 +961,9 @@ class parallel_env(ParallelEnv):
                 # Store this as the agent's last movement action.
                 agent.currentAction = action_movement
 
+                # Check whether the agent is currently on a node.
+                agent_on_node = agent.edge is None
+
                 # Get the destination node.
                 dstNode = self.getDestinationNode(agent, action_movement)
                 
@@ -993,22 +996,26 @@ class parallel_env(ParallelEnv):
                         break
                 
                 # Handle communication.
-                if self.action_method in ["full", "neighbors"]:
-                    # Hack - we are doing broadcast-based requests, so always receive from all agents.
-                    if self.comms_model.canReceive(None, agent):
-                        senders = set(other for other in self.agents if other is not agent)
-                        if senders:
-                            comms_requests[agent] = senders
-                            info_dict["communication/requests_made"] += 1
-                elif self.action_method == "neighbors_with_comm_boolean":
-                    action_movement = int(action["movement"])
-                    action_communication = bool(action["communication"])
-                    if action_communication:
-                        senders = set(other for other in self.agents if other is not agent)
-                        if senders:
-                            comms_requests[agent] = senders
-                            info_dict["communication/requests_made"] += 1
-                        reward_dict[agent] += -1.0 * self.reward_comms_penalty_weight
+                # Only allow this when an agent is on a node, because that is the only time that the policy actually makes a decision,
+                # thanks to the --skip-steps parameter. This prevents multiple counting of the communication penalty during edge traversal,
+                # when an agent could not change its decision anyway.
+                if agent_on_node:
+                    if self.action_method in ["full", "neighbors"]:
+                        # Hack - we are doing broadcast-based requests, so always receive from all agents.
+                        if self.comms_model.canReceive(None, agent):
+                            senders = set(other for other in self.agents if other is not agent)
+                            if senders:
+                                comms_requests[agent] = senders
+                                info_dict["communication/requests_made"] += 1
+                    elif self.action_method == "neighbors_with_comm_boolean":
+                        action_movement = int(action["movement"])
+                        action_communication = bool(action["communication"])
+                        if action_communication:
+                            senders = set(other for other in self.agents if other is not agent)
+                            if senders:
+                                comms_requests[agent] = senders
+                                info_dict["communication/requests_made"] += 1
+                            reward_dict[agent] += -1.0 * self.reward_comms_penalty_weight
 
         # Record the average idleness time at this step.
         avg = self._minMaxNormalize(self.pg.getAverageIdlenessTime(self.step_count), minimum=0.0, maximum=self.step_count)
