@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-    "--experiment_name", "patrolling-random-draft1",
+    "--experiment_name", "patrolling-randomOR-draft1",
     "--project_name", "qmas",
     "--env_class", "patrolling_zoo.patrolling_zoo_v0.parallel_env",
     "--user_name", "ideas-mas",
@@ -15,6 +15,8 @@ args = [
     "--observe_method", "pyg",
     "--observe_method_global", "coordinates",
     "--observation_radius", "200.0",
+    "--observation_radius_random_min", "50.0",
+    "--observation_radius_random_max", "300.0",
     "--communication_model", "bernoulli",
     "--communication_probability", "0.5",
     "--alpha", "1.0",
@@ -27,6 +29,7 @@ args = [
     # "--graph_file", "../patrolling_zoo/graphs/milwaukee.graph",
     "--graph_random",
     "--regenerate_graph_on_reset",
+    "--regenerate_graph_every", "1",
 
     "--num_env_steps", "1000000",
     "--episode_length", "200",
