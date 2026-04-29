@@ -1,3 +1,5 @@
+import functools
+
 from pettingzoo import ParallelEnv
 from pettingzoo.utils import parallel_to_aec
 
@@ -52,13 +54,14 @@ def add_args(parser):
     parser.add_argument("--agent_speed", type=float, default=10.0,
                         help="the speed of each agent")
     parser.add_argument("--action_method", type=str, default="full",
-                        choices=["full", "neighbors", "neighbors_with_comm_boolean"],
+                        choices=["full", "neighbors", "neighbors_with_comm_boolean", "full_with_comm_boolean"],
                         help="the action method to use. 'neighbors_with_comm_boolean' extends "
                              "'neighbors' with a binary communication-request action: agents "
                              "may request a broadcast from all other agents, who respond by "
-                             "sharing their local observations.")
+                             "sharing their local observations. "
+                             "'full_with_comm_boolean' is the same but with the 'full' movement space.")
     parser.add_argument("--observe_method", type=str, default="adjacency", 
-                        choices=["adjacency", "coordinates", "pyg"],
+                        choices=["adjacency", "coordinates", "pyg", "path-distance"],
                         help="the observation method to use")
     parser.add_argument("--observe_method_global", type=str, default="", 
                         help="the observation method to use for global observation")
@@ -292,6 +295,21 @@ class parallel_env(ParallelEnv):
                 )
             })
 
+        elif action_method == "full_with_comm_boolean":
+            maxNodes = self.action_full_max_nodes if self.action_full_max_nodes > 0 else len(self.pg.graph)
+            return spaces.Dict({
+                "movement": spaces.Box(
+                    low = 0,
+                    high = maxNodes - 1,
+                    dtype = np.int32
+                ),
+                "communication": spaces.Box(
+                    low = 0,
+                    high = 1,
+                    dtype = np.int32
+                )
+            })
+
 
     def _buildStateSpace(self, observe_method):
         ''' Creates a state space given the observation method.
@@ -303,7 +321,7 @@ class parallel_env(ParallelEnv):
         # Add to the dictionary depending on the observation method.
 
         # Add agent id.
-        if observe_method in ["adjacency", "coordinates"]:
+        if observe_method in ["adjacency", "coordinates", "path-distance"]:
             state_space["agent_id"] = spaces.Box(
                 low = -1,
                 high = len(self.possible_agents),
@@ -311,11 +329,33 @@ class parallel_env(ParallelEnv):
             )
 
         # Add vertex idleness time.
-        if observe_method in ["adjacency", "coordinates"]:
+        if observe_method in ["adjacency", "coordinates", "path-distance"]:
             state_space["vertex_state"] = spaces.Dict({
                 v: spaces.Box(
                     low = -1.0,
                     high = np.inf,
+                ) for v in range(self.pg.graph.number_of_nodes())
+            }) # type: ignore
+
+        # Add shortest-path distances from ego agent to each node.
+        if observe_method in ["path-distance"]:
+            state_space["vertex_ego_dist"] = spaces.Dict({
+                v: spaces.Box(
+                    low = -1.0,
+                    high = np.inf,
+                    shape=(1,),
+                    dtype=np.float32,
+                ) for v in range(self.pg.graph.number_of_nodes())
+            }) # type: ignore
+
+        # Add minimum shortest-path distance from any other visible agent to each node.
+        if observe_method in ["path-distance"]:
+            state_space["vertex_min_other_dist"] = spaces.Dict({
+                v: spaces.Box(
+                    low = -1.0,
+                    high = np.inf,
+                    shape=(1,),
+                    dtype=np.float32,
                 ) for v in range(self.pg.graph.number_of_nodes())
             }) # type: ignore
         
@@ -338,7 +378,7 @@ class parallel_env(ParallelEnv):
             }) # type: ignore
 
         # Add vertex 2D coordinates.
-        if observe_method in ["coordinates"]:
+        if observe_method in ["coordinates", "path-distance"]:
             state_space["vertex_position"] = spaces.Dict({
                 v: spaces.Box(
                     low = -np.inf,
@@ -349,7 +389,7 @@ class parallel_env(ParallelEnv):
             }) # type: ignore
 
         # Add agent 2D coordinates.
-        if observe_method in ["coordinates"]:
+        if observe_method in ["coordinates", "path-distance"]:
             state_space["agent_position"] = spaces.Dict({
                 a: spaces.Box(
                     low = -np.inf,
@@ -417,6 +457,9 @@ class parallel_env(ParallelEnv):
         regenerateGraph = self.regenerate_graph_on_reset and self.reset_count % self.regenerate_graph_every == 0
         randomizeIds = regenerateGraph
         self.pg.reset(seed, randomizeIds=randomizeIds, regenerateGraph=regenerateGraph)
+        if regenerateGraph:
+            # Reset the LRU cache.
+            self._path_lengths.cache_clear()
 
         # Randomize the observation radius.
         if self.observation_radius_random_max > self.observation_radius_random_min:
@@ -637,6 +680,11 @@ class parallel_env(ParallelEnv):
         return self.available_actions_dict[agent]
 
 
+    @functools.lru_cache(maxsize=100)
+    def _path_lengths(self, source):
+        ''' Returns the shortest path lengths from the source node to all other nodes. '''
+        return nx.single_source_dijkstra_path_length(self.pg.graph, source, weight='weight')
+
     def _populateStateSpace(self, observe_method, agent, radius, allow_done_agents, global_state=False, senders=set()):
         ''' Returns a populated state/observation space.'''
 
@@ -668,12 +716,12 @@ class parallel_env(ParallelEnv):
         obs_mask = {}
 
         # Add agent ID.
-        if observe_method in ["adjacency", "coordinates"]:
+        if observe_method in ["adjacency", "coordinates", "path-distance"]:
             obs["agent_id"] = agent.id
             obs_mask["agent_id"] = np.array([True], dtype=bool)
 
         # Add vertex idleness time (raw).
-        if observe_method in ["adjacency", "coordinates"]:
+        if observe_method in ["adjacency", "coordinates", "path-distance"]:
             obs["vertex_state"] = {}
             obs_mask["vertex_state"] = {}
 
@@ -682,8 +730,46 @@ class parallel_env(ParallelEnv):
                 obs["vertex_state"][node] = self.pg.getNodeIdlenessTime(node, self.step_count)
                 obs_mask["vertex_state"][node] = np.array([node in vertices], dtype=bool)
 
+        # Add shortest-path distances from ego agent and min distance from other visible agents.
+        if observe_method in ["path-distance"]:
+            obs["vertex_ego_dist"] = {}
+            obs_mask["vertex_ego_dist"] = {}
+            obs["vertex_min_other_dist"] = {}
+            obs_mask["vertex_min_other_dist"] = {}
+
+            # Compute shortest-path distances from the ego agent's current node.
+            ego_node = agent.lastNode
+            ego_dists = self._path_lengths(ego_node)
+
+            # Compute shortest-path distances from each other visible agent's current node.
+            other_agents = [a for a in agents if a is not agent]
+            other_dists_list = [
+                self._path_lengths(a.lastNode)
+                for a in other_agents
+            ]
+
+            vertices_set = set(vertices)
+            for node in range(self.pg.graph.number_of_nodes()):
+                visible = node in vertices_set
+
+                # Ego distance: -1.0 if node is not visible.
+                obs["vertex_ego_dist"][node] = np.array(
+                    [ego_dists.get(node, -1.0)] if visible else [-1.0], dtype=np.float32
+                )
+                obs_mask["vertex_ego_dist"][node] = np.array([visible], dtype=bool)
+
+                # Min other-agent distance: -1.0 if no other agent is visible.
+                if other_dists_list and visible:
+                    min_dist = min(d.get(node, np.inf) for d in other_dists_list)
+                    obs["vertex_min_other_dist"][node] = np.array(
+                        [min_dist if min_dist < np.inf else -1.0], dtype=np.float32
+                    )
+                else:
+                    obs["vertex_min_other_dist"][node] = np.array([-1.0], dtype=np.float32)
+                obs_mask["vertex_min_other_dist"][node] = np.array([visible and len(other_dists_list) > 0], dtype=bool)
+
         # Add vertex 2D coordinates.
-        if observe_method in ["coordinates"]:
+        if observe_method in ["coordinates", "path-distance"]:
             obs["vertex_position"] = {}
             obs_mask["vertex_position"] = {}
 
@@ -692,7 +778,7 @@ class parallel_env(ParallelEnv):
                 obs_mask["vertex_position"][node] = np.array([node in vertices], dtype=bool)
 
         # Add agent 2D coordinates.
-        if observe_method in ["coordinates"]:
+        if observe_method in ["coordinates", "path-distance"]:
             obs["agent_position"] = {}
             obs_mask["agent_position"] = {}
 
@@ -955,7 +1041,7 @@ class parallel_env(ParallelEnv):
                 # Get the agent's movement action.
                 if self.action_method in ["full", "neighbors"]:
                     action_movement = int(action)
-                elif self.action_method == "neighbors_with_comm_boolean":
+                elif self.action_method in ["neighbors_with_comm_boolean", "full_with_comm_boolean"]:
                     action_movement = int(action["movement"])
 
                 # Store this as the agent's last movement action.
@@ -1000,7 +1086,7 @@ class parallel_env(ParallelEnv):
                         if senders:
                             comms_requests[agent] = senders
                             info_dict["communication/requests_made"] += 1
-                elif self.action_method == "neighbors_with_comm_boolean":
+                elif self.action_method in ["neighbors_with_comm_boolean", "full_with_comm_boolean"]:
                     action_movement = int(action["movement"])
                     action_communication = bool(action["communication"])
                     if action_communication:
@@ -1103,7 +1189,7 @@ class parallel_env(ParallelEnv):
         ''' Returns the destination node for the given agent and action. '''
 
         # Interpret the action using the "full" method.
-        if self.action_method == "full":
+        if self.action_method in ["full", "full_with_comm_boolean"]:
             if action not in self.pg.graph.nodes:
                 raise ValueError(f"Invalid action {action} for agent {agent.name}")
             dstNode = action
@@ -1245,6 +1331,27 @@ class parallel_env(ParallelEnv):
                 }
                 numNeighbors = self.pg.graph.out_degree(agent.lastNode)
                 actionMap["movement"][:numNeighbors] = 1.0
+            else:
+                # Only the current movement action is available (as it is still incomplete), but communication is still available.
+                actionMap = {
+                    "movement": np.zeros(num_moves, dtype=np.float32),
+                    "communication": np.array([1.0, 1.0], dtype=np.float32)
+                }
+                actionMap["movement"][agent.currentAction] = 1.0
+            
+            # Flatten the action map.
+            flat = spaces.flatten(self.available_actions_space(agent), actionMap)
+            return flat
+
+        elif self.action_method == "full_with_comm_boolean":
+            num_moves = self.action_space(agent)["movement"].high - self.action_space(agent)["movement"].low + 1
+            if agent.edge == None:
+                # All graph nodes are available, and communication is always available.
+                actionMap = {
+                    "movement": np.zeros(num_moves, dtype=np.float32),
+                    "communication": np.array([1.0, 1.0], dtype=np.float32)
+                }
+                actionMap["movement"][:self.pg.graph.number_of_nodes()] = 1.0
             else:
                 # Only the current movement action is available (as it is still incomplete), but communication is still available.
                 actionMap = {
