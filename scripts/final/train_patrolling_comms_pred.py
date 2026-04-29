@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-    "--experiment_name", "patrolling-randomOR-comms-pred-draft1",
+    "--experiment_name", "patrolling-randomOR-noSkip-comms-pred-draft1",
     "--project_name", "qmas",
     "--env_class", "patrolling_zoo.patrolling_zoo_v0.parallel_env",
     "--user_name", "ideas-mas",
@@ -48,8 +48,8 @@ args = [
     # "--use_recurrent_policy",
     "--use_centralized_V",
     "--use_gae",
-    "--use_gae_amadm",
-    "--skip_steps",
+    # "--use_gae_amadm",
+    # "--skip_steps",
     "--share_policy",
     "--use_ReLU",
     "--hidden_size", "64",
@@ -70,9 +70,9 @@ args = [
 
     # "--episode_fraction_start_prediction", "0.2",
 
-    "--n_rollout_threads", "66",
+    "--n_rollout_threads", "72",
     "--cuda",
-    "--cuda_idx", "7",
+    "--cuda_idx", "6",
     # "--cuda_idx_predictor", "6",
     "--threaded_training",
     "--n_training_threads", "16",
