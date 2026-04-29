@@ -146,7 +146,7 @@ class PettingzooRunner(Runner):
         # buffer slot has the correct shape (2× obs_dim) from the start.
         # collect() will overwrite this with [pred | uncertainty] on the first step.
         obs_full = None
-        if self.all_args.prediction_uq_injection_method == "append":
+        if self.all_args.prediction_uq_injection_method == "append" and not self.all_args.prediction_disable:
             if obs.dtype == object:
                 if observation_global is None:
                     raise ValueError("Must have observation_global in infos to use object-type observations (e.g. pyg graph observations). Check that environment is providing this information.")
@@ -836,6 +836,7 @@ class PettingzooRunner(Runner):
                         if obs.dtype != object:
                             obs = obs * viz_mask_local
                         if observation_global is not None and viz_mask_global is not None:
+                            print(f"Masking global obs. Sum before: {observation_global.sum():.2f}, sum after: { (observation_global * viz_mask_global).sum():.2f}")
                             observation_global = observation_global * viz_mask_global
 
                 # Save the current masked observation_global for use as fallback in the next step.
@@ -846,10 +847,10 @@ class PettingzooRunner(Runner):
                 time_stop = time.time()
 
                 # Perform rendering.
-                if ipython_clear_output:
-                    clear_output(wait = True)
-                spf = prediction_now if use_prediction else None
-                env.envs[0].env.render(spf, history_length=self.all_args.prediction_history_window, uncertainty=uncertainty_now)
+                # if ipython_clear_output:
+                #     clear_output(wait = True)
+                # spf = prediction_now if use_prediction else None
+                # env.envs[0].env.render(spf, history_length=self.all_args.prediction_history_window, uncertainty=uncertainty_now)
 
                 # append frame
                 if self.all_args.save_gifs:        
