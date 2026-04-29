@@ -10,7 +10,7 @@ args = [
     "--user_name", "ideas-mas",
 
     "--num_agents", "4",
-    "--agent_speed", "40.0",
+    "--agent_speed", "20.0",
     "--action_method", "neighbors",
     "--observe_method", "pyg",
     "--observe_method_global", "coordinates",
@@ -32,8 +32,8 @@ args = [
     "--regenerate_graph_every", "1",
 
     "--num_env_steps", "1000000",
-    "--episode_length", "200",
-    "--max_cycles", "200",
+    "--episode_length", "150",
+    "--max_cycles", "150",
     "--num_mini_batch", "10",
 
     "--algorithm_class", "qmas.variant_two_modules.new.algorithm.QmasAlgorithm",
@@ -57,7 +57,7 @@ args = [
     "--layer_N", "3",
     "--use_linear_lr_decay",
     "--ppo_epoch", "5",
-    "--seed", "0",
+    "--seed", "42",
 
     "--diffusion_model_type", "dit1d",
     # "--prediction_history_window", "16",
@@ -70,7 +70,7 @@ args = [
 
     # "--episode_fraction_start_prediction", "0.0",
 
-    "--n_rollout_threads", "66",
+    "--n_rollout_threads", "72",
     "--cuda",
     "--cuda_idx", "4",
     # "--cuda_idx_predictor", "6",
