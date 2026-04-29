@@ -10,7 +10,7 @@ args = [
     "--user_name", "ideas-mas",
 
     "--num_agents", "4",
-    "--agent_speed", "20.0",
+    "--agent_speed", "40.0",
     "--action_method", "neighbors_with_comm_boolean",
     "--observe_method", "pyg",
     "--observe_method_global", "coordinates",
