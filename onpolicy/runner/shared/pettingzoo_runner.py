@@ -147,14 +147,15 @@ class PettingzooRunner(Runner):
         # collect() will overwrite this with [pred | uncertainty] on the first step.
         obs_full = None
         if self.all_args.prediction_uq_injection_method == "append" and not self.all_args.prediction_disable:
-            if obs.dtype == object:
+            if obs.dtype == object or (self.all_args.state_encoder and observation_global is not None):
+                # Object-type obs or state_encoder: UQ is appended to observation_global.
                 if observation_global is None:
                     raise ValueError("Must have observation_global in infos to use object-type observations (e.g. pyg graph observations). Check that environment is providing this information.")
                 observation_global = np.concatenate(
                     [observation_global, np.zeros_like(observation_global)], axis=-1
                 )
             else:
-                # Dense envs: UQ is appended to obs instead. Pre-pad obs with zeros so the
+                # Dense envs without state_encoder: UQ is appended to obs instead. Pre-pad obs with zeros so the
                 # buffer slot has the correct shape before collect() overwrites it.
                 obs_full = obs
                 obs = np.concatenate([obs, np.zeros_like(obs)], axis=-1)
@@ -307,7 +308,7 @@ class PettingzooRunner(Runner):
             observation_global_raw = observation_global  # unpadded, for trajectory buffer
             # The buffer was initialized with zero-padded obs (2× size) in warmup().
             # Pad the raw env obs here to match, so the storage set doesn't fail on shape.
-            if self.all_args.prediction_uq_injection_method == "append" and obs.dtype == object:
+            if self.all_args.prediction_uq_injection_method == "append" and (obs.dtype == object or self.all_args.state_encoder):
                 observation_global = np.concatenate(
                     [observation_global, np.zeros_like(observation_global)], axis=-1
                 )
@@ -322,8 +323,8 @@ class PettingzooRunner(Runner):
         else:
             observation_global = None
             observation_global_raw = None
-            # Dense envs: pad obs with zeros for the same reason.
-            if obs.dtype != object and self.all_args.prediction_uq_injection_method == "append":
+            # Dense envs without state_encoder: pad obs with zeros for the same reason.
+            if obs.dtype != object and not self.all_args.state_encoder and self.all_args.prediction_uq_injection_method == "append":
                 obs_full = obs
                 obs = np.concatenate([obs, np.zeros_like(obs)], axis=-1)
 
