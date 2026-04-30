@@ -94,6 +94,7 @@ class QmasActor(nn.Module):
             obs_space_graph = get_graph_obs_space(obs_space)
             obs_space_nongraph = strip_graph_obs_space(obs_space)
             self.obs_space_graph_idx = get_graph_obs_space_idx(obs_space)
+            self.obs_nongraph_space = obs_space_nongraph
 
             self.base = GNNBase(
                 layers=args.gnn_layer_N,
@@ -224,9 +225,19 @@ class QmasActor(nn.Module):
             obs_nongraph = obs[:, nonGraphIdx]
             if len(obs_nongraph.shape) > 1 and obs_nongraph.shape[1] > 0:
                 # The non-graph data is stored as an object dtype. Need to convert to float32.
-                obs_non_graph_float = np.zeros((obs_nongraph.shape[0], *obs_nongraph[0, 0].shape), dtype=np.float32)
-                for i in range(obs_nongraph.shape[0]):
-                    obs_non_graph_float[i] = obs_nongraph[i, 0]
+                if obs_nongraph.shape[1] == 1:
+                    # Single non-graph key
+                    obs_non_graph_float = np.zeros((obs_nongraph.shape[0], *obs_nongraph[0, 0].shape), dtype=np.float32)
+                    for i in range(obs_nongraph.shape[0]):
+                        obs_non_graph_float[i] = obs_nongraph[i, 0]
+                else:
+                    # Multiple non-graph keys
+                    nongraph_keys = list(self.obs_nongraph_space.spaces.keys())
+                    flat_dim = spaces.flatdim(self.obs_nongraph_space)
+                    obs_non_graph_float = np.zeros((obs_nongraph.shape[0], flat_dim), dtype=np.float32)
+                    for i in range(obs_nongraph.shape[0]):
+                        obs_dict = {k: obs_nongraph[i, j] for j, k in enumerate(nongraph_keys)}
+                        obs_non_graph_float[i] = spaces.flatten(self.obs_nongraph_space, obs_dict)
                 obs_nongraph = obs_non_graph_float
             obs_nongraph = check(obs_nongraph.astype(np.float32)).to(**self.tpdv)
 
