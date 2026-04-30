@@ -391,12 +391,12 @@ class parallel_env(ParallelEnv):
         # Add agent 2D coordinates.
         if observe_method in ["coordinates", "path-distance", "pd-pyg"]:
             state_space["agent_position"] = spaces.Dict({
-                a: spaces.Box(
+                i: spaces.Box(
                     low = -np.inf,
                     high = np.inf,
                     shape=(2,),
                     dtype=np.float32,
-                ) for a in self.possible_agents
+                ) for i in range(len(self.possible_agents))
             }) # type: ignore
         
         if observe_method in ["pyg"]:
@@ -805,12 +805,12 @@ class parallel_env(ParallelEnv):
             obs_mask["agent_position"] = {}
 
             agents_set = set(agents)
-            for a in self.possible_agents:
+            for i, a in enumerate(self.possible_agents):
                 if observe_method in ["path-distance", "pd-pyg"] and a not in agents_set:
-                    obs["agent_position"][a] = np.array([0.0, 0.0], dtype=np.float32)
+                    obs["agent_position"][i] = np.array([0.0, 0.0], dtype=np.float32)
                 else:
-                    obs["agent_position"][a] = np.array(a.position, dtype=np.float32)
-                obs_mask["agent_position"][a] = np.ones(2, dtype=bool) if a in agents_set else np.zeros(2, dtype=bool)
+                    obs["agent_position"][i] = np.array(a.position, dtype=np.float32)
+                obs_mask["agent_position"][i] = np.ones(2, dtype=bool) if a in agents_set else np.zeros(2, dtype=bool)
 
         # Add weighted adjacency matrix (normalized).
         if observe_method in ["adjacency"]:
