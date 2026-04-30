@@ -61,7 +61,7 @@ def add_args(parser):
                              "sharing their local observations. "
                              "'full_with_comm_boolean' is the same but with the 'full' movement space.")
     parser.add_argument("--observe_method", type=str, default="adjacency", 
-                        choices=["adjacency", "coordinates", "pyg", "path-distance"],
+                        choices=["adjacency", "coordinates", "pyg", "path-distance", "pd-pyg"],
                         help="the observation method to use")
     parser.add_argument("--observe_method_global", type=str, default="", 
                         help="the observation method to use for global observation")
@@ -321,7 +321,7 @@ class parallel_env(ParallelEnv):
         # Add to the dictionary depending on the observation method.
 
         # Add agent id.
-        if observe_method in ["adjacency", "coordinates", "path-distance"]:
+        if observe_method in ["adjacency", "coordinates", "path-distance", "pd-pyg"]:
             state_space["agent_id"] = spaces.Box(
                 low = -1,
                 high = len(self.possible_agents),
@@ -329,7 +329,7 @@ class parallel_env(ParallelEnv):
             )
 
         # Add vertex idleness time.
-        if observe_method in ["adjacency", "coordinates", "path-distance"]:
+        if observe_method in ["adjacency", "coordinates", "path-distance", "pd-pyg"]:
             state_space["vertex_state"] = spaces.Dict({
                 v: spaces.Box(
                     low = -1.0,
@@ -338,7 +338,7 @@ class parallel_env(ParallelEnv):
             }) # type: ignore
 
         # Add shortest-path distances from ego agent to each node.
-        if observe_method in ["path-distance"]:
+        if observe_method in ["path-distance", "pd-pyg"]:
             state_space["vertex_ego_dist"] = spaces.Dict({
                 v: spaces.Box(
                     low = -1.0,
@@ -349,7 +349,7 @@ class parallel_env(ParallelEnv):
             }) # type: ignore
 
         # Add minimum shortest-path distance from any other visible agent to each node.
-        if observe_method in ["path-distance"]:
+        if observe_method in ["path-distance", "pd-pyg"]:
             state_space["vertex_min_other_dist"] = spaces.Dict({
                 v: spaces.Box(
                     low = -1.0,
@@ -378,7 +378,7 @@ class parallel_env(ParallelEnv):
             }) # type: ignore
 
         # Add vertex 2D coordinates.
-        if observe_method in ["coordinates", "path-distance"]:
+        if observe_method in ["coordinates", "path-distance", "pd-pyg"]:
             state_space["vertex_position"] = spaces.Dict({
                 v: spaces.Box(
                     low = -np.inf,
@@ -389,7 +389,7 @@ class parallel_env(ParallelEnv):
             }) # type: ignore
 
         # Add agent 2D coordinates.
-        if observe_method in ["coordinates", "path-distance"]:
+        if observe_method in ["coordinates", "path-distance", "pd-pyg"]:
             state_space["agent_position"] = spaces.Dict({
                 a: spaces.Box(
                     low = -np.inf,
@@ -431,6 +431,25 @@ class parallel_env(ParallelEnv):
             )
             state_space["graph"].node_type_idx = node_type_idx
         
+        if observe_method in ["pd-pyg"]:
+            edge_space = spaces.Box(
+                # weight
+                low = np.array([0.0], dtype=np.float32),
+                high = np.array([np.inf], dtype=np.float32),
+            )
+            node_space = spaces.Box(
+                # ID, nodeType
+                low = np.array([0.0, -np.inf], dtype=np.float32),
+                high = np.array([np.inf, np.inf], dtype=np.float32),
+            )
+            node_type_idx = 1
+
+            state_space["graph"] = spaces.Graph(
+                node_space = node_space,
+                edge_space = edge_space
+            )
+            state_space["graph"].node_type_idx = node_type_idx
+
         # Add observation radius (all observation modes).
         state_space["observation_radius"] = spaces.Box(
             low=0.0,
@@ -716,25 +735,25 @@ class parallel_env(ParallelEnv):
         obs_mask = {}
 
         # Add agent ID.
-        if observe_method in ["adjacency", "coordinates", "path-distance"]:
+        if observe_method in ["adjacency", "coordinates", "path-distance", "pd-pyg"]:
             obs["agent_id"] = agent.id
             obs_mask["agent_id"] = np.array([True], dtype=bool)
 
         # Add vertex idleness time (raw).
-        if observe_method in ["adjacency", "coordinates", "path-distance"]:
+        if observe_method in ["adjacency", "coordinates", "path-distance", "pd-pyg"]:
             obs["vertex_state"] = {}
             obs_mask["vertex_state"] = {}
 
             for node in range(self.pg.graph.number_of_nodes()):
                 visible = node in vertices
-                if observe_method == "path-distance" and not visible:
+                if observe_method in ["path-distance", "pd-pyg"] and not visible:
                     obs["vertex_state"][node] = np.array([0.0])
                 else:
                     obs["vertex_state"][node] = self.pg.getNodeIdlenessTime(node, self.step_count)
                 obs_mask["vertex_state"][node] = np.array([visible], dtype=bool)
 
         # Add shortest-path distances from ego agent and min distance from other visible agents.
-        if observe_method in ["path-distance"]:
+        if observe_method in ["path-distance", "pd-pyg"]:
             obs["vertex_ego_dist"] = {}
             obs_mask["vertex_ego_dist"] = {}
             obs["vertex_min_other_dist"] = {}
@@ -772,7 +791,7 @@ class parallel_env(ParallelEnv):
                 obs_mask["vertex_min_other_dist"][node] = np.array([visible and len(other_dists_list) > 0], dtype=bool)
 
         # Add vertex 2D coordinates.
-        if observe_method in ["coordinates", "path-distance"]:
+        if observe_method in ["coordinates", "path-distance", "pd-pyg"]:
             obs["vertex_position"] = {}
             obs_mask["vertex_position"] = {}
 
@@ -781,13 +800,13 @@ class parallel_env(ParallelEnv):
                 obs_mask["vertex_position"][node] = np.array([node in vertices], dtype=bool)
 
         # Add agent 2D coordinates.
-        if observe_method in ["coordinates", "path-distance"]:
+        if observe_method in ["coordinates", "path-distance", "pd-pyg"]:
             obs["agent_position"] = {}
             obs_mask["agent_position"] = {}
 
             agents_set = set(agents)
             for a in self.possible_agents:
-                if observe_method == "path-distance" and a not in agents_set:
+                if observe_method in ["path-distance", "pd-pyg"] and a not in agents_set:
                     obs["agent_position"][a] = np.array([0.0, 0.0], dtype=np.float32)
                 else:
                     obs["agent_position"][a] = np.array(a.position, dtype=np.float32)
@@ -825,6 +844,45 @@ class parallel_env(ParallelEnv):
                 graphPos[a] = vec
                 obs_mask["agent_graph_position"][a] = np.ones(3, dtype=bool) if a in agents else np.zeros(3, dtype=bool)
             obs["agent_graph_position"] = graphPos
+
+        if observe_method in ["pd-pyg"]:
+            # Build a PyG Data object whose node ordering matches the path-distance vectors
+            # (node i in the tensor == key i in vertex_state/vertex_ego_dist/etc.).
+            # vertices_set is already computed in the path-distance block above.
+            g = self.pg.graph
+            sorted_nodes = sorted(g.nodes)  # [0, 1, ..., N-1]
+
+            import torch
+            N = len(sorted_nodes)
+
+            # Node features: [id, nodeType] in sorted node order.
+            x = torch.zeros((N, 2), dtype=torch.float32)
+            for i, node in enumerate(sorted_nodes):
+                x[i, 0] = float(g.nodes[node].get("id", node))
+                x[i, 1] = float(NODE_TYPE.OBSERVABLE_NODE if node in vertices_set else NODE_TYPE.UNOBSERVABLE_NODE)
+
+            # Edge index and attributes (both directions for the undirected graph).
+            node_to_idx = {node: i for i, node in enumerate(sorted_nodes)}
+            edges_src, edges_dst, edge_weights = [], [], []
+            for u, v, edata in g.edges(data=True):
+                w = float(edata.get("weight", 1.0))
+                edges_src += [node_to_idx[u], node_to_idx[v]]
+                edges_dst += [node_to_idx[v], node_to_idx[u]]
+                edge_weights += [w, w]
+
+            if edges_src:
+                edge_index = torch.tensor([edges_src, edges_dst], dtype=torch.long)
+                edge_attr = torch.tensor(edge_weights, dtype=torch.float32).unsqueeze(1)
+            else:
+                edge_index = torch.zeros((2, 0), dtype=torch.long)
+                edge_attr = torch.zeros((0, 1), dtype=torch.float32)
+
+            data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
+            obs["graph"] = data
+            # Set obs_mask to None: the obs is object-type (contains a PyG Data object) so the
+            # runner never applies float32 masking, and the info wrapper can't serialize a nested
+            # dict mask. Visibility is encoded via nodeType in the graph node features instead.
+            obs_mask = None
 
         if observe_method in ["pyg"]:
             obs_mask = None
