@@ -725,10 +725,13 @@ class parallel_env(ParallelEnv):
             obs["vertex_state"] = {}
             obs_mask["vertex_state"] = {}
 
-            # Fill in actual values. Set the obs_mask to True for vertices that are visible.
             for node in range(self.pg.graph.number_of_nodes()):
-                obs["vertex_state"][node] = self.pg.getNodeIdlenessTime(node, self.step_count)
-                obs_mask["vertex_state"][node] = np.array([node in vertices], dtype=bool)
+                visible = node in vertices
+                if observe_method == "path-distance" and not visible:
+                    obs["vertex_state"][node] = np.array([0.0])
+                else:
+                    obs["vertex_state"][node] = self.pg.getNodeIdlenessTime(node, self.step_count)
+                obs_mask["vertex_state"][node] = np.array([visible], dtype=bool)
 
         # Add shortest-path distances from ego agent and min distance from other visible agents.
         if observe_method in ["path-distance"]:
@@ -782,9 +785,13 @@ class parallel_env(ParallelEnv):
             obs["agent_position"] = {}
             obs_mask["agent_position"] = {}
 
+            agents_set = set(agents)
             for a in self.possible_agents:
-                obs["agent_position"][a] = np.array(a.position, dtype=np.float32)
-                obs_mask["agent_position"][a] = np.ones(2, dtype=bool) if a in agents else np.zeros(2, dtype=bool)
+                if observe_method == "path-distance" and a not in agents_set:
+                    obs["agent_position"][a] = np.array([0.0, 0.0], dtype=np.float32)
+                else:
+                    obs["agent_position"][a] = np.array(a.position, dtype=np.float32)
+                obs_mask["agent_position"][a] = np.ones(2, dtype=bool) if a in agents_set else np.zeros(2, dtype=bool)
 
         # Add weighted adjacency matrix (normalized).
         if observe_method in ["adjacency"]:
