@@ -381,6 +381,36 @@ class parallel_env(ParallelEnv):
         return observation, info
 
 
+    def get_reset_info(self):
+        ''' Returns the full info dict (including global observations) for the current reset state.
+            Called by the PettingZoo wrapper after reset() to populate observation_global etc.
+        '''
+        info = {
+            agent: {
+                "ready": True
+            } for agent in self.agents
+        }
+
+        for agent in self.agents:
+            agent_observation, fixed_mask = self.observe(
+                agent,
+            )
+            info[agent]["visibility_mask"] = fixed_mask
+
+            # Provide the globally situated observation.
+            if hasattr(self, "get_observation_and_comms_situated"):
+                agent_observation_global, fixed_mask_global = self.get_observation_and_comms_situated(
+                    agent,
+                )
+                info[agent]["observation_global"] = agent_observation_global
+                info[agent]["visibility_mask_global"] = fixed_mask_global
+
+        _, state_visibility_mask = self._state()
+        info["state_visibility_mask"] = state_visibility_mask
+
+        return info
+
+
     def generate_map(self):
         ''' Generates a random map for the environment. '''
 
