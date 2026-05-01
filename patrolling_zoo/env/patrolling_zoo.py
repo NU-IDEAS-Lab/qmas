@@ -392,11 +392,11 @@ class parallel_env(ParallelEnv):
                     high = np.array([np.inf], dtype=np.float32),
                 )
                 node_space = spaces.Box(
-                    # ID, nodeType, idleness, lastNode, currentAction
-                    low = np.array([0.0, -np.inf, -1.0, -1.0, -1.0], dtype=np.float32),
-                    high = np.array([np.inf, np.inf, np.inf, np.inf, np.inf], dtype=np.float32),
+                    # nodeType, idleness, lastNode, currentAction
+                    low = np.array([-np.inf, -1.0, -1.0, -1.0], dtype=np.float32),
+                    high = np.array([np.inf, np.inf, np.inf, np.inf], dtype=np.float32),
                 )
-                node_type_idx = 1
+                node_type_idx = 0
 
             state_space["graph"] = spaces.Graph(
                 node_space = node_space,
@@ -872,7 +872,7 @@ class parallel_env(ParallelEnv):
                 # node_attrs = ["id", "nodeType", "idlenessTime", "lastNode", "currentAction"]
             else:
                 edge_attrs = ["weight"]
-                node_attrs = ["id", "nodeType", "idlenessTime", "lastNode", "currentAction"]
+                node_attrs = ["nodeType", "idlenessTime", "lastNode", "currentAction"]
 
             # Convert g to PyG
             data = from_networkx(
