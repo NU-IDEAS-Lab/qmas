@@ -680,9 +680,9 @@ class parallel_env(ParallelEnv):
 
             for node in range(self.pg.graph.number_of_nodes()):
                 if use_belief:
-                    # Agent's belief map: known for all nodes, always fully visible.
+                    # Agent's belief map: value always from belief, but mask by observation radius.
                     obs["vertex_state"][node] = agent.belief_idleness[node]
-                    obs_mask["vertex_state"][node] = np.array([True], dtype=bool)
+                    obs_mask["vertex_state"][node] = np.array([node in vertices], dtype=bool)
                 else:
                     # Ground-truth: masked by observation radius.
                     obs["vertex_state"][node] = self.pg.getNodeIdlenessTime(node, self.step_count)
