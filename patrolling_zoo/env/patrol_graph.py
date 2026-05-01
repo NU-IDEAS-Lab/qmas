@@ -13,10 +13,10 @@ class NODE_TYPE(IntEnum):
 
 class PatrolGraph():
     
-    def __init__(self, filepath = None, numNodes = 40):
+    def __init__(self, filepath = None, numNodes = 40, radius = 75.0, sizeX = 500.0, sizeY = 500.0):
         self.graph = nx.DiGraph()
         if filepath is None:
-            self.generateRandomGraph(numNodes)
+            self.generateRandomGraph(numNodes, radius=radius, sizeX=sizeX, sizeY=sizeY)
         else:
             self.loadFromFile(filepath)
 
@@ -100,6 +100,7 @@ class PatrolGraph():
         self.graphDimension = numNodes
         self.widthPixels = sizeX
         self.heightPixels = sizeY
+        self.connectionRadius = radius
         self.resolution = 1.0
         self.offsetX = 0.0
         self.offsetY = 0.0
@@ -125,7 +126,7 @@ class PatrolGraph():
             If regenerateGraph is True, a new random graph is generated. '''
 
         if regenerateGraph:
-            self.generateRandomGraph(self.graphDimension, sizeX=self.widthPixels, sizeY=self.heightPixels, seed=seed)
+            self.generateRandomGraph(self.graphDimension, radius=self.connectionRadius, sizeX=self.widthPixels, sizeY=self.heightPixels, seed=seed)
         
         if randomizeIds:
             # Get random node IDs.

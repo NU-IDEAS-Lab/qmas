@@ -44,6 +44,15 @@ def add_args(parser):
     parser.add_argument("--graph_random_nodes", type=int,
                         default=40,
                         help="The number of random nodes to generate.")
+    parser.add_argument("--graph_random_radius", type=float,
+                        default=75.0,
+                        help="The connection radius for random graph generation.")
+    parser.add_argument("--graph_random_size_x", type=float,
+                        default=500.0,
+                        help="The x-axis size of the world for random graph generation.")
+    parser.add_argument("--graph_random_size_y", type=float,
+                        default=500.0,
+                        help="The y-axis size of the world for random graph generation.")
     parser.add_argument("--reward_method_terminal", type=str,
                         default="average", 
                         help="the method to use for terminal reward.")
@@ -184,6 +193,9 @@ class parallel_env(ParallelEnv):
                  regenerate_graph_every: int = 20,
                  graph_random = False,
                  graph_random_nodes = 40,
+                 graph_random_radius = 75.0,
+                 graph_random_size_x = 500.0,
+                 graph_random_size_y = 500.0,
                  graph_file = os.path.join(os.path.dirname(patrolling_zoo.graphs.__file__), "cumberland.graph"),
                 ):
         """
@@ -222,7 +234,7 @@ class parallel_env(ParallelEnv):
 
         # Create patrol graph.
         if graph_random:
-            self.pg = PatrolGraph(numNodes=graph_random_nodes)
+            self.pg = PatrolGraph(numNodes=graph_random_nodes, radius=graph_random_radius, sizeX=graph_random_size_x, sizeY=graph_random_size_y)
         else:
             self.pg = PatrolGraph(graph_file)
 
