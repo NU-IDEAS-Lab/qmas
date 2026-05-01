@@ -664,12 +664,15 @@ class parallel_env(ParallelEnv):
         # Calculate the list of visible agents and vertices.
         vertices = set()
         agents = set([agent]) | (senders & agentList)
-        observers = copy(agents)
 
-        # Include data broadcast by each transmitting agent (and the ego agent).
+        # Expand vertices from the ego agent's own observation radius only.
+        # Senders do not communicate node idleness; only agent positions are shared.
+        obs_v = set(v for v in self.pg.graph.nodes if self._dist(self.pg.getNodePosition(v), agent.position) <= radius)
+        vertices |= obs_v
+
+        # Expand visible agents from all observers (ego agent + senders).
+        observers = copy(agents)
         for a in observers:
-            obs_v = set(v for v in self.pg.graph.nodes if self._dist(self.pg.getNodePosition(v), a.position) <= radius)
-            vertices |= obs_v
             obs_a = set(ag for ag in agentList if self._dist(ag.position, a.position) <= radius)
             agents |= obs_a
         
@@ -689,10 +692,11 @@ class parallel_env(ParallelEnv):
             obs["vertex_state"] = {}
             obs_mask["vertex_state"] = {}
 
-            # Fill in actual values. Set the obs_mask to True for vertices that are visible.
+            # Fill in actual values. Idleness is only observable in the global state.
+            # obs_mask is always False for vertex_state (idleness is never revealed to agents).
             for node in range(self.pg.graph.number_of_nodes()):
-                obs["vertex_state"][node] = self.pg.getNodeIdlenessTime(node, self.step_count)
-                obs_mask["vertex_state"][node] = np.array([node in vertices], dtype=bool)
+                obs["vertex_state"][node] = self.pg.getNodeIdlenessTime(node, self.step_count) if global_state else -1.0
+                obs_mask["vertex_state"][node] = np.array([False], dtype=bool)
 
         # Add vertex 2D coordinates.
         if observe_method in ["coordinates"]:
@@ -768,7 +772,8 @@ class parallel_env(ParallelEnv):
             idleness_map = {}
             node_type_map = {}
             for node in g.nodes:
-                if node in vertices:
+                # Idleness is only observable in the global state.
+                if global_state and node in vertices:
                     idleness_map[node] = 1.0 if allSame else self._minMaxNormalize(
                         self.step_count - lastVisits[node], minimum=minIdleness, maximum=maxIdleness
                     )
