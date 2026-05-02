@@ -797,7 +797,6 @@ class parallel_env(ParallelEnv):
                     id = -1 - a.id,
                     nodeType = NODE_TYPE.AGENT,
                     visitTime = 0.0,
-                    idlenessTime = 0.0,
                     lastNode = g.nodes[a.lastNode]["id"] if a.lastNode in g.nodes else -1.0,
                     currentAction = a.currentAction if a in agents else -1.0
                 )
@@ -859,7 +858,7 @@ class parallel_env(ParallelEnv):
                 # node_attrs = ["id", "nodeType", "idlenessTime", "lastNode", "currentAction"]
             else:
                 edge_attrs = ["weight"]
-                node_attrs = ["id", "nodeType", "idlenessTime", "lastNode", "currentAction"]
+                node_attrs = ["id", "nodeType", "lastNode", "currentAction"]
 
             # Convert g to PyG
             data = from_networkx(
