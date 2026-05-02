@@ -391,9 +391,9 @@ class parallel_env(ParallelEnv):
                     high = np.array([np.inf], dtype=np.float32),
                 )
                 node_space = spaces.Box(
-                    # ID, nodeType, idleness, lastNode, currentAction
-                    low = np.array([0.0, -np.inf, -1.0, -1.0, -1.0], dtype=np.float32),
-                    high = np.array([np.inf, np.inf, np.inf, np.inf, np.inf], dtype=np.float32),
+                    # ID, nodeType, lastNode, currentAction
+                    low = np.array([0.0, -np.inf, -1.0, -1.0], dtype=np.float32),
+                    high = np.array([np.inf, np.inf, np.inf, np.inf], dtype=np.float32),
                 )
                 node_type_idx = 1
 
