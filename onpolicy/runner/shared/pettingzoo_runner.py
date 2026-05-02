@@ -837,7 +837,6 @@ class PettingzooRunner(Runner):
                         if obs.dtype != object:
                             obs = obs * viz_mask_local
                         if observation_global is not None and viz_mask_global is not None:
-                            print(f"Masking global obs. Sum before: {observation_global.sum():.2f}, sum after: { (observation_global * viz_mask_global).sum():.2f}")
                             observation_global = observation_global * viz_mask_global
 
                 # Save the current masked observation_global for use as fallback in the next step.
