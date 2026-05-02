@@ -115,6 +115,8 @@ class QmasActor(nn.Module):
                 input_dim = args.gnn_hidden_size + get_shape_from_obs_space(obs_space_nongraph)[0]
 
             if self._use_gnn_mlp:
+                if args.state_encoder:
+                    input_dim += args.state_encoder_output_dim
                 self.mlp0 = MLPLayer(input_dim=input_dim, output_dim=self.hidden_size, hidden_size=self.hidden_size, layer_N=args.layer_N, use_orthogonal=args.use_orthogonal, use_ReLU=args.use_ReLU)
                 input_dim = self.hidden_size
         else:
@@ -137,6 +139,8 @@ class QmasActor(nn.Module):
                 input_dim = input_dim
 
             if self._use_mlp:
+                if args.state_encoder:
+                    input_dim += args.state_encoder_output_dim
                 self.mlp = MLPBase(args, input_dim)
                 input_dim = self.hidden_size
         
@@ -157,7 +161,9 @@ class QmasActor(nn.Module):
                 use_orthogonal=args.use_orthogonal,
                 device=device
             )
-            input_dim += args.state_encoder_output_dim
+            # Only add to input_dim when the encoded state is not absorbed by mlp0/mlp.
+            if not (self._use_gnn_mlp or self._use_mlp):
+                input_dim += args.state_encoder_output_dim
 
         if self._use_rnn:
             self.rnn = RNNLayer(input_dim, self.hidden_size, self._recurrent_N, self._use_orthogonal)
@@ -217,6 +223,11 @@ class QmasActor(nn.Module):
         if available_actions is not None:
             available_actions = check(available_actions).to(**self.tpdv)
 
+        # Compute encoded state early so it can be injected into the base models.
+        encoded_state = None
+        if self._use_state_encoder:
+            encoded_state = self._encode_global_state(global_obs, rnn_states.shape[0])
+
         if self._use_gnn:
             # Split observation into graph and non-graph components.
             obs_graph = obs[:, self.obs_space_graph_idx]
@@ -270,7 +281,11 @@ class QmasActor(nn.Module):
             actor_features = torch.cat([actor_features, obs_nongraph], dim=-1)
 
             if self._use_gnn_mlp:
+                actor_features = torch.cat([actor_features, encoded_state], dim=-1)
                 actor_features = self.mlp0(actor_features)
+            elif self._use_state_encoder:
+                # No mlp0: concat encoded state here before RNN.
+                actor_features = torch.cat([actor_features, encoded_state], dim=-1)
         else:
             obs = check(obs).to(**self.tpdv)
 
@@ -279,32 +294,37 @@ class QmasActor(nn.Module):
                 actor_features = self.cnn(actor_features)
             if self._use_attention:
                 actor_features = self.attention(actor_features)
+            if self._use_state_encoder:
+                actor_features = torch.cat([actor_features, encoded_state], dim=-1)
             if self._use_mlp:
                 actor_features = self.mlp(actor_features)
-
-        # Handle global observation.
-        if self._use_state_encoder:
-            if global_obs == None:
-                # If no global state is provided, use zeros.
-                batch_size = actor_features.shape[0]
-                encoded_state = torch.zeros((batch_size, self.args.state_encoder_output_dim), device=actor_features.device)
-            else:
-                global_obs = check(global_obs).to(**self.tpdv)
-                global_obs = torch.nan_to_num(global_obs, nan=0.0, posinf=0.0, neginf=0.0)
-                # Encode the global state
-                encoded_state = self.state_encoder(global_obs)
-                # Repeat the encoded state for each agent if necessary.
-                if encoded_state.shape[0] < actor_features.shape[0]:
-                    if actor_features.shape[0] % encoded_state.shape[0] != 0:
-                        raise ValueError("Batch size of obs is not a multiple of batch size of share_obs.")
-                    encoded_state = encoded_state.repeat_interleave(actor_features.shape[0] // encoded_state.shape[0], dim=0)
-            actor_features = torch.cat([actor_features, encoded_state], dim=-1)
 
         # Recurrent network.
         if self._use_rnn:
             actor_features, rnn_states = self.rnn(actor_features, rnn_states, masks)
 
         return actor_features, rnn_states
+
+
+    def _encode_global_state(self, global_obs, batch_size):
+        '''
+        This function encodes the global state using the state encoder.
+        batch_size: the per-agent batch size (e.g. n_threads * n_agents).
+        '''
+        if global_obs is None:
+            # If no global state is provided, use zeros.
+            encoded_state = torch.zeros((batch_size, self.args.state_encoder_output_dim), device=self.device)
+        else:
+            global_obs = check(global_obs).to(**self.tpdv)
+            global_obs = torch.nan_to_num(global_obs, nan=0.0, posinf=0.0, neginf=0.0)
+            # Encode the global state.
+            encoded_state = self.state_encoder(global_obs)
+            # Repeat the encoded state for each agent if necessary.
+            if encoded_state.shape[0] < batch_size:
+                if batch_size % encoded_state.shape[0] != 0:
+                    raise ValueError("Batch size of obs is not a multiple of batch size of share_obs.")
+                encoded_state = encoded_state.repeat_interleave(batch_size // encoded_state.shape[0], dim=0)
+        return encoded_state
 
 
 class QmasCritic(Critic):
