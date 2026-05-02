@@ -379,9 +379,9 @@ class parallel_env(ParallelEnv):
                     high = np.array([np.inf, np.inf], dtype=np.float32),
                 )
                 node_space = spaces.Box(
-                    # nodeType, idleness, degree
-                    low = np.array([-np.inf, -1.0, 0.0], dtype=np.float32),
-                    high = np.array([np.inf, np.inf, np.inf], dtype=np.float32),
+                    # nodeType, degree
+                    low = np.array([-np.inf, 0.0], dtype=np.float32),
+                    high = np.array([np.inf, np.inf], dtype=np.float32),
                 )
                 node_type_idx = 0
             else:
@@ -769,21 +769,21 @@ class parallel_env(ParallelEnv):
             allSame = maxIdleness == minIdleness
 
             # Set attributes of patrol graph nodes.
-            idleness_map = {}
+            # idleness_map = {}
             node_type_map = {}
             for node in g.nodes:
-                # Idleness is only observable in the global state.
-                if global_state and node in vertices:
-                    idleness_map[node] = 1.0 if allSame else self._minMaxNormalize(
-                        self.step_count - lastVisits[node], minimum=minIdleness, maximum=maxIdleness
-                    )
-                else:
-                    idleness_map[node] = -1.0
+                # # Idleness is only observable in the global state.
+                # if global_state and node in vertices:
+                #     idleness_map[node] = 1.0 if allSame else self._minMaxNormalize(
+                #         self.step_count - lastVisits[node], minimum=minIdleness, maximum=maxIdleness
+                #     )
+                # else:
+                #     idleness_map[node] = -1.0
                 node_type_map[node] = NODE_TYPE.OBSERVABLE_NODE if node in vertices else NODE_TYPE.UNOBSERVABLE_NODE
 
             nx.set_node_attributes(g, -1.0, "lastNode")
             nx.set_node_attributes(g, -1.0, "currentAction")
-            nx.set_node_attributes(g, idleness_map, "idlenessTime")
+            # nx.set_node_attributes(g, idleness_map, "idlenessTime")
             nx.set_node_attributes(g, node_type_map, "nodeType")
 
             # Traverse through all visible agents and add their positions as new nodes to g
@@ -854,7 +854,8 @@ class parallel_env(ParallelEnv):
 
             if self.action_method in ["neighbors", "neighbors_with_comm_boolean"]:
                 edge_attrs = ["weight", "neighborIndex"]
-                node_attrs = ["nodeType", "idlenessTime", "degree"]
+                node_attrs = ["nodeType", "degree"]
+                # node_attrs = ["nodeType", "idlenessTime", "degree"]
                 # node_attrs = ["id", "nodeType", "idlenessTime", "lastNode", "currentAction"]
             else:
                 edge_attrs = ["weight"]
