@@ -67,4 +67,5 @@ args = [
     "--use_wandb",
 ]
 
-main(args)
+if __name__ == "__main__":
+    main(args)
