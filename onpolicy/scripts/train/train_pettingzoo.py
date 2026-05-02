@@ -9,9 +9,13 @@ import importlib
 # third-party packages
 import numpy as np
 import setproctitle
-import torch
 import wandb
 import random
+
+# Torch and related configuration
+import torch
+# torch.multiprocessing.set_sharing_strategy('file_system')
+# torch.multiprocessing.set_start_method('spawn')
 
 # code repository sub-packages
 from onpolicy.config import get_config
