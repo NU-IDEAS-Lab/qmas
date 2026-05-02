@@ -692,10 +692,10 @@ class parallel_env(ParallelEnv):
             obs["vertex_state"] = {}
             obs_mask["vertex_state"] = {}
 
-            # Fill in actual values. Idleness is only observable in the global state.
+            # Fill in actual values.
             # obs_mask is always False for vertex_state (idleness is never revealed to agents).
             for node in range(self.pg.graph.number_of_nodes()):
-                obs["vertex_state"][node] = self.pg.getNodeIdlenessTime(node, self.step_count) if global_state else -1.0
+                obs["vertex_state"][node] = self.pg.getNodeIdlenessTime(node, self.step_count)
                 obs_mask["vertex_state"][node] = np.array([False], dtype=bool)
 
         # Add vertex 2D coordinates.
