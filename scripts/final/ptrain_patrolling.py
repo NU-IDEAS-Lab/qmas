@@ -25,7 +25,13 @@ def argreplace(args, arg_name, arg_value):
             index = args.index(f"--{arg_name}")
             args[index + 1] = arg_value
     else:
-        args += [f"--{arg_name}", arg_value]
+        if type(arg_value) == bool:
+            if arg_value:
+                args.append(f"--{arg_name}")
+            else:
+                args.append("--no-" + arg_name)
+        else:
+            args += [f"--{arg_name}", arg_value]
     return args
 
 threads = []
@@ -33,8 +39,8 @@ for i, script in enumerate(scripts):
     module = importlib.import_module(f"{script}")
     args = module.args
     args = argreplace(args, "cuda_idx", str(cuda_idx[i]))
-    args = argreplace(args, "experiment_name", f"BLAH{i}")
-    args = argreplace(args, "use_wandb", False)
+    args = argreplace(args, "state_encoder_output_dim", f"128")
+    args = argreplace(args, "observation_mask", True)
 
     p = multiprocessing.Process(target=module.main, args=(args,))
     p.start()
