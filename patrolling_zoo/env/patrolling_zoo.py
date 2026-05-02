@@ -315,12 +315,12 @@ class parallel_env(ParallelEnv):
         # Add to the dictionary depending on the observation method.
 
         # Add agent id.
-        if observe_method in ["adjacency", "coordinates"]:
-            state_space["agent_id"] = spaces.Box(
-                low = -1,
-                high = len(self.possible_agents),
-                dtype=np.int32
-            )
+        # if observe_method in ["adjacency", "coordinates"]:
+        #     state_space["agent_id"] = spaces.Box(
+        #         low = -1,
+        #         high = len(self.possible_agents),
+        #         dtype=np.int32
+        #     )
 
         # Add vertex idleness time.
         if observe_method in ["adjacency", "coordinates"]:
@@ -683,9 +683,9 @@ class parallel_env(ParallelEnv):
         obs_mask = {}
 
         # Add agent ID.
-        if observe_method in ["adjacency", "coordinates"]:
-            obs["agent_id"] = agent.id
-            obs_mask["agent_id"] = np.array([True], dtype=bool)
+        # if observe_method in ["adjacency", "coordinates"]:
+        #     obs["agent_id"] = agent.id
+        #     obs_mask["agent_id"] = np.array([True], dtype=bool)
 
         # Add vertex idleness time (raw).
         if observe_method in ["adjacency", "coordinates"]:
