@@ -362,6 +362,9 @@ def get_config():
     # diffuser parameters
     parser.add_argument("--episode_fraction_start_prediction", type=float, default=0.0,
                         help="The fraction of episodes at which to start training the prediction model.")
+    parser.add_argument("--episode_fraction_start_policy", type=float, default=0.0,
+                        help="The fraction of episodes at which to start training the policy, "
+                             "allowing the predictor to be partially trained first.")
     parser.add_argument("--episode_fraction_stop_policy", type=float, default=1.0,
                         help="The fraction of episodes at which to stop training the policy.")
     parser.add_argument("--prediction_during_training", action=argparse.BooleanOptionalAction, default=False,

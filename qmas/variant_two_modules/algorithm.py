@@ -53,6 +53,9 @@ class QmasAlgorithm(R_MAPPO):
             frac = episode / episodes
             if frac < self.args.episode_fraction_start_prediction:
                 update_predictor = False
+            if frac < self.args.episode_fraction_start_policy:
+                update_actor = False
+                update_critic = False
             if frac > self.args.episode_fraction_stop_policy:
                 update_actor = False
                 update_critic = False
