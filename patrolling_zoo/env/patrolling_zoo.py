@@ -1106,8 +1106,7 @@ class parallel_env(ParallelEnv):
 
         # Calculate a visitation reward.
         idleness = self.pg.getNodeIdlenessTime(node, timeStamp)
-        avgIdleness = self.pg.getAverageIdlenessTime(timeStamp)
-        reward = self._minMaxNormalize(idleness, minimum=0.0, maximum=avgIdleness)
+        reward = self._minMaxNormalize(idleness, minimum=0.0, maximum=max(timeStamp, 1))
         reward = self.alpha * reward
 
         # Update the node visit time.
