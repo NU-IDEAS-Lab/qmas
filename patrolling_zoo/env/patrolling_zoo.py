@@ -707,7 +707,7 @@ class parallel_env(ParallelEnv):
 
             for node in range(self.pg.graph.number_of_nodes()):
                 obs["vertex_position"][node] = np.array(self.pg.getNodePosition(node), dtype=np.float32)
-                obs_mask["vertex_position"][node] = np.array([node in vertices], dtype=bool)
+                obs_mask["vertex_position"][node] = np.array([True], dtype=bool)
 
         # Add agent 2D coordinates.
         if observe_method in ["coordinates"]:
