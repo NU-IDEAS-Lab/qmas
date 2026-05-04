@@ -139,10 +139,8 @@ class PettingzooRunner(Runner):
         # Use the visibility mask from infos, falling back to all-ones if not provided.
         if "visibility_mask" in infos[0]:
             visibility_mask = np.array([info["visibility_mask"] for info in infos], dtype=np.float32)
-            print(f"Using visibility mask from infos with shape {visibility_mask.shape} and sum {visibility_mask.sum()}.")
         else:
             visibility_mask = np.ones_like(obs, dtype=np.float32)
-            print("No visibility mask received.")
 
         observation_global = None
         if "observation_global" in infos[0]:
