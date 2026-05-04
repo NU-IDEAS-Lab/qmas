@@ -637,10 +637,10 @@ class parallel_env(ParallelEnv):
         return state
 
 
-    def observe(self, agent, radius=None, allow_done_agents=False, senders=set()):
+    def observe(self, agent, radius=None, allow_done_agents=False, senders=set(), force_idleness_visible=True):
         ''' Returns the observation for the given agent.'''
 
-        return self._populateStateSpace(self.observe_method, agent, radius, allow_done_agents, senders=senders)
+        return self._populateStateSpace(self.observe_method, agent, radius, allow_done_agents, senders=senders, force_idleness_visible=force_idleness_visible)
 
 
     def available_actions(self, agent):
@@ -649,7 +649,7 @@ class parallel_env(ParallelEnv):
         return self.available_actions_dict[agent]
 
 
-    def _populateStateSpace(self, observe_method, agent, radius, allow_done_agents, global_state=False, senders=set()):
+    def _populateStateSpace(self, observe_method, agent, radius, allow_done_agents, global_state=False, senders=set(), force_idleness_visible=True):
         ''' Returns a populated state/observation space.'''
 
         if radius == None:
@@ -692,11 +692,13 @@ class parallel_env(ParallelEnv):
             obs["vertex_state"] = {}
             obs_mask["vertex_state"] = {}
 
+            idleness_visible = force_idleness_visible
+
             # Fill in actual values.
             # obs_mask is always False for vertex_state (idleness is never revealed to agents).
             for node in range(self.pg.graph.number_of_nodes()):
                 obs["vertex_state"][node] = self.pg.getNodeIdlenessTime(node, self.step_count)
-                obs_mask["vertex_state"][node] = np.array([False], dtype=bool)
+                obs_mask["vertex_state"][node] = np.array([idleness_visible], dtype=bool)
 
         # Add vertex 2D coordinates.
         if observe_method in ["coordinates"]:
