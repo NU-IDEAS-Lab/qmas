@@ -61,6 +61,7 @@ for i, script in enumerate(scripts):
     args = argreplace(args, "gnn_neighbor_scoring", True)
     args = argreplace(args, "gnn_skip_connections", False)
     args = argreplace(args, "gnn_use_dense_obs", True)
+    args = argreplace(args, "state_encoder", False)
 
 
     # TEST WITH SMALL GRAPH
