@@ -109,7 +109,12 @@ class QmasActor(nn.Module):
             
             if args.gnn_neighbor_scoring:
                 # Support the neighbor scoring mechanism from Goeckner et al., DOI: 10.1109/IROS58592.2024.10802510.
-                self.neighbor_scorer = MLPLayer(input_dim=args.gnn_hidden_size, output_dim=1, hidden_size=self.hidden_size, layer_N=3, use_orthogonal=args.use_orthogonal, use_ReLU=args.use_ReLU, use_layer_norm=False)
+                # When a state encoder is present, the scorer receives per-node GNN features concatenated
+                # with the broadcast global context, so idleness can condition per-neighbor scores.
+                scorer_input_dim = args.gnn_hidden_size
+                if args.state_encoder:
+                    scorer_input_dim += args.state_encoder_output_dim
+                self.neighbor_scorer = MLPLayer(input_dim=scorer_input_dim, output_dim=1, hidden_size=self.hidden_size, layer_N=3, use_orthogonal=args.use_orthogonal, use_ReLU=args.use_ReLU, use_layer_norm=False)
                 input_dim = self.MAX_NEIGHBORS + get_shape_from_obs_space(obs_space_nongraph)[0]
             else:
                 input_dim = args.gnn_hidden_size + get_shape_from_obs_space(obs_space_nongraph)[0]
@@ -254,10 +259,17 @@ class QmasActor(nn.Module):
                 if self.MAX_NODES - actor_features.shape[1] > 0:
                     actor_features = F.pad(actor_features, (0, 0, 0, self.MAX_NODES - actor_features.shape[1]), mode='constant', value=0.0)
 
-                neighbors_mask = check(np.array(graphs.neighbors_mask)).to(**self.tpdv).bool()
-                # Extend the mask for the full feature size.
-                neighbors_mask = neighbors_mask.unsqueeze(2).repeat(1, 1, actor_features.shape[-1])
-                actor_features_masked = torch.where(neighbors_mask, actor_features, 0.0)
+                neighbors_mask_1d = check(np.array(graphs.neighbors_mask)).to(**self.tpdv).bool()  # (batch, MAX_NODES)
+
+                if self._use_state_encoder and encoded_state is not None:
+                    encoded_broadcast = encoded_state.unsqueeze(1).expand(-1, actor_features.shape[1], -1)  # (batch, MAX_NODES, enc_dim)
+                    features_for_scorer = torch.cat([actor_features, encoded_broadcast], dim=-1)  # (batch, MAX_NODES, gnn_hidden + enc_dim)
+                else:
+                    features_for_scorer = actor_features  # (batch, MAX_NODES, gnn_hidden)
+
+                # Extend the mask to match the scorer input feature size.
+                neighbors_mask = neighbors_mask_1d.unsqueeze(2).repeat(1, 1, features_for_scorer.shape[-1])
+                actor_features_masked = torch.where(neighbors_mask, features_for_scorer, 0.0)
                 scores = self.neighbor_scorer(actor_features_masked)
                 
                 # Shift the scores to the correct position.
