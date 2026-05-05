@@ -295,150 +295,122 @@ class QmasActor(nn.Module):
             encoded_state = self._encode_global_state(global_obs, rnn_states.shape[0])
 
         if self._use_gnn:
+            # Each branch below prepares the flat (compact, no-padding) GNN inputs and
+            # any path-specific bookkeeping, then falls through to the shared post-GNN block.
             if self._use_gnn_dense_obs:
-                # --- Dense tensor obs path ---
-                # obs is a float tensor of shape (batch, flat_obs_dim).
-                obs_t = check(obs).to(**self.tpdv)
+                # --- Dense obs: strip padding on CPU, move only compact tensors to GPU ---
+                obs_cpu = check(obs)  # numpy → tensor; stays on CPU
                 offsets = self._gnn_dense_offsets
-                layout = self.gnn_dense_obs_layout
+                layout  = self.gnn_dense_obs_layout
+                B       = obs_cpu.shape[0]
+                dev     = self.device
 
-                def _slice(key):
+                def _slice_cpu(key):
                     s, e, shape = offsets[key]
-                    return obs_t[:, s:e].reshape(-1, *shape)
+                    return obs_cpu[:, s:e].reshape(B, *shape)
 
-                node_features_pad = _slice("node_features")  # (B, max_total_nodes, node_feat_dim)
-                edge_index_pad    = _slice("edge_index")      # (B, 2, max_edges)
-                edge_attr_pad     = _slice("edge_attr")       # (B, max_edges, edge_feat_dim)
-                agent_idx_t       = _slice("agent_idx")       # (B, 1)
-                nbr_mask_pad      = _slice("neighbors_mask")  # (B, max_total_nodes)
-                num_nodes_t       = _slice("num_nodes").squeeze(-1).long()  # (B,)
+                node_features_pad = _slice_cpu("node_features")           # (B, max_N, F)
+                edge_index_pad_f  = _slice_cpu("edge_index")              # (B, 2, max_E) float32
+                edge_attr_pad     = _slice_cpu("edge_attr")               # (B, max_E, EF)
+                agent_idx_t       = _slice_cpu("agent_idx").long()        # (B, 1)
+                num_nodes_t       = _slice_cpu("num_nodes").squeeze(-1).long()  # (B,)
+                max_N             = layout["max_total_nodes"]
 
-                # Reconstruct one PyG Data per batch item, excluding padding nodes.
-                data_list = []
-                for i in range(obs_t.shape[0]):
-                    n = int(num_nodes_t[i].item())
-                    x_i = node_features_pad[i, :n]            # (n, node_feat_dim)
-                    # edge_index: keep only edges where both endpoints < n
-                    ei = edge_index_pad[i].long()              # (2, max_edges)
-                    ea = edge_attr_pad[i]                      # (max_edges, edge_feat_dim)
-                    valid_edges = (ei[0] < n) & (ei[1] < n)
-                    ei_i = ei[:, valid_edges]                  # (2, num_real_edges)
-                    ea_i = ea[valid_edges]                     # (num_real_edges, edge_feat_dim)
-                    nbr_mask_i = nbr_mask_pad[i, :n]          # (n,)
+                # Node validity mask and compact node tensor.
+                node_range = torch.arange(max_N)
+                node_mask  = node_range.unsqueeze(0) < num_nodes_t.unsqueeze(1)  # (B, max_N)
+                x_flat_cpu    = node_features_pad[node_mask]                     # (sum_n, F)
+                batch_vec_cpu = torch.repeat_interleave(torch.arange(B), num_nodes_t)
 
-                    d = Data(
-                        x=x_i,
-                        edge_index=ei_i,
-                        edge_attr=ea_i,
-                        agent_idx=int(agent_idx_t[i].item()),
-                        neighbors_mask=nbr_mask_i.bool().cpu().numpy(),
-                    )
-                    data_list.append(d)
+                # Cumulative node offsets for global edge index remapping.
+                cum_nodes     = torch.zeros(B, dtype=torch.long)
+                cum_nodes[1:] = num_nodes_t[:-1].cumsum(0)
 
-                graphs = Batch.from_data_list(data_list).to(self.device)
-                actor_features = self.base(graphs.x, graphs.edge_attr, graphs.edge_index)
-                actor_features, _ = to_dense_batch(actor_features, graphs.batch.to(self.device))
+                # Edge validity and remapping (float32 arithmetic exact for ints < 2^24).
+                n_i_f        = num_nodes_t.float().unsqueeze(1)
+                ei_src_f     = edge_index_pad_f[:, 0, :]
+                ei_dst_f     = edge_index_pad_f[:, 1, :]
+                edge_valid   = (ei_src_f < n_i_f) & (ei_dst_f < n_i_f)
+                offset_f     = cum_nodes.float().unsqueeze(1)
+                ei_src_g     = (ei_src_f + offset_f)[edge_valid].long()
+                ei_dst_g     = (ei_dst_f + offset_f)[edge_valid].long()
 
-                if self.args.gnn_neighbor_scoring:
-                    # Pad to MAX_NODES along the node dimension.
-                    if self.MAX_NODES - actor_features.shape[1] > 0:
-                        actor_features = F.pad(actor_features, (0, 0, 0, self.MAX_NODES - actor_features.shape[1]), mode='constant', value=0.0)
+                # Move only compact tensors to GPU.
+                x_flat          = x_flat_cpu.to(dev)
+                edge_index_flat = torch.stack([ei_src_g, ei_dst_g], dim=0).to(dev)
+                edge_attr_flat  = edge_attr_pad[edge_valid].to(dev)
+                batch_vec       = batch_vec_cpu.to(dev)
+                agent_idx_t     = agent_idx_t.to(dev)
 
-                    # neighbors_mask from dense obs, padded to MAX_NODES.
-                    nbr_mask_full = torch.zeros((obs_t.shape[0], self.MAX_NODES), **self.tpdv)
-                    for i in range(obs_t.shape[0]):
-                        n = int(num_nodes_t[i].item())
-                        nbr_mask_full[i, :n] = nbr_mask_pad[i, :n].float()
-                    neighbors_mask_1d = nbr_mask_full.bool()
+                # Neighbor mask (CPU; moved to GPU in shared block if needed).
+                nbr_mask_cpu = _slice_cpu("neighbors_mask") if self.args.gnn_neighbor_scoring else None  # (B, max_N)
 
-                    if self._use_state_encoder and encoded_state is not None:
-                        encoded_broadcast = encoded_state.unsqueeze(1).expand(-1, actor_features.shape[1], -1)
-                        features_for_scorer = torch.cat([actor_features, encoded_broadcast], dim=-1)
-                    else:
-                        features_for_scorer = actor_features
-
-                    neighbors_mask = neighbors_mask_1d.unsqueeze(2).repeat(1, 1, features_for_scorer.shape[-1])
-                    actor_features_masked = torch.where(neighbors_mask, features_for_scorer, 0.0)
-                    scores = self.neighbor_scorer(actor_features_masked)
-
-                    scores_shifted = torch.zeros((actor_features.shape[0], self.MAX_NEIGHBORS), **self.tpdv)
-                    for i in range(actor_features.shape[0]):
-                        nbr_indices = nbr_mask_full[i].nonzero(as_tuple=True)[0][:self.MAX_NEIGHBORS]
-                        scores_shifted[i, :nbr_indices.shape[0]] = scores[i, nbr_indices, 0]
-
-                    actor_features = scores_shifted
-                else:
-                    # Extract agent node features.
-                    agent_idx_long = agent_idx_t.long()  # (B, 1)
-                    actor_features = self.base.gatherNodeFeats(actor_features, agent_idx_long)
-
-                # Dense obs has no non-graph remainder, but include observation_radius if present.
-                s_obs_r, e_obs_r, _ = offsets.get("observation_radius", (0, 0, (0,)))
-                if e_obs_r > s_obs_r:
-                    obs_radius = obs_t[:, s_obs_r:e_obs_r]
-                    actor_features = torch.cat([actor_features, obs_radius], dim=-1)
-
-                obs_nongraph = torch.zeros((obs_t.shape[0], 0), **self.tpdv)
+                # Non-graph remainder (e.g. observation_radius).
+                s_r, e_r, _ = offsets.get("observation_radius", (0, 0, (0,)))
+                obs_nongraph = obs_cpu[:, s_r:e_r].to(dev) if e_r > s_r else torch.zeros(B, 0, **self.tpdv)
 
             else:
-                # --- PyG object obs path (original) ---
-                # Split observation into graph and non-graph components.
-                obs_graph = obs[:, self.obs_space_graph_idx]
-                nonGraphIdx = [i for i in range(obs.shape[1]) if i != self.obs_space_graph_idx]
-                obs_nongraph = obs[:, nonGraphIdx]
-                if len(obs_nongraph.shape) > 1 and obs_nongraph.shape[1] > 0:
-                    # The non-graph data is stored as an object dtype. Need to convert to float32.
-                    obs_non_graph_float = np.zeros((obs_nongraph.shape[0], *obs_nongraph[0, 0].shape), dtype=np.float32)
-                    for i in range(obs_nongraph.shape[0]):
-                        obs_non_graph_float[i] = obs_nongraph[i, 0]
-                    obs_nongraph = obs_non_graph_float
-                obs_nongraph = check(obs_nongraph.astype(np.float32)).to(**self.tpdv)
+                # --- PyG object obs path ---
+                obs_graph    = obs[:, self.obs_space_graph_idx]
+                nonGraphIdx  = [i for i in range(obs.shape[1]) if i != self.obs_space_graph_idx]
+                obs_nongraph_np = obs[:, nonGraphIdx]
+                if len(obs_nongraph_np.shape) > 1 and obs_nongraph_np.shape[1] > 0:
+                    tmp = np.zeros((obs_nongraph_np.shape[0], *obs_nongraph_np[0, 0].shape), dtype=np.float32)
+                    for i in range(obs_nongraph_np.shape[0]):
+                        tmp[i] = obs_nongraph_np[i, 0]
+                    obs_nongraph_np = tmp
+                obs_nongraph = check(obs_nongraph_np.astype(np.float32)).to(**self.tpdv)
 
-                # Batch the graphs and pass through GNN.
                 graphs = Batch.from_data_list(obs_graph).to(self.device, "x", "edge_attr", "edge_index")
-                actor_features = self.base(graphs.x, graphs.edge_attr, graphs.edge_index)
+                x_flat          = graphs.x
+                edge_index_flat = graphs.edge_index
+                edge_attr_flat  = graphs.edge_attr
+                batch_vec       = graphs.batch.to(self.device)
+                B               = int(batch_vec.max().item()) + 1
+                max_N           = self.MAX_NODES
 
-                # Restore the original shape of [batch_size, num_nodes (including agents), num_feats] from [batch_size*num_nodes, num_feats]
-                actor_features, _ = to_dense_batch(actor_features, graphs.batch.to(self.device))
+                agent_idx_t  = torch.from_numpy(np.array(graphs.agent_idx)).reshape(-1, 1).to(self.device) \
+                               if hasattr(graphs, "agent_idx") else None
+                nbr_mask_cpu = check(np.array(graphs.neighbors_mask)) \
+                               if (hasattr(graphs, "neighbors") and self.args.gnn_neighbor_scoring) else None
 
-                # Perform the neighbor scoring from Goeckner et al., DOI: 10.1109/IROS58592.2024.10802510
-                if hasattr(graphs, "neighbors") and self.args.gnn_neighbor_scoring:
-                    # Pad actor_features to max neighbors.
-                    if self.MAX_NODES - actor_features.shape[1] > 0:
-                        actor_features = F.pad(actor_features, (0, 0, 0, self.MAX_NODES - actor_features.shape[1]), mode='constant', value=0.0)
+            # ---- Shared post-GNN block ----
+            out            = self.base(x_flat, edge_attr_flat, edge_index_flat)  # (sum_n, hidden)
+            actor_features, _ = to_dense_batch(out, batch_vec)                  # (B, max_n_i, hidden)
+            max_n_i        = actor_features.shape[1]
 
-                    neighbors_mask_1d = check(np.array(graphs.neighbors_mask)).to(**self.tpdv).bool()  # (batch, MAX_NODES)
-
-                    if self._use_state_encoder and encoded_state is not None:
-                        encoded_broadcast = encoded_state.unsqueeze(1).expand(-1, actor_features.shape[1], -1)  # (batch, MAX_NODES, enc_dim)
-                        features_for_scorer = torch.cat([actor_features, encoded_broadcast], dim=-1)  # (batch, MAX_NODES, gnn_hidden + enc_dim)
-                    else:
-                        features_for_scorer = actor_features  # (batch, MAX_NODES, gnn_hidden)
-
-                    # Extend the mask to match the scorer input feature size.
-                    neighbors_mask = neighbors_mask_1d.unsqueeze(2).repeat(1, 1, features_for_scorer.shape[-1])
-                    actor_features_masked = torch.where(neighbors_mask, features_for_scorer, 0.0)
-                    scores = self.neighbor_scorer(actor_features_masked)
-
-                    # Shift the scores to the correct position.
-                    scores_shifted = torch.zeros((actor_features.shape[0], self.MAX_NEIGHBORS), **self.tpdv)
-                    for i in range(actor_features.shape[0]):
-                        nbrs = check(np.array(graphs.neighbors[i])).to(**self.tpdv).int()
-                        scores_shifted[i, :nbrs.shape[0]] = scores[i, nbrs, 0]
-
-                    actor_features = scores_shifted
-
-                # Perform evaluation only for a node of interest (typically agent position).
-                elif hasattr(graphs, "agent_idx"):
-                    agent_idx = torch.from_numpy(np.array(graphs.agent_idx)).reshape(-1, 1).to(self.device)
-                    actor_features = self.base.gatherNodeFeats(actor_features, agent_idx)
-
-                # Use the entire graph as the actor features.
+            if nbr_mask_cpu is not None:
+                # Trim / pad neighbor mask to the dense-batch node dimension.
+                nbr_cols = nbr_mask_cpu.shape[1]
+                if max_n_i <= nbr_cols:
+                    nbr_mask_1d = nbr_mask_cpu[:, :max_n_i].bool().to(self.device)
                 else:
-                    actor_features = self.base.graphAggr(actor_features, aggr="mean")
+                    pad = torch.zeros(B, max_n_i - nbr_cols, dtype=torch.bool)
+                    nbr_mask_1d = torch.cat([nbr_mask_cpu.bool(), pad], dim=1).to(self.device)
 
-                # Concatenate the graph and non-graph features.
-                actor_features = torch.cat([actor_features, obs_nongraph], dim=-1)
+                if self._use_state_encoder and encoded_state is not None:
+                    enc_bc = encoded_state.unsqueeze(1).expand(-1, max_n_i, -1)
+                    features_for_scorer = torch.cat([actor_features, enc_bc], dim=-1)
+                else:
+                    features_for_scorer = actor_features
+
+                nbr_mask_3d = nbr_mask_1d.unsqueeze(2).expand_as(features_for_scorer)
+                scores = self.neighbor_scorer(
+                    torch.where(nbr_mask_3d, features_for_scorer, features_for_scorer.new_zeros(())))
+
+                scores_shifted = torch.zeros(B, self.MAX_NEIGHBORS, **self.tpdv)
+                for i in range(B):
+                    nbr_idx = nbr_mask_1d[i].nonzero(as_tuple=True)[0][:self.MAX_NEIGHBORS]
+                    scores_shifted[i, :nbr_idx.shape[0]] = scores[i, nbr_idx, 0]
+                actor_features = scores_shifted
+
+            elif agent_idx_t is not None:
+                actor_features = self.base.gatherNodeFeats(actor_features, agent_idx_t)
+
+            else:
+                actor_features = self.base.graphAggr(actor_features, aggr="mean")
+
+            actor_features = torch.cat([actor_features, obs_nongraph], dim=-1)
 
             if self._use_gnn_mlp:
                 actor_features = torch.cat([actor_features, encoded_state], dim=-1)

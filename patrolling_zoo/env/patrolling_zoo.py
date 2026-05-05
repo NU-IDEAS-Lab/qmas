@@ -191,7 +191,6 @@ class parallel_env(ParallelEnv):
                  regenerate_graph_on_reset: bool = False,
                  regenerate_graph_every: int = 20,
                  gnn_use_dense_obs: bool = False,
-                 gnn_max_edges: int = 200,
                  graph_random = False,
                  graph_random_nodes = 40,
                  graph_random_radius = 75.0,
@@ -227,7 +226,6 @@ class parallel_env(ParallelEnv):
         self.max_nodes = max_nodes
         self.max_neighbors = max_neighbors
         self.gnn_use_dense_obs = gnn_use_dense_obs
-        self.gnn_max_edges = gnn_max_edges
 
         self.reward_interval = reward_interval
 
@@ -391,7 +389,9 @@ class parallel_env(ParallelEnv):
             if self.gnn_use_dense_obs:
                 # Dense tensor obs: one Box sub-space per component.
                 # idleness is appended; max_total_nodes = patrol nodes + agent position nodes.
-                max_total_nodes = self.max_nodes + len(self.possible_agents)
+                max_total_nodes = len(self.pg.graph.nodes) + len(self.possible_agents)
+                _actual_max_edges = len(self.pg.graph.edges) * 2 + max_total_nodes
+                max_edges_for_space = int(_actual_max_edges * 1.25) + 1
                 node_feat_dim_with_idleness = node_feat_dim + 1  # +1 for idlenessTime
 
                 state_space["node_features"] = spaces.Box(
@@ -404,13 +404,13 @@ class parallel_env(ParallelEnv):
                 state_space["edge_index"] = spaces.Box(
                     low=0.0,
                     high=max_total_nodes - 1,
-                    shape=(2, self.gnn_max_edges),
+                    shape=(2, max_edges_for_space),
                     dtype=np.float32,
                 )
                 state_space["edge_attr"] = spaces.Box(
                     low=-np.inf,
                     high=np.inf,
-                    shape=(self.gnn_max_edges, edge_feat_dim),
+                    shape=(max_edges_for_space, edge_feat_dim),
                     dtype=np.float32,
                 )
                 state_space["agent_idx"] = spaces.Box(
@@ -436,7 +436,7 @@ class parallel_env(ParallelEnv):
                     max_total_nodes=max_total_nodes,
                     node_feat_dim=node_feat_dim_with_idleness,
                     edge_feat_dim=edge_feat_dim,
-                    max_edges=self.gnn_max_edges,
+                    max_edges=max_edges_for_space,
                     node_type_idx=node_type_idx,
                 )
             else:
@@ -1002,7 +1002,7 @@ class parallel_env(ParallelEnv):
                     f"Graph has {num_real_nodes} nodes but max_total_nodes={max_total_nodes}. Increase --max_nodes."
                 num_edges = subgraph.number_of_edges()
                 assert num_edges <= max_edges, \
-                    f"Graph has {num_edges} edges but gnn_max_edges={max_edges}. Increase --gnn_max_edges."
+                    f"Graph has {num_edges} edges but max_edges={max_edges} (computed from graph size + 25% headroom)."
 
                 # Build padded node_features: [max_total_nodes, node_feat_dim].
                 node_features = np.zeros((max_total_nodes, node_feat_dim), dtype=np.float32)

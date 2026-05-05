@@ -245,8 +245,6 @@ def get_config():
                         default=False, help='Whether to use GNN-based neighbor scoring.')
     parser.add_argument("--gnn_use_dense_obs", action=argparse.BooleanOptionalAction, default=False,
                         help="Use dense tensor observations instead of PyG graph objects. Enables predictor training on graph observations.")
-    parser.add_argument("--gnn_max_edges", type=int, default=200,
-                        help="Maximum number of edges to pad to in dense graph observations.")
 
     # recurrent parameters
     parser.add_argument("--use_naive_recurrent_policy", action=argparse.BooleanOptionalAction,
