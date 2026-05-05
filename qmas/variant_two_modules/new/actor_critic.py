@@ -413,7 +413,8 @@ class QmasActor(nn.Module):
             actor_features = torch.cat([actor_features, obs_nongraph], dim=-1)
 
             if self._use_gnn_mlp:
-                actor_features = torch.cat([actor_features, encoded_state], dim=-1)
+                if self._use_state_encoder and encoded_state is not None:
+                    actor_features = torch.cat([actor_features, encoded_state], dim=-1)
                 actor_features = self.mlp0(actor_features)
             elif self._use_state_encoder:
                 # No mlp0: concat encoded state here before RNN.

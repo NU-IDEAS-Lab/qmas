@@ -245,6 +245,8 @@ def get_config():
                         default=False, help='Whether to use GNN-based neighbor scoring.')
     parser.add_argument("--gnn_use_dense_obs", action=argparse.BooleanOptionalAction, default=False,
                         help="Use dense tensor observations instead of PyG graph objects. Enables predictor training on graph observations.")
+    parser.add_argument("--disable_observation_global", action='store_true', default=False,
+                        help="Ignore observation_global from env infos and use obs for everything, including predictor UQ injection. Useful when the predictor feeds directly into the GNN via obs.")
 
     # recurrent parameters
     parser.add_argument("--use_naive_recurrent_policy", action=argparse.BooleanOptionalAction,

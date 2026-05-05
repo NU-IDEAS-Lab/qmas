@@ -39,6 +39,14 @@ class QmasPolicy(Policy):
         share_obs_dim = np.prod(share_obs_shape) # observation space for one agent
         action_dim = np.prod(get_shape_from_act_space(act_space)) # action space for one agent
 
+        # When observation_global is disabled, the predictor operates on local obs instead.
+        if getattr(args, "disable_observation_global", False):
+            predictor_obs_shape = get_shape_from_obs_space(self.obs_space, flatten_dicts=False)
+            predictor_obs_dim = np.prod(predictor_obs_shape)
+        else:
+            predictor_obs_shape = share_obs_shape
+            predictor_obs_dim = share_obs_dim
+
         if args.prediction_ensemble_size > 1:
             print(f"Creating ensemble of {args.prediction_ensemble_size} predictors.")
         
@@ -55,10 +63,10 @@ class QmasPolicy(Policy):
                 device_predictor = self.device
 
             predictor = Predictor(
-                share_obs_dim,
+                predictor_obs_dim,
                 action_dim,
                 args,
-                obs_shape=share_obs_shape,
+                obs_shape=predictor_obs_shape,
                 device=device_predictor
             ).to(device_predictor)
             self.predictors.append(predictor)

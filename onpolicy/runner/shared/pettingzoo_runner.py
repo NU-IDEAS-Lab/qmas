@@ -143,23 +143,24 @@ class PettingzooRunner(Runner):
             visibility_mask = np.ones_like(obs, dtype=np.float32)
 
         observation_global = None
-        if "observation_global" in infos[0]:
+        if "observation_global" in infos[0] and not self.all_args.disable_observation_global:
             observation_global = np.array([info["observation_global"] for info in infos])
         # If UQ will be appended during rollout, pre-pad with zeros here so the
         # buffer slot has the correct shape (2× obs_dim) from the start.
         # collect() will overwrite this with [pred | uncertainty] on the first step.
         obs_full = None
         if self.all_args.prediction_uq_injection_method == "append" and not self.all_args.prediction_disable:
-            if obs.dtype == object or (self.all_args.state_encoder and observation_global is not None):
-                # Object-type obs or state_encoder: UQ is appended to observation_global.
+            if obs.dtype == object or observation_global is not None:
+                # Object-type obs or global obs available: UQ is appended to observation_global
+                # (matches collect() which writes to global_obs whenever global_obs is not None).
                 if observation_global is None:
                     raise ValueError("Must have observation_global in infos to use object-type observations (e.g. pyg graph observations). Check that environment is providing this information.")
                 observation_global = np.concatenate(
                     [observation_global, np.zeros_like(observation_global)], axis=-1
                 )
             else:
-                # Dense envs without state_encoder: UQ is appended to obs instead. Pre-pad obs with zeros so the
-                # buffer slot has the correct shape before collect() overwrites it.
+                # Dense envs with no global obs: UQ is appended to obs itself. Pre-pad obs with
+                # zeros so the buffer slot has the correct shape before collect() overwrites it.
                 obs_full = obs
                 obs = np.concatenate([obs, np.zeros_like(obs)], axis=-1)
 
@@ -306,7 +307,7 @@ class PettingzooRunner(Runner):
         
         obs_full = None
         obs_raw = obs  # unpadded, for trajectory buffer
-        if "observation_global" in infos[0]:
+        if "observation_global" in infos[0] and not self.all_args.disable_observation_global:
             observation_global = np.array([info["observation_global"] for info in infos])
             observation_global_raw = observation_global  # unpadded, for trajectory buffer
             # The buffer was initialized with zero-padded obs (2× size) in warmup().
@@ -333,7 +334,7 @@ class PettingzooRunner(Runner):
 
         # Get extra state information from infos.
         state_visibility_mask = None
-        if "state_visibility_mask" in infos[0]:
+        if "state_visibility_mask" in infos[0] and not self.all_args.disable_observation_global:
             state_visibility_mask = np.array([info["state_visibility_mask"] for info in infos])
 
         # Add information to the logger.
