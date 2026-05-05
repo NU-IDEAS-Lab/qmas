@@ -453,6 +453,7 @@ class parallel_env(ParallelEnv):
         # Reset other state.
         self.step_count = 0
         self.dones = dict.fromkeys(self.agents, False)
+        self.last_comms_requests = {}  # {receiver_agent: set_of_sender_agents} from the most recent step.
 
         # Set available actions.
         self.available_actions_dict = {agent: self._getAvailableActions(agent) for agent in self.agents}
@@ -496,7 +497,7 @@ class parallel_env(ParallelEnv):
         return info
 
 
-    def render(self, prediction_now = None, figsize=(12, 9), history_length=10, **kwargs):
+    def render(self, prediction_now = None, figsize=(12, 9), history_length=10, observe_agent=None, **kwargs):
         ''' Renders the environment.
             
             Args:
@@ -557,12 +558,42 @@ class parallel_env(ParallelEnv):
                         ha='center', va='top', fontsize=7, color='darkgreen',
                         bbox=dict(boxstyle='round,pad=0.1', fc='white', alpha=0.6, ec='none'))
 
-        # Draw the agents.
+        # Freeze axes limits after the graph is drawn so that radius circles don't cause rescaling.
+        ax.autoscale(False)
+
+        # Draw the agents and their observation-radius circles for communications.
+        # Collect all (receiver, sender) pairs from the last step.
+        _last_comms = getattr(self, 'last_comms_requests', {})
+        _visible_pairs = set()  # (receiver_idx, sender_idx)
+        for receiver, senders in _last_comms.items():
+            r_idx = self.possible_agents.index(receiver)
+            for sender in senders:
+                s_idx = self.possible_agents.index(sender)
+                _visible_pairs.add((r_idx, s_idx))
+
         for i, agent in enumerate(self.possible_agents):
             marker = markers[i % len(markers)] if agent in self.agents else markers_done[i % len(markers_done)]
             color = colors[i % len(colors)]
             plt.scatter(*agent.position, color=color, marker=marker, zorder=10, alpha=0.3, s=300)
             plt.plot([], [], color=color, marker=marker, linestyle='None', label=agent.name, alpha=0.5)
+
+            # Draw the observation radius circle for the observing agent only.
+            _observe_agent = observe_agent if observe_agent is not None else self.possible_agents[0]
+            radius = agent.observationRadius
+            if agent is _observe_agent and np.isfinite(radius):
+                circle = plt.Circle(agent.position, radius, color=color,
+                                    fill=False, linestyle='--', linewidth=1.2, alpha=0.5, zorder=5)
+                ax.add_patch(circle)
+
+        # Highlight agents that were visible to at least one receiver with a ring.
+        _senders_seen = set()
+        for senders in _last_comms.values():
+            _senders_seen.update(senders)
+        for agent in _senders_seen:
+            i = self.possible_agents.index(agent)
+            color = colors[i % len(colors)]
+            plt.scatter(*agent.position, s=500, facecolors='none', edgecolors=color,
+                        linewidths=2, zorder=9, alpha=0.8)
 
         # Draw the predicted agent positions if provided.
         # Only supported for adjacency-type state spaces that have named agent positions.
@@ -1052,6 +1083,9 @@ class parallel_env(ParallelEnv):
                             comms_requests[agent] = senders
                             info_dict["communication/requests_made"] += 1
                         reward_dict[agent] += -1.0 * self.reward_comms_penalty_weight
+
+        # Save communication requests from this step for rendering.
+        self.last_comms_requests = comms_requests
 
         # Record the average idleness time at this step.
         avg = self._minMaxNormalize(self.pg.getAverageIdlenessTime(self.step_count), minimum=0.0, maximum=self.step_count)
