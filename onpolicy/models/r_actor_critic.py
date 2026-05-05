@@ -159,14 +159,19 @@ class R_Actor(nn.Module):
                 neighbors_mask = neighbors_mask.unsqueeze(2).repeat(1, 1, actor_features.shape[-1])
                 actor_features_masked = torch.where(neighbors_mask, actor_features, 0.0)
                 scores = self.neighbor_scorer(actor_features_masked)
-                
-                # Shift the scores to the correct position.
-                scores_shifted = torch.zeros((actor_features.shape[0], self.MAX_NEIGHBORS), **self.tpdv)
-                for i in range(actor_features.shape[0]):
-                    nbrs = check(np.array(graphs.neighbors[i])).to(**self.tpdv).int()
-                    scores_shifted[i, :nbrs.shape[0]] = scores[i, nbrs, 0]
 
-                actor_features = scores_shifted
+                # Build gather index without breaking the autograd graph.
+                B_a = actor_features.shape[0]
+                gather_idx = torch.zeros(B_a, self.MAX_NEIGHBORS, dtype=torch.long, device=self.device)
+                valid_mask  = torch.zeros(B_a, self.MAX_NEIGHBORS, dtype=torch.bool,  device=self.device)
+                for i in range(B_a):
+                    nbrs = check(np.array(graphs.neighbors[i])).long().to(self.device)
+                    n = nbrs.shape[0]
+                    gather_idx[i, :n] = nbrs
+                    valid_mask[i, :n]  = True
+                scores_flat = scores[:, :, 0]
+                gather_idx = gather_idx.clamp(max=scores_flat.shape[1] - 1)
+                actor_features = torch.gather(scores_flat, 1, gather_idx) * valid_mask.float()
 
             elif hasattr(graphs, "agent_idx"):
                 agent_idx = torch.from_numpy(np.array(graphs.agent_idx)).reshape(-1, 1).to(self.device)
@@ -248,14 +253,19 @@ class R_Actor(nn.Module):
                 neighbors_mask = neighbors_mask.unsqueeze(2).repeat(1, 1, actor_features.shape[-1])
                 actor_features_masked = torch.where(neighbors_mask, actor_features, 0.0)
                 scores = self.neighbor_scorer(actor_features_masked)
-                
-                # Shift the scores to the correct position.
-                scores_shifted = torch.zeros((actor_features.shape[0], self.MAX_NEIGHBORS), **self.tpdv)
-                for i in range(actor_features.shape[0]):
-                    nbrs = check(np.array(graphs.neighbors[i])).to(**self.tpdv).int()
-                    scores_shifted[i, :nbrs.shape[0]] = scores[i, nbrs, 0]
 
-                actor_features = scores_shifted
+                # Build gather index without breaking the autograd graph.
+                B_a = actor_features.shape[0]
+                gather_idx = torch.zeros(B_a, self.MAX_NEIGHBORS, dtype=torch.long, device=self.device)
+                valid_mask  = torch.zeros(B_a, self.MAX_NEIGHBORS, dtype=torch.bool,  device=self.device)
+                for i in range(B_a):
+                    nbrs = check(np.array(graphs.neighbors[i])).long().to(self.device)
+                    n = nbrs.shape[0]
+                    gather_idx[i, :n] = nbrs
+                    valid_mask[i, :n]  = True
+                scores_flat = scores[:, :, 0]
+                gather_idx = gather_idx.clamp(max=scores_flat.shape[1] - 1)
+                actor_features = torch.gather(scores_flat, 1, gather_idx) * valid_mask.float()
 
             elif hasattr(graphs, "agent_idx"):
                 agent_idx = torch.from_numpy(np.array(graphs.agent_idx)).reshape(-1, 1).to(self.device)
