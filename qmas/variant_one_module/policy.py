@@ -135,7 +135,7 @@ class QmasPolicy(R_MAPPOPolicy):
         return values, action_log_probs, dist_entropy
 
     def get_prediction(self, trajectory, visibility_mask=None, prediction_prev=None,
-                       has_sample_dim=False):
+                       has_sample_dim=False, return_member_preds=False):
         """Get a prediction from the ensemble of embedded predictors.
 
         Mirrors ``variant_two_modules.new.policy.QmasPolicy.get_prediction``.
@@ -154,14 +154,14 @@ class QmasPolicy(R_MAPPOPolicy):
             uncertainty: Variance across ensemble (zeros for single predictor).
         """
         dim_ensemble = 0
+
         predictions = []
-        for predictor in self.predictors:
-            if prediction_prev is not None:
-                prediction_prev = prediction_prev.to(predictor.device)
+        for i, predictor in enumerate(self.predictors):
+            member_prev = None if prediction_prev is None else prediction_prev[i].to(predictor.device)
             pred = predictor.get_prediction(
                 trajectory.detach().to(predictor.device),
                 visibility_mask.detach().to(predictor.device),
-                prediction_prev,
+                member_prev,
                 has_sample_dim=has_sample_dim,
             )
             predictions.append(pred.unsqueeze(0).to(self.device))
@@ -169,8 +169,10 @@ class QmasPolicy(R_MAPPOPolicy):
         prediction = predictions.mean(dim=dim_ensemble)
 
         if predictions.shape[dim_ensemble] > 1:
-            uncertainty = predictions.var(dim=dim_ensemble)
+            uncertainty = predictions.std(dim=dim_ensemble)
         else:
             uncertainty = torch.zeros_like(prediction)
 
+        if return_member_preds:
+            return prediction, uncertainty, predictions.detach()
         return prediction, uncertainty

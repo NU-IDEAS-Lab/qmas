@@ -44,6 +44,15 @@ def add_args(parser):
     parser.add_argument("--graph_random_nodes", type=int,
                         default=40,
                         help="The number of random nodes to generate.")
+    parser.add_argument("--graph_random_radius", type=float,
+                        default=75.0,
+                        help="The connection radius for random graph generation.")
+    parser.add_argument("--graph_random_size_x", type=float,
+                        default=500.0,
+                        help="The x-axis size of the world for random graph generation.")
+    parser.add_argument("--graph_random_size_y", type=float,
+                        default=500.0,
+                        help="The y-axis size of the world for random graph generation.")
     parser.add_argument("--reward_method_terminal", type=str,
                         default="average", 
                         help="the method to use for terminal reward.")
@@ -66,6 +75,10 @@ def add_args(parser):
                         help="the size (squared) to which the bitmap should be scaled for observation")
     parser.add_argument("--observation_radius", type=float, default=999999, 
                         help="the observable radius for each agent")
+    parser.add_argument("--observation_radius_random_min", type=float, default=0.0,
+                        help="the minimum random observable radius for each agent")
+    parser.add_argument("--observation_radius_random_max", type=float, default=0.0,
+                        help="the maximum random observable radius for each agent")
     parser.add_argument("--attrition_method", type=str, default="none", 
                         help="the method to use for agent attrition")
     parser.add_argument("--attrition_fixed_times", type=list, default=[], 
@@ -80,6 +93,8 @@ def add_args(parser):
                         help="the probability of successful communication")
     parser.add_argument("--regenerate_graph_on_reset", action=argparse.BooleanOptionalAction, default=False,
                         help="Whether to regenerate the graph on reset.")
+    parser.add_argument("--regenerate_graph_every", type=int, default=20,
+                        help="The number of steps after which to regenerate the graph.")
     parser.add_argument("--max_nodes", type=int, default=50,
                         help="The maximum number of nodes in a single graph observation.")
     parser.add_argument("--max_neighbors", type=int, default=10,
@@ -160,6 +175,8 @@ class parallel_env(ParallelEnv):
                  action_neighbors_max_degree = 15,
                  reward_method_terminal = "average",
                  observation_radius = np.inf,
+                 observation_radius_random_min = 0.0,
+                 observation_radius_random_max = 0.0,
                  observe_method = "adjacency",
                  observe_method_global = "",
                  observe_bitmap_size = 50,
@@ -172,8 +189,12 @@ class parallel_env(ParallelEnv):
                  max_neighbors: int = 15,
                  reward_interval: int = -1,
                  regenerate_graph_on_reset: bool = False,
+                 regenerate_graph_every: int = 20,
                  graph_random = False,
                  graph_random_nodes = 40,
+                 graph_random_radius = 75.0,
+                 graph_random_size_x = 500.0,
+                 graph_random_size_y = 500.0,
                  graph_file = os.path.join(os.path.dirname(patrolling_zoo.graphs.__file__), "cumberland.graph"),
                 ):
         """
@@ -183,7 +204,9 @@ class parallel_env(ParallelEnv):
 
         # Configuration.
         self.requireExplicitVisit = require_explicit_visit
-        self.observationRadius = observation_radius
+        self.observation_radius = observation_radius
+        self.observation_radius_random_min = observation_radius_random_min
+        self.observation_radius_random_max = observation_radius_random_max
         self.max_cycles = max_cycles
         self.comms_model = CommunicationModel(model=communication_model, p=communication_probability)
         self.action_method = action_method
@@ -198,6 +221,7 @@ class parallel_env(ParallelEnv):
         self.attrition_times = attrition_fixed_times
         self.attrition_min_agents = attrition_min_agents
         self.regenerate_graph_on_reset = regenerate_graph_on_reset
+        self.regenerate_graph_every = regenerate_graph_every
         self.max_nodes = max_nodes
         self.max_neighbors = max_neighbors
 
@@ -209,7 +233,7 @@ class parallel_env(ParallelEnv):
 
         # Create patrol graph.
         if graph_random:
-            self.pg = PatrolGraph(numNodes=graph_random_nodes)
+            self.pg = PatrolGraph(numNodes=graph_random_nodes, radius=graph_random_radius, sizeX=graph_random_size_x, sizeY=graph_random_size_y)
         else:
             self.pg = PatrolGraph(graph_file)
 
@@ -220,7 +244,7 @@ class parallel_env(ParallelEnv):
             PatrolAgent(i, startingPositions[i],
                         speed = agent_speed,
                         startingNode = self.agentOrigins[i],
-                        observationRadius = self.observationRadius,
+                        observationRadius = self.observation_radius,
                         max_nodes = self.max_nodes
             ) for i in range(num_agents)
         ]
@@ -379,6 +403,14 @@ class parallel_env(ParallelEnv):
             )
             state_space["graph"].node_type_idx = node_type_idx
         
+        # Add observation radius (all observation modes).
+        state_space["observation_radius"] = spaces.Box(
+            low=0.0,
+            high=np.inf,
+            shape=(1,),
+            dtype=np.float32,
+        )
+
         if type(state_space) == dict:
             state_space = spaces.Dict(state_space)
         
@@ -394,9 +426,13 @@ class parallel_env(ParallelEnv):
             random.seed(seed)
 
         # Reset the graph.
-        regenerateGraph = self.regenerate_graph_on_reset and self.reset_count % 20 == 0
+        regenerateGraph = self.regenerate_graph_on_reset and self.reset_count % self.regenerate_graph_every == 0
         randomizeIds = regenerateGraph
         self.pg.reset(seed, randomizeIds=randomizeIds, regenerateGraph=regenerateGraph)
+
+        # Randomize the observation radius.
+        if self.observation_radius_random_max > self.observation_radius_random_min:
+            self.observation_radius = np.random.uniform(self.observation_radius_random_min, self.observation_radius_random_max)
 
         # Reset the information about idleness over time.
         self.avgIdlenessTimes = []
@@ -411,6 +447,7 @@ class parallel_env(ParallelEnv):
         for agent in self.possible_agents:
             agent.startingPosition = startingPositions[agent.id]
             agent.startingNode = self.agentOrigins[agent.id]
+            agent.observationRadius = self.observation_radius
             agent.reset()
         
         # Reset other state.
@@ -851,6 +888,10 @@ class parallel_env(ParallelEnv):
 
             obs["graph"] = data
 
+        # Add observation radius (all observation modes).
+        obs["observation_radius"] = np.array([agent.observationRadius], dtype=np.float32)
+        if obs_mask is not None:
+            obs_mask["observation_radius"] = np.array([True], dtype=bool)
 
         if (type(obs) == dict and obs == {}) or (type(obs) != dict and len(obs) < 1):
             raise ValueError(f"Invalid observation method {observe_method}")

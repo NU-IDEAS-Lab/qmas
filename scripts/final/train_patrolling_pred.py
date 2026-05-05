@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-    "--experiment_name", "patrolling-random-pred-draft1",
+    "--experiment_name", "patrolling-randomOR-pred-draft1",
     "--project_name", "qmas",
     "--env_class", "patrolling_zoo.patrolling_zoo_v0.parallel_env",
     "--user_name", "ideas-mas",
@@ -15,6 +15,8 @@ args = [
     "--observe_method", "pyg",
     "--observe_method_global", "coordinates",
     "--observation_radius", "200.0",
+    "--observation_radius_random_min", "50.0",
+    "--observation_radius_random_max", "300.0",
     "--communication_model", "bernoulli",
     "--communication_probability", "0.5",
     "--alpha", "1.0",
@@ -27,10 +29,11 @@ args = [
     # "--graph_file", "../patrolling_zoo/graphs/milwaukee.graph",
     "--graph_random",
     "--regenerate_graph_on_reset",
+    "--regenerate_graph_every", "1",
 
     "--num_env_steps", "1000000",
-    "--episode_length", "200",
-    "--max_cycles", "200",
+    "--episode_length", "150",
+    "--max_cycles", "150",
     "--num_mini_batch", "10",
 
     "--algorithm_class", "qmas.variant_two_modules.new.algorithm.QmasAlgorithm",
@@ -54,7 +57,7 @@ args = [
     "--layer_N", "3",
     "--use_linear_lr_decay",
     "--ppo_epoch", "5",
-    "--seed", "0",
+    "--seed", "42",
 
     "--diffusion_model_type", "dit1d",
     # "--prediction_history_window", "16",
@@ -67,9 +70,9 @@ args = [
 
     # "--episode_fraction_start_prediction", "0.0",
 
-    "--n_rollout_threads", "66",
+    "--n_rollout_threads", "72",
     "--cuda",
-    "--cuda_idx", "5",
+    "--cuda_idx", "6",
     # "--cuda_idx_predictor", "6",
     "--threaded_training",
     "--n_training_threads", "16",
@@ -80,4 +83,5 @@ args = [
     "--use_wandb",
 ]
 
-main(args)
+if __name__ == "__main__":
+    main(args)

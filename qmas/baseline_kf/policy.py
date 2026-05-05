@@ -25,7 +25,7 @@ class QmasPolicy(R_MAPPOPolicy):
         )]
 
 
-    def get_prediction(self, trajectory, visibility_mask=None, prediction_prev=None, has_sample_dim=False):
+    def get_prediction(self, trajectory, visibility_mask=None, prediction_prev=None, has_sample_dim=False, return_member_preds=False):
         """
         Get a prediction from the ensemble of predictors.
         Args:
@@ -48,7 +48,7 @@ class QmasPolicy(R_MAPPOPolicy):
         predictions = torch.cat(predictions, dim=0)  # Shape: (num_predictors, T, D_out)
         prediction = predictions.mean(dim=0)
         if predictions.shape[0] > 1:
-            uncertainty = predictions.var(dim=0)
+            uncertainty = predictions.std(dim=0)
         else:
             uncertainty = torch.zeros_like(prediction)
 

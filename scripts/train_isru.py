@@ -1,7 +1,6 @@
 from onpolicy.scripts.train.train_pettingzoo import main
 
 import os
-import sys
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
@@ -63,9 +62,9 @@ args = [
 
     "--n_rollout_threads", "50",
     "--threaded_training",
-    # "--cuda",
-    "--cuda_idx", "3",
-    "--cuda_idx_predictor", "7",
+    "--cuda",
+    # "--cuda_idx", "5",
+    # "--cuda_idx_predictor", "7",
 
     "--save_interval", "200000",
     # "--save_checkpoints",
@@ -73,4 +72,5 @@ args = [
     "--use_wandb",
 ]
 
-main(args + sys.argv[1:])
+if __name__ == "__main__":
+    main(args)
