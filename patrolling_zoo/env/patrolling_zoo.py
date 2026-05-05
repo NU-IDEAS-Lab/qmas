@@ -882,7 +882,14 @@ class parallel_env(ParallelEnv):
 
             # Copy pg map to g
             g = self.pg.graph.copy()
- 
+
+            # Pre-compute true (unmasked) idleness for ALL patrol nodes.
+            _allLastVisits = {n: self.pg.getNodeVisitTime(n) for n in g.nodes}
+            _allIdlenessRaw = {n: self.step_count - t for n, t in _allLastVisits.items()}
+            _maxAllIdleness = max(_allIdlenessRaw.values()) if _allIdlenessRaw else 0
+            _minAllIdleness = min(_allIdlenessRaw.values()) if _allIdlenessRaw else 0
+            _allSameIdleness = _maxAllIdleness == _minAllIdleness
+
             # Get a list of last visit times for each visible node.
             lastVisits = {i: self.pg.getNodeVisitTime(i) for i in vertices}
             
@@ -1000,8 +1007,14 @@ class parallel_env(ParallelEnv):
                 # Build padded node_features: [max_total_nodes, node_feat_dim].
                 node_features = np.zeros((max_total_nodes, node_feat_dim), dtype=np.float32)
                 node_vis = np.zeros(max_total_nodes, dtype=np.float32)
+                idle_feat_idx = node_attrs.index("idlenessTime")
                 for i, n in enumerate(subgraphNodes):
                     feats = [float(subgraph.nodes[n][a]) for a in node_attrs]
+                    # Overwrite idlenessTime with the true all-node-normalized value.
+                    if n not in agentnodes:
+                        feats[idle_feat_idx] = 1.0 if _allSameIdleness else self._minMaxNormalize(
+                            _allIdlenessRaw[n], minimum=_minAllIdleness, maximum=_maxAllIdleness
+                        )
                     node_features[i] = feats
                     node_vis[i] = 1.0 if (n in vertices or n in agentnodes) else 0.0
                 # Padding rows: vis=1 so fix_mask=1 (not predicted, fixed at 0).
