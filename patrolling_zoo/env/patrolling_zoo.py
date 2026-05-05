@@ -496,7 +496,7 @@ class parallel_env(ParallelEnv):
         return info
 
 
-    def render(self, predicted_positions = None, figsize=(12, 9), history_length=10, **kwargs):
+    def render(self, prediction_now = None, figsize=(12, 9), history_length=10, **kwargs):
         ''' Renders the environment.
             
             Args:
@@ -515,6 +515,21 @@ class parallel_env(ParallelEnv):
         pos = nx.get_node_attributes(self.pg.graph, 'pos')
         idleness = [self.pg.getNodeIdlenessTime(i, self.step_count) for i in self.pg.graph.nodes]
         nodeColors = [self._minMaxNormalize(idleness[i], a=0.0, b=100, minimum=0.0, maximum=self.step_count) for i in self.pg.graph.nodes]
+
+        # Unflatten prediction once if available (reused for both vertex state and agent positions).
+        pred_unflattened = None
+        if prediction_now is not None and isinstance(self.state_space, spaces.Dict):
+            _pred_agent0 = prediction_now[0]
+            if hasattr(_pred_agent0, 'numpy'):
+                _pred_agent0 = _pred_agent0.numpy()
+            pred_unflattened = spaces.unflatten(self.state_space, _pred_agent0.flatten())
+
+        # Extract predicted vertex idleness if available.
+        pred_vertex_state = None
+        if pred_unflattened is not None and "vertex_state" in self.state_space.spaces:
+            pred_vertex_state = {node: float(pred_unflattened["vertex_state"][node])
+                                 for node in self.pg.graph.nodes}
+
         nx.draw_networkx(self.pg.graph,
                          pos,
                          with_labels=True,
@@ -529,7 +544,19 @@ class parallel_env(ParallelEnv):
         )
         weights = {key: np.round(value, 1) for key, value in nx.get_edge_attributes(self.pg.graph, 'weight').items()}
         nx.draw_networkx_edge_labels(self.pg.graph, pos, edge_labels=weights, font_size=7)
-        
+
+        # Annotate each node with actual (and predicted) idleness.
+        for node in self.pg.graph.nodes:
+            x, y = pos[node]
+            actual = idleness[node]
+            if pred_vertex_state is not None:
+                label = f"A:{actual:.1f}\nP:{pred_vertex_state[node]:.1f}"
+            else:
+                label = f"A:{actual:.1f}"
+            ax.annotate(label, (x, y), textcoords="offset points", xytext=(0, -22),
+                        ha='center', va='top', fontsize=7, color='darkgreen',
+                        bbox=dict(boxstyle='round,pad=0.1', fc='white', alpha=0.6, ec='none'))
+
         # Draw the agents.
         for i, agent in enumerate(self.possible_agents):
             marker = markers[i % len(markers)] if agent in self.agents else markers_done[i % len(markers_done)]
@@ -540,16 +567,10 @@ class parallel_env(ParallelEnv):
         # Draw the predicted agent positions if provided.
         # Only supported for adjacency-type state spaces that have named agent positions.
         _prediction_supported = (
-            predicted_positions is not None
-            and isinstance(self.state_space, spaces.Dict)
+            pred_unflattened is not None
             and "agent_graph_position" in self.state_space.spaces
         )
         if _prediction_supported:
-            pred_agent0 = predicted_positions[0]
-            if hasattr(pred_agent0, 'numpy'):
-                pred_agent0 = pred_agent0.numpy()
-            pred_unflattened = spaces.unflatten(self.state_space, pred_agent0.flatten())
-
             # Plot history of predictions from the perspective of agent 0.
             # state_space obs is a single-agent view (not keyed by agent at the top level).
             graph_pos = pred_unflattened["agent_graph_position"]

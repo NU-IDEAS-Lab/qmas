@@ -850,10 +850,10 @@ class PettingzooRunner(Runner):
                 time_stop = time.time()
 
                 # Perform rendering.
-                # if ipython_clear_output:
-                #     clear_output(wait = True)
-                # spf = prediction_now if use_prediction else None
-                # env.envs[0].env.render(spf, history_length=self.all_args.prediction_history_window, uncertainty=uncertainty_now)
+                if ipython_clear_output:
+                    clear_output(wait = True)
+                spf = prediction_now if use_prediction else None
+                env.envs[0].env.render(spf, history_length=self.all_args.prediction_history_window, uncertainty=uncertainty_now)
 
                 # append frame
                 if self.all_args.save_gifs:        
