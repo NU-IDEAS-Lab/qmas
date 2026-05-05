@@ -190,6 +190,8 @@ class parallel_env(ParallelEnv):
                  reward_interval: int = -1,
                  regenerate_graph_on_reset: bool = False,
                  regenerate_graph_every: int = 20,
+                 gnn_use_dense_obs: bool = False,
+                 gnn_max_edges: int = 200,
                  graph_random = False,
                  graph_random_nodes = 40,
                  graph_random_radius = 75.0,
@@ -224,6 +226,8 @@ class parallel_env(ParallelEnv):
         self.regenerate_graph_every = regenerate_graph_every
         self.max_nodes = max_nodes
         self.max_neighbors = max_neighbors
+        self.gnn_use_dense_obs = gnn_use_dense_obs
+        self.gnn_max_edges = gnn_max_edges
 
         self.reward_interval = reward_interval
 
@@ -236,6 +240,9 @@ class parallel_env(ParallelEnv):
             self.pg = PatrolGraph(numNodes=graph_random_nodes, radius=graph_random_radius, sizeX=graph_random_size_x, sizeY=graph_random_size_y)
         else:
             self.pg = PatrolGraph(graph_file)
+
+        # Layout metadata for dense GNN observations; populated by _buildStateSpace when gnn_use_dense_obs=True.
+        self._gnn_dense_layout = None
 
         # Create the agents with random starting positions.
         self.agentOrigins = random.sample(list(self.pg.graph.nodes), num_agents)
@@ -373,35 +380,94 @@ class parallel_env(ParallelEnv):
         
         if observe_method in ["pyg"]:
             if self.action_method in ["neighbors", "neighbors_with_comm_boolean"]:
-                edge_space = spaces.Box(
-                    # weight, neighborID
-                    low = np.array([0.0, -1.0], dtype=np.float32),
-                    high = np.array([np.inf, np.inf], dtype=np.float32),
-                )
-                node_space = spaces.Box(
-                    # nodeType, degree
-                    low = np.array([-np.inf, 0.0], dtype=np.float32),
-                    high = np.array([np.inf, np.inf], dtype=np.float32),
-                )
+                edge_feat_dim = 2  # weight, neighborIndex
+                node_feat_dim = 2  # nodeType, degree
                 node_type_idx = 0
             else:
-                edge_space = spaces.Box(
-                    # weight
-                    low = np.array([0.0], dtype=np.float32),
-                    high = np.array([np.inf], dtype=np.float32),
-                )
-                node_space = spaces.Box(
-                    # ID, nodeType, lastNode, currentAction
-                    low = np.array([0.0, -np.inf, -1.0, -1.0], dtype=np.float32),
-                    high = np.array([np.inf, np.inf, np.inf, np.inf], dtype=np.float32),
-                )
+                edge_feat_dim = 1  # weight
+                node_feat_dim = 4  # id, nodeType, lastNode, currentAction
                 node_type_idx = 1
 
-            state_space["graph"] = spaces.Graph(
-                node_space = node_space,
-                edge_space = edge_space
-            )
-            state_space["graph"].node_type_idx = node_type_idx
+            if self.gnn_use_dense_obs:
+                # Dense tensor obs: one Box sub-space per component.
+                # idleness is appended; max_total_nodes = patrol nodes + agent position nodes.
+                max_total_nodes = self.max_nodes + len(self.possible_agents)
+                node_feat_dim_with_idleness = node_feat_dim + 1  # +1 for idlenessTime
+
+                state_space["node_features"] = spaces.Box(
+                    low=-np.inf,
+                    high=np.inf,
+                    shape=(max_total_nodes, node_feat_dim_with_idleness),
+                    dtype=np.float32,
+                )
+                # edge_index stored as float32 for buffer compatibility.
+                state_space["edge_index"] = spaces.Box(
+                    low=0.0,
+                    high=max_total_nodes - 1,
+                    shape=(2, self.gnn_max_edges),
+                    dtype=np.float32,
+                )
+                state_space["edge_attr"] = spaces.Box(
+                    low=-np.inf,
+                    high=np.inf,
+                    shape=(self.gnn_max_edges, edge_feat_dim),
+                    dtype=np.float32,
+                )
+                state_space["agent_idx"] = spaces.Box(
+                    low=0,
+                    high=max_total_nodes - 1,
+                    shape=(1,),
+                    dtype=np.float32,
+                )
+                state_space["neighbors_mask"] = spaces.Box(
+                    low=0.0,
+                    high=1.0,
+                    shape=(max_total_nodes,),
+                    dtype=np.float32,
+                )
+                state_space["num_nodes"] = spaces.Box(
+                    low=1,
+                    high=max_total_nodes,
+                    shape=(1,),
+                    dtype=np.float32,
+                )
+                # Store layout metadata on self for use in _populateStateSpace, actor, and algorithm.
+                self._gnn_dense_layout = dict(
+                    max_total_nodes=max_total_nodes,
+                    node_feat_dim=node_feat_dim_with_idleness,
+                    edge_feat_dim=edge_feat_dim,
+                    max_edges=self.gnn_max_edges,
+                    node_type_idx=node_type_idx,
+                )
+            else:
+                if self.action_method in ["neighbors", "neighbors_with_comm_boolean"]:
+                    edge_space = spaces.Box(
+                        # weight, neighborID
+                        low = np.array([0.0, -1.0], dtype=np.float32),
+                        high = np.array([np.inf, np.inf], dtype=np.float32),
+                    )
+                    node_space = spaces.Box(
+                        # nodeType, idlenessTime, degree
+                        low = np.array([-np.inf, 0.0, 0.0], dtype=np.float32),
+                        high = np.array([np.inf, np.inf, np.inf], dtype=np.float32),
+                    )
+                else:
+                    edge_space = spaces.Box(
+                        # weight
+                        low = np.array([0.0], dtype=np.float32),
+                        high = np.array([np.inf], dtype=np.float32),
+                    )
+                    node_space = spaces.Box(
+                        # ID, nodeType, idlenessTime, lastNode, currentAction
+                        low = np.array([0.0, -np.inf, 0.0, -1.0, -1.0], dtype=np.float32),
+                        high = np.array([np.inf, np.inf, np.inf, np.inf, np.inf], dtype=np.float32),
+                    )
+
+                state_space["graph"] = spaces.Graph(
+                    node_space = node_space,
+                    edge_space = edge_space
+                )
+                state_space["graph"].node_type_idx = node_type_idx
         
         # Add observation radius (all observation modes).
         state_space["observation_radius"] = spaces.Box(
@@ -826,21 +892,21 @@ class parallel_env(ParallelEnv):
             allSame = maxIdleness == minIdleness
 
             # Set attributes of patrol graph nodes.
-            # idleness_map = {}
+            idleness_map = {}
             node_type_map = {}
             for node in g.nodes:
-                # # Idleness is only observable in the global state.
-                # if global_state and node in vertices:
-                #     idleness_map[node] = 1.0 if allSame else self._minMaxNormalize(
-                #         self.step_count - lastVisits[node], minimum=minIdleness, maximum=maxIdleness
-                #     )
-                # else:
-                #     idleness_map[node] = -1.0
+                # Idleness: normalized for observable nodes, 0 for unobservable.
+                if node in vertices:
+                    idleness_map[node] = 1.0 if allSame else self._minMaxNormalize(
+                        self.step_count - lastVisits[node], minimum=minIdleness, maximum=maxIdleness
+                    )
+                else:
+                    idleness_map[node] = 0.0
                 node_type_map[node] = NODE_TYPE.OBSERVABLE_NODE if node in vertices else NODE_TYPE.UNOBSERVABLE_NODE
 
             nx.set_node_attributes(g, -1.0, "lastNode")
             nx.set_node_attributes(g, -1.0, "currentAction")
-            # nx.set_node_attributes(g, idleness_map, "idlenessTime")
+            nx.set_node_attributes(g, idleness_map, "idlenessTime")
             nx.set_node_attributes(g, node_type_map, "nodeType")
 
             # Traverse through all visible agents and add their positions as new nodes to g
@@ -853,6 +919,7 @@ class parallel_env(ParallelEnv):
                     pos = a.position,
                     id = -1 - a.id,
                     nodeType = NODE_TYPE.AGENT,
+                    idlenessTime = 0.0,
                     visitTime = 0.0,
                     lastNode = g.nodes[a.lastNode]["id"] if a.lastNode in g.nodes else -1.0,
                     currentAction = a.currentAction if a in agents else -1.0
@@ -910,45 +977,107 @@ class parallel_env(ParallelEnv):
 
             if self.action_method in ["neighbors", "neighbors_with_comm_boolean"]:
                 edge_attrs = ["weight", "neighborIndex"]
-                node_attrs = ["nodeType", "degree"]
-                # node_attrs = ["nodeType", "idlenessTime", "degree"]
-                # node_attrs = ["id", "nodeType", "idlenessTime", "lastNode", "currentAction"]
+                node_attrs = ["nodeType", "idlenessTime", "degree"]
             else:
                 edge_attrs = ["weight"]
-                node_attrs = ["id", "nodeType", "lastNode", "currentAction"]
+                node_attrs = ["id", "nodeType", "idlenessTime", "lastNode", "currentAction"]
 
-            # Convert g to PyG
-            data = from_networkx(
-                subgraph,
-                group_node_attrs=node_attrs,
-                group_edge_attrs=edge_attrs
-            )
-            data.x = data.x.float()
-            data.edge_attr = data.edge_attr.float()
+            if self.gnn_use_dense_obs:
+                # --- Dense tensor observation path ---
+                layout = self._gnn_dense_layout
+                max_total_nodes = layout["max_total_nodes"]
+                node_feat_dim = layout["node_feat_dim"]
+                edge_feat_dim = layout["edge_feat_dim"]
+                max_edges = layout["max_edges"]
 
-            # Calculate the agent_mask based on the graph node ID assigned to this agent.
-            if agent.edge == None:
-                idx = subgraphNodes.index(agent.lastNode)
-                neighborhood = list(subgraph.neighbors(agent.lastNode))
+                num_real_nodes = len(subgraphNodes)
+                assert num_real_nodes <= max_total_nodes, \
+                    f"Graph has {num_real_nodes} nodes but max_total_nodes={max_total_nodes}. Increase --max_nodes."
+                num_edges = subgraph.number_of_edges()
+                assert num_edges <= max_edges, \
+                    f"Graph has {num_edges} edges but gnn_max_edges={max_edges}. Increase --gnn_max_edges."
+
+                # Build padded node_features: [max_total_nodes, node_feat_dim].
+                node_features = np.zeros((max_total_nodes, node_feat_dim), dtype=np.float32)
+                node_vis = np.zeros(max_total_nodes, dtype=np.float32)
+                for i, n in enumerate(subgraphNodes):
+                    feats = [float(subgraph.nodes[n][a]) for a in node_attrs]
+                    node_features[i] = feats
+                    node_vis[i] = 1.0 if (n in vertices or n in agentnodes) else 0.0
+                # Padding rows: vis=1 so fix_mask=1 (not predicted, fixed at 0).
+                node_vis[num_real_nodes:] = 1.0
+
+                # Build padded edge_index [2, max_edges] and edge_attr [max_edges, edge_feat_dim].
+                node_to_idx = {n: i for i, n in enumerate(subgraphNodes)}
+                edge_index = np.zeros((2, max_edges), dtype=np.float32)
+                edge_attr = np.zeros((max_edges, edge_feat_dim), dtype=np.float32)
+                for k, (u, v) in enumerate(subgraph.edges()):
+                    edge_index[0, k] = node_to_idx[u]
+                    edge_index[1, k] = node_to_idx[v]
+                    edge_attr[k] = [float(subgraph.edges[(u, v)][a]) for a in edge_attrs]
+
+                # agent_idx and neighbor information.
+                if agent.edge is None:
+                    agent_idx_val = subgraphNodes.index(agent.lastNode)
+                    neighborhood = list(subgraph.neighbors(agent.lastNode))
+                else:
+                    agent_idx_val = subgraphNodes.index(f"agent_{agent.id}_pos")
+                    neighborhood = list(subgraph.neighbors(f"agent_{agent.id}_pos"))
+
+                nbr_mask = np.zeros(max_total_nodes, dtype=np.float32)
+                for nb in neighborhood:
+                    if subgraph.nodes[nb]["nodeType"] != NODE_TYPE.AGENT:
+                        nbr_mask[subgraphNodes.index(nb)] = 1.0
+
+                obs["node_features"] = node_features
+                obs["edge_index"] = edge_index
+                obs["edge_attr"] = edge_attr
+                obs["agent_idx"] = np.array([agent_idx_val], dtype=np.float32)
+                obs["neighbors_mask"] = nbr_mask
+                obs["num_nodes"] = np.array([num_real_nodes], dtype=np.float32)
+
+                # Visibility mask: per-node for node_features; all-ones for structural fields.
+                obs_mask = {}
+                obs_mask["node_features"] = np.stack([node_vis] * node_feat_dim, axis=-1)
+                obs_mask["edge_index"] = np.ones((2, max_edges), dtype=np.float32)
+                obs_mask["edge_attr"] = np.ones((max_edges, edge_feat_dim), dtype=np.float32)
+                obs_mask["agent_idx"] = np.ones((1,), dtype=np.float32)
+                obs_mask["neighbors_mask"] = np.ones((max_total_nodes,), dtype=np.float32)
+                obs_mask["num_nodes"] = np.ones((1,), dtype=np.float32)
             else:
-                idx = subgraphNodes.index(f"agent_{agent.id}_pos")
-                neighborhood = list(subgraph.neighbors(f"agent_{agent.id}_pos"))
-            agent_mask = np.zeros(data.num_nodes, dtype=bool)
-            agent_mask[idx] = True
-            data.agent_idx = idx
-            data.agent_mask = agent_mask
+                # --- PyG object observation path (original) ---
+                # Convert g to PyG
+                data = from_networkx(
+                    subgraph,
+                    group_node_attrs=node_attrs,
+                    group_edge_attrs=edge_attrs
+                )
+                data.x = data.x.float()
+                data.edge_attr = data.edge_attr.float()
 
-            # Calculate neighbor information.
-            neighbors = []
-            for neighbor in neighborhood:
-                if subgraph.nodes[neighbor]["nodeType"] != NODE_TYPE.AGENT:
-                    neighbors.append(subgraphNodes.index(neighbor))
-            nbrMask = np.zeros(self.max_nodes, dtype=bool)
-            nbrMask[neighbors] = True
-            data.neighbors = neighbors
-            data.neighbors_mask = nbrMask
+                # Calculate the agent_mask based on the graph node ID assigned to this agent.
+                if agent.edge == None:
+                    idx = subgraphNodes.index(agent.lastNode)
+                    neighborhood = list(subgraph.neighbors(agent.lastNode))
+                else:
+                    idx = subgraphNodes.index(f"agent_{agent.id}_pos")
+                    neighborhood = list(subgraph.neighbors(f"agent_{agent.id}_pos"))
+                agent_mask = np.zeros(data.num_nodes, dtype=bool)
+                agent_mask[idx] = True
+                data.agent_idx = idx
+                data.agent_mask = agent_mask
 
-            obs["graph"] = data
+                # Calculate neighbor information.
+                neighbors = []
+                for neighbor in neighborhood:
+                    if subgraph.nodes[neighbor]["nodeType"] != NODE_TYPE.AGENT:
+                        neighbors.append(subgraphNodes.index(neighbor))
+                nbrMask = np.zeros(self.max_nodes, dtype=bool)
+                nbrMask[neighbors] = True
+                data.neighbors = neighbors
+                data.neighbors_mask = nbrMask
+
+                obs["graph"] = data
 
         # Add observation radius (all observation modes).
         obs["observation_radius"] = np.array([agent.observationRadius], dtype=np.float32)
