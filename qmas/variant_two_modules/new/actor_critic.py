@@ -398,11 +398,17 @@ class QmasActor(nn.Module):
                 scores = self.neighbor_scorer(
                     torch.where(nbr_mask_3d, features_for_scorer, features_for_scorer.new_zeros(())))
 
-                scores_shifted = torch.zeros(B, self.MAX_NEIGHBORS, **self.tpdv)
+                gather_idx = torch.zeros(B, self.MAX_NEIGHBORS, dtype=torch.long, device=scores.device)
+                valid_mask  = torch.zeros(B, self.MAX_NEIGHBORS, dtype=torch.bool,  device=scores.device)
                 for i in range(B):
                     nbr_idx = nbr_mask_1d[i].nonzero(as_tuple=True)[0][:self.MAX_NEIGHBORS]
-                    scores_shifted[i, :nbr_idx.shape[0]] = scores[i, nbr_idx, 0]
-                actor_features = scores_shifted
+                    n = nbr_idx.shape[0]
+                    gather_idx[i, :n] = nbr_idx
+                    valid_mask[i, :n]  = True
+                scores_flat = scores[:, :, 0]  # (B, max_n_i)
+                # Clamp gather_idx to valid range in case max_n_i < MAX_NEIGHBORS.
+                gather_idx = gather_idx.clamp(max=scores_flat.shape[1] - 1)
+                actor_features = torch.gather(scores_flat, 1, gather_idx) * valid_mask.float()
 
             elif agent_idx_t is not None:
                 actor_features = self.base.gatherNodeFeats(actor_features, agent_idx_t)
