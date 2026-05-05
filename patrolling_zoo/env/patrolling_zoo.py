@@ -226,9 +226,10 @@ class parallel_env(ParallelEnv):
         self.max_nodes = max_nodes
         self.max_neighbors = max_neighbors
         self.gnn_use_dense_obs = gnn_use_dense_obs
+        self.graph_random = graph_random
+        self.graph_random_nodes = graph_random_nodes
 
         self.reward_interval = reward_interval
-
         self.alpha = alpha
         self.beta = beta
         self.reward_comms_penalty_weight = reward_comms_penalty_weight
@@ -391,7 +392,13 @@ class parallel_env(ParallelEnv):
                 # idleness is appended; max_total_nodes = patrol nodes + agent position nodes.
                 max_total_nodes = len(self.pg.graph.nodes) + len(self.possible_agents)
                 _actual_max_edges = len(self.pg.graph.edges) * 2 + max_total_nodes
-                max_edges_for_space = int(_actual_max_edges * 1.25) + 1
+                if self.graph_random:
+                    # Random graphs have variable edge counts across subprocesses; use the
+                    # complete directed graph bound N*(N-1) so all processes share the same obs_dim.
+                    n_patrol = self.graph_random_nodes
+                    max_edges_for_space = n_patrol * (n_patrol - 1)
+                else:
+                    max_edges_for_space = int(_actual_max_edges * 1.25) + 1
                 node_feat_dim_with_idleness = node_feat_dim + 1  # +1 for idlenessTime
 
                 state_space["node_features"] = spaces.Box(
