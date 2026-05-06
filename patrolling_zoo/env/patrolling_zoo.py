@@ -426,10 +426,14 @@ class parallel_env(ParallelEnv):
                     shape=(1,),
                     dtype=np.float32,
                 )
+                # neighbors_mask stores node positions in ACTION ORDER (by neighborIndex):
+                # neighbors_mask[k] = index of the action-k target node in the padded node array,
+                # or -1.0 if action k has no valid neighbor.
+                # Shape is (action_neighbors_max_degree,) — one slot per action.
                 state_space["neighbors_mask"] = spaces.Box(
-                    low=0.0,
-                    high=1.0,
-                    shape=(max_total_nodes,),
+                    low=-1.0,
+                    high=float(max_total_nodes - 1),
+                    shape=(self.action_neighbors_max_degree,),
                     dtype=np.float32,
                 )
                 state_space["num_nodes"] = spaces.Box(
@@ -445,6 +449,7 @@ class parallel_env(ParallelEnv):
                     edge_feat_dim=edge_feat_dim,
                     max_edges=max_edges_for_space,
                     node_type_idx=node_type_idx,
+                    action_neighbors_max_degree=self.action_neighbors_max_degree,
                 )
             else:
                 if self.action_method in ["neighbors", "neighbors_with_comm_boolean"]:
@@ -1044,16 +1049,22 @@ class parallel_env(ParallelEnv):
                     agent_idx_val = subgraphNodes.index(f"agent_{agent.id}_pos")
                     neighborhood = list(subgraph.neighbors(f"agent_{agent.id}_pos"))
 
-                nbr_mask = np.zeros(max_total_nodes, dtype=np.float32)
+                # neighbors_mask[k] = node position in the padded array for action k,
+                # or -1.0 if action k has no valid neighbor.
+                n_actions = layout["action_neighbors_max_degree"]
+                nbr_positions = np.full(n_actions, -1.0, dtype=np.float32)
+                action_k = 0
                 for nb in neighborhood:
                     if subgraph.nodes[nb]["nodeType"] != NODE_TYPE.AGENT:
-                        nbr_mask[subgraphNodes.index(nb)] = 1.0
+                        if action_k < n_actions:
+                            nbr_positions[action_k] = float(subgraphNodes.index(nb))
+                            action_k += 1
 
                 obs["node_features"] = node_features
                 obs["edge_index"] = edge_index
                 obs["edge_attr"] = edge_attr
                 obs["agent_idx"] = np.array([agent_idx_val], dtype=np.float32)
-                obs["neighbors_mask"] = nbr_mask
+                obs["neighbors_mask"] = nbr_positions
                 obs["num_nodes"] = np.array([num_real_nodes], dtype=np.float32)
 
                 # Visibility mask: per-node for node_features; all-ones for structural fields.
@@ -1062,7 +1073,7 @@ class parallel_env(ParallelEnv):
                 obs_mask["edge_index"] = np.ones((2, max_edges), dtype=np.float32)
                 obs_mask["edge_attr"] = np.ones((max_edges, edge_feat_dim), dtype=np.float32)
                 obs_mask["agent_idx"] = np.ones((1,), dtype=np.float32)
-                obs_mask["neighbors_mask"] = np.ones((max_total_nodes,), dtype=np.float32)
+                obs_mask["neighbors_mask"] = np.ones((n_actions,), dtype=np.float32)
                 obs_mask["num_nodes"] = np.ones((1,), dtype=np.float32)
             else:
                 # --- PyG object observation path (original) ---
