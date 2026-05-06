@@ -71,7 +71,8 @@ class R_Actor(nn.Module):
             )
             
             if args.gnn_neighbor_scoring:
-                self.neighbor_scorer = MLPLayer(input_dim=args.gnn_hidden_size, output_dim=1, hidden_size=self.hidden_size, layer_N=3, use_orthogonal=args.use_orthogonal, use_ReLU=args.use_ReLU, use_layer_norm=False)
+                self.neighbor_scorer = MLPLayer(input_dim=args.gnn_hidden_size, output_dim=None, hidden_size=self.hidden_size, layer_N=3, use_orthogonal=args.use_orthogonal, use_ReLU=args.use_ReLU, use_layer_norm=False)
+                self.neighbor_scorer_head = nn.Linear(self.hidden_size, 1)
                 input_dim = self.MAX_NEIGHBORS + get_shape_from_obs_space(obs_space_nongraph)[0]
             else:
                 input_dim = args.gnn_hidden_size + get_shape_from_obs_space(obs_space_nongraph)[0]
@@ -158,7 +159,7 @@ class R_Actor(nn.Module):
                 # Extend the mask for the full feature size.
                 neighbors_mask = neighbors_mask.unsqueeze(2).repeat(1, 1, actor_features.shape[-1])
                 actor_features_masked = torch.where(neighbors_mask, actor_features, 0.0)
-                scores = self.neighbor_scorer(actor_features_masked)
+                scores = self.neighbor_scorer_head(self.neighbor_scorer(actor_features_masked))
 
                 # Build gather index without breaking the autograd graph.
                 B_a = actor_features.shape[0]
@@ -252,7 +253,7 @@ class R_Actor(nn.Module):
                 # Extend the mask for the full feature size.
                 neighbors_mask = neighbors_mask.unsqueeze(2).repeat(1, 1, actor_features.shape[-1])
                 actor_features_masked = torch.where(neighbors_mask, actor_features, 0.0)
-                scores = self.neighbor_scorer(actor_features_masked)
+                scores = self.neighbor_scorer_head(self.neighbor_scorer(actor_features_masked))
 
                 # Build gather index without breaking the autograd graph.
                 B_a = actor_features.shape[0]

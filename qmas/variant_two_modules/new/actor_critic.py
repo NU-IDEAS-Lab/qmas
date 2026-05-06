@@ -140,8 +140,11 @@ class QmasActor(nn.Module):
                     scorer_input_dim = args.gnn_hidden_size
                     if args.state_encoder:
                         scorer_input_dim += args.state_encoder_output_dim
-                    self.neighbor_scorer = MLPLayer(input_dim=scorer_input_dim, output_dim=1, hidden_size=self.hidden_size, layer_N=3, use_orthogonal=args.use_orthogonal, use_ReLU=args.use_ReLU, use_layer_norm=False)
-                    input_dim = self.MAX_NEIGHBORS + nongraph_dim
+                    self.neighbor_scorer = MLPLayer(input_dim=scorer_input_dim, output_dim=None, hidden_size=self.hidden_size, layer_N=3, use_orthogonal=args.use_orthogonal, use_ReLU=args.use_ReLU, use_layer_norm=False)
+                    self.neighbor_scorer_head = nn.Linear(self.hidden_size, 1)
+                    n_actions = dict_space.spaces["neighbors_mask"].shape[0]
+                    self._n_actions = n_actions
+                    input_dim = n_actions + nongraph_dim
                 else:
                     input_dim = args.gnn_hidden_size + nongraph_dim
 
@@ -175,8 +178,11 @@ class QmasActor(nn.Module):
                     scorer_input_dim = args.gnn_hidden_size
                     if args.state_encoder:
                         scorer_input_dim += args.state_encoder_output_dim
-                    self.neighbor_scorer = MLPLayer(input_dim=scorer_input_dim, output_dim=1, hidden_size=self.hidden_size, layer_N=3, use_orthogonal=args.use_orthogonal, use_ReLU=args.use_ReLU, use_layer_norm=False)
-                    input_dim = self.MAX_NEIGHBORS + get_shape_from_obs_space(obs_space_nongraph)[0]
+                    # Body MLP (no output_dim → no final activation), then a bare linear head.
+                    # Using output_dim=1 bakes a ReLU into the last layer, killing all gradients.
+                    self.neighbor_scorer = MLPLayer(input_dim=scorer_input_dim, output_dim=None, hidden_size=self.hidden_size, layer_N=3, use_orthogonal=args.use_orthogonal, use_ReLU=args.use_ReLU, use_layer_norm=False)
+                    self.neighbor_scorer_head = nn.Linear(self.hidden_size, 1)
+                    input_dim = self.MAX_NODES + get_shape_from_obs_space(obs_space_nongraph)[0]
                 else:
                     input_dim = args.gnn_hidden_size + get_shape_from_obs_space(obs_space_nongraph)[0]
 
@@ -342,8 +348,8 @@ class QmasActor(nn.Module):
                 batch_vec       = batch_vec_cpu.to(dev)
                 agent_idx_t     = agent_idx_t.to(dev)
 
-                # Neighbor mask (CPU; moved to GPU in shared block if needed).
-                nbr_mask_cpu = _slice_cpu("neighbors_mask") if self.args.gnn_neighbor_scoring else None  # (B, max_N)
+                # Neighbor positions in action order: (B, n_actions) float, -1 = invalid.
+                nbr_mask_cpu = _slice_cpu("neighbors_mask") if self.args.gnn_neighbor_scoring else None
 
                 # Non-graph remainder (e.g. observation_radius).
                 s_r, e_r, _ = offsets.get("observation_radius", (0, 0, (0,)))
@@ -380,13 +386,27 @@ class QmasActor(nn.Module):
             max_n_i        = actor_features.shape[1]
 
             if nbr_mask_cpu is not None:
-                # Trim / pad neighbor mask to the dense-batch node dimension.
-                nbr_cols = nbr_mask_cpu.shape[1]
-                if max_n_i <= nbr_cols:
-                    nbr_mask_1d = nbr_mask_cpu[:, :max_n_i].bool().to(self.device)
-                else:
-                    pad = torch.zeros(B, max_n_i - nbr_cols, dtype=torch.bool)
-                    nbr_mask_1d = torch.cat([nbr_mask_cpu.bool(), pad], dim=1).to(self.device)
+                # nbr_mask_cpu[i, k] = node position (in padded array) for action k,
+                # or -1.0 if action k has no valid neighbor.  Shape: (B, n_actions).
+                # This encodes neighbors in ACTION ORDER so actor_features[i, k] directly
+                # gives the GNN score for the target of action k.
+                n_actions   = nbr_mask_cpu.shape[1]
+                dev         = self.device
+
+                # Valid actions: position >= 0  (invalid slots store -1.0)
+                valid_mask  = (nbr_mask_cpu > -0.5).to(dev)                        # (B, n_actions) bool
+                # Clamp invalid (-1) positions to 0 for gather; they will be zeroed by valid_mask.
+                gather_idx  = nbr_mask_cpu.clamp(min=0).long().to(dev)             # (B, n_actions) long
+                gather_idx  = gather_idx.clamp(max=max(max_n_i - 1, 0))
+
+                # Rebuild per-node boolean mask for the scorer (which nodes are reachable neighbors).
+                nbr_node_mask_int = torch.zeros(B, max_n_i, dtype=torch.long, device=dev)
+                nbr_node_mask_int.scatter_add_(
+                    1,
+                    gather_idx.clamp(max=max_n_i - 1),
+                    valid_mask.long(),
+                )
+                nbr_mask_1d = nbr_node_mask_int.bool()  # (B, max_n_i)
 
                 if self._use_state_encoder and encoded_state is not None:
                     enc_bc = encoded_state.unsqueeze(1).expand(-1, max_n_i, -1)
@@ -395,20 +415,13 @@ class QmasActor(nn.Module):
                     features_for_scorer = actor_features
 
                 nbr_mask_3d = nbr_mask_1d.unsqueeze(2).expand_as(features_for_scorer)
-                scores = self.neighbor_scorer(
+                hidden = self.neighbor_scorer(
                     torch.where(nbr_mask_3d, features_for_scorer, features_for_scorer.new_zeros(())))
+                scores = self.neighbor_scorer_head(hidden)  # (B, max_n_i, 1) — no final activation
 
-                gather_idx = torch.zeros(B, self.MAX_NEIGHBORS, dtype=torch.long, device=scores.device)
-                valid_mask  = torch.zeros(B, self.MAX_NEIGHBORS, dtype=torch.bool,  device=scores.device)
-                for i in range(B):
-                    nbr_idx = nbr_mask_1d[i].nonzero(as_tuple=True)[0][:self.MAX_NEIGHBORS]
-                    n = nbr_idx.shape[0]
-                    gather_idx[i, :n] = nbr_idx
-                    valid_mask[i, :n]  = True
-                scores_flat = scores[:, :, 0]  # (B, max_n_i)
-                # Clamp gather_idx to valid range in case max_n_i < MAX_NEIGHBORS.
-                gather_idx = gather_idx.clamp(max=scores_flat.shape[1] - 1)
+                scores_flat    = scores[:, :, 0]            # (B, max_n_i)
                 actor_features = torch.gather(scores_flat, 1, gather_idx) * valid_mask.float()
+                # actor_features shape: (B, n_actions) — score for each action's target node.
 
             elif agent_idx_t is not None:
                 actor_features = self.base.gatherNodeFeats(actor_features, agent_idx_t)
