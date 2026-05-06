@@ -163,12 +163,6 @@ class PettingzooRunner(Runner):
                 # zeros so the buffer slot has the correct shape before collect() overwrites it.
                 obs_full = obs
                 obs = np.concatenate([obs, np.zeros_like(obs)], axis=-1)
-                # Extend visibility_mask to match the doubled obs size. The appended UQ portion
-                # is always unmasked (ones) since it does not correspond to observable features.
-                if visibility_mask is not None:
-                    visibility_mask = np.concatenate(
-                        [visibility_mask, np.ones_like(visibility_mask)], axis=-1
-                    )
 
         # Initialize buffer.
         self.buffer.insert(
@@ -337,11 +331,6 @@ class PettingzooRunner(Runner):
             if obs.dtype != object and not self.all_args.state_encoder and self.all_args.prediction_uq_injection_method == "append":
                 obs_full = obs
                 obs = np.concatenate([obs, np.zeros_like(obs)], axis=-1)
-                # Extend visibility_mask to match the doubled obs size.
-                if visibility_mask is not None:
-                    visibility_mask = np.concatenate(
-                        [visibility_mask, np.ones_like(visibility_mask)], axis=-1
-                    )
 
         # Get extra state information from infos.
         state_visibility_mask = None
