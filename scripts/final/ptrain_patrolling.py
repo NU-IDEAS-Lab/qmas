@@ -49,12 +49,12 @@ for i, script in enumerate(scripts):
     args = module.args
     args = argreplace(args, "cuda_idx", str(cuda_idx[i]))
     # args = argreplace(args, "state_encoder_output_dim", f"128")
-    args = argreplace(args, "observation_mask", False)
-    args = argreplace(args, "n_rollout_threads", "66")
-    args = argreplace(args, "num_mini_batch", "5")
+    args = argreplace(args, "observation_mask", True)
+    args = argreplace(args, "n_rollout_threads", "12")
+    args = argreplace(args, "num_mini_batch", "20")
     # args = argreplace(args, "beta", "0.5")
     # args = argreplace(args, "alpha", "1.0")
-    args = argreplace(args, "reward_comms_penalty_weight", "0.0")
+    # args = argreplace(args, "reward_comms_penalty_weight", "0.0")
     # args = argreplace(args, "reward_method_terminal", "average")
     args = argreplace(args, "use_linear_lr_decay", False)
     # args = argreplace(args, "reward_interval", "-1")
@@ -68,12 +68,14 @@ for i, script in enumerate(scripts):
 
 
     # TEST WITH SMALL GRAPH
-    # args = argreplace(args, "experiment_name", f"test-nodes10-denseGNN2-{script}")
-    args = argreplace(args, "graph_random_nodes", "10")
-    args = argreplace(args, "regenerate_graph_on_reset", False)
-    args = argreplace(args, "num_agents", "2")
-    args = argreplace(args, "episode_length", "100")
-    args = argreplace(args, "max_cycles", "100")
+    # args = argreplace(args, "experiment_name", f"noVisitConstraint-{script}")
+    # args = argreplace(args, "graph_random_nodes", "10")
+    # args = argreplace(args, "regenerate_graph_on_reset", False)
+    # args = argreplace(args, "num_agents", "2")
+    # args = argreplace(args, "episode_length", "100")
+    # args = argreplace(args, "max_cycles", "100")
+
+    # args = argreplace(args, "use_wandb", False)
 
     p = multiprocessing.Process(target=module.main, args=(args,))
     p.start()
