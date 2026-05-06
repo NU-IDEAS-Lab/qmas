@@ -824,14 +824,11 @@ class parallel_env(ParallelEnv):
 
             idleness_visible = force_idleness_visible
 
-            # Nodes currently occupied by a visible agent have idleness=0 and are observable.
-            visited_nodes = {a.lastNode for a in agents if a.edge is None}
-
             # Fill in actual values.
             # obs_mask is always False for vertex_state (idleness is never revealed to agents).
             for node in range(self.pg.graph.number_of_nodes()):
                 obs["vertex_state"][node] = self.pg.getNodeIdlenessTime(node, self.step_count)
-                obs_mask["vertex_state"][node] = np.array([idleness_visible or node in visited_nodes], dtype=bool)
+                obs_mask["vertex_state"][node] = np.array([idleness_visible], dtype=bool)
 
         # Add vertex 2D coordinates.
         if observe_method in ["coordinates"]:
