@@ -296,7 +296,10 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
                 if self._use_proper_time_limits:
                     gae = gae * self.bad_masks[step + 1]
 
-                self["returns"][step] = gae + value_normalizer.denormalize(self["value_preds"][step])
+                if self._use_popart or self._use_valuenorm:
+                    self["returns"][step] = gae + value_normalizer.denormalize(self["value_preds"][step])
+                else:
+                    self["returns"][step] = gae + self["value_preds"][step]
 
         else:
             self["returns"][last_step] = next_value
