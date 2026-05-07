@@ -141,6 +141,9 @@ class PettingzooRunner(Runner):
             visibility_mask = np.array([info["visibility_mask"] for info in infos], dtype=np.float32)
         else:
             visibility_mask = np.ones_like(obs, dtype=np.float32)
+        visibility_mask_global = None
+        if "visibility_mask_global" in infos[0]:
+            visibility_mask_global = np.array([info["visibility_mask_global"] for info in infos], dtype=np.float32)
 
         observation_global = None
         if "observation_global" in infos[0] and not self.all_args.disable_observation_global:
@@ -163,6 +166,14 @@ class PettingzooRunner(Runner):
                 # zeros so the buffer slot has the correct shape before collect() overwrites it.
                 obs_full = obs
                 obs = np.concatenate([obs, np.zeros_like(obs)], axis=-1)
+
+        # Apply visibility mask to global obs before the initial insertion.
+        if self.all_args.observation_mask and observation_global is not None and visibility_mask_global is not None:
+            mask = visibility_mask_global
+            if mask.shape[-1] < observation_global.shape[-1]:
+                pad = np.ones((*mask.shape[:-1], observation_global.shape[-1] - mask.shape[-1]), dtype=np.float32)
+                mask = np.concatenate([mask, pad], axis=-1)
+            observation_global = observation_global * mask
 
         # Initialize buffer.
         self.buffer.insert(
