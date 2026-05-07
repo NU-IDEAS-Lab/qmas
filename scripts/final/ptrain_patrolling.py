@@ -1,13 +1,13 @@
 import multiprocessing
 import importlib
 
-cuda_idx = [0, 1, 2, 3, 4, 5, 6, 7]
-# cuda_idx = [5, 6]
+# cuda_idx = [0, 1, 2, 3, 4, 5, 6, 7]
+cuda_idx = [5, 6]
 scripts = [
     "train_patrolling",
     "train_patrolling_pred",
-    "train_patrolling_pred_uq",
-    "train_patrolling_comms_pred",
+    # "train_patrolling_pred_uq",
+    # "train_patrolling_comms_pred",
     "train_patrolling_comms_pred_uq",
 ]
 
@@ -65,7 +65,7 @@ for i, script in enumerate(scripts):
     args = argreplace(args, "gnn_use_dense_obs", True)
     args = argreplace(args, "state_encoder", False)
     args = argreplace(args, "disable_observation_global", True)
-    args = argreplace(args, "algorithm_name", "mappo")
+    # args = argreplace(args, "algorithm_name", "mappo")
 
 
     # TEST WITH SMALL GRAPH
