@@ -550,8 +550,12 @@ class PettingzooRunner(Runner):
         # Call the reset function to determine whether this environment returns global observations.
         obs, share_obs, available_actions, infos = env.reset(return_info=True)
                 
-        # Get shape of observation space.
-        if "observation_global" in infos[0]:
+        # Get shape of observation space used by the predictor.
+        use_observation_global = (
+            "observation_global" in infos[0]
+            and not self.all_args.disable_observation_global
+        )
+        if use_observation_global:
             obs_shape = get_shape_from_obs_space(self.buffer.share_obs_space)
         else:
             obs_shape = get_shape_from_obs_space(self.buffer.obs_space)
@@ -571,7 +575,7 @@ class PettingzooRunner(Runner):
             self._seed_trajectory_buffer(trajectory, obs, rollout_threads, share_obs=share_obs)
 
             # Fallback (masked) observation_global used when prediction is not yet available.
-            if "observation_global" in reset_infos[0]:
+            if use_observation_global and "observation_global" in reset_infos[0]:
                 obs_global_fallback = np.array([info["observation_global"] for info in reset_infos])
                 if self.all_args.observation_mask and "visibility_mask_global" in reset_infos[0]:
                     viz_mask_global_reset = np.array([info["visibility_mask_global"] for info in reset_infos])
@@ -653,18 +657,34 @@ class PettingzooRunner(Runner):
 
                 obs, share_obs, rewards, dones, infos, available_actions = env.step(actions_env)
 
-                observation_global = np.array([info["observation_global"] for info in infos]) if "observation_global" in infos[0] else None
+                observation_global = (
+                    np.array([info["observation_global"] for info in infos])
+                    if use_observation_global and "observation_global" in infos[0]
+                    else None
+                )
                 # Save unmasked ground truth before masking, for use as prediction error reference next step.
-                ground_truth_obs_prev = observation_global.copy() if observation_global is not None else None
+                if observation_global is not None:
+                    ground_truth_obs_prev = observation_global.copy()
+                elif obs.dtype != object:
+                    ground_truth_obs_prev = obs.copy()
+                else:
+                    ground_truth_obs_prev = None
                 if hasattr(self.policy, "predictors") and not self.all_args.prediction_disable:
-                    obs, observation_global = self._apply_masks_and_update_trajectory(trajectory, obs, infos, actions, rollout_threads, global_obs=observation_global)
+                    obs, observation_global = self._apply_masks_and_update_trajectory(
+                        trajectory,
+                        obs,
+                        infos,
+                        actions,
+                        rollout_threads,
+                        global_obs=observation_global,
+                    )
                 else:
                     if self.all_args.observation_mask:
                         viz_mask_local = np.array([info["visibility_mask"] for info in infos]) if "visibility_mask" in infos[0] else np.ones_like(obs)
                         viz_mask_global = np.array([info["visibility_mask_global"] for info in infos]) if "visibility_mask_global" in infos[0] else None
                         if obs.dtype != object:
                             obs = obs * viz_mask_local
-                        if observation_global is not None and viz_mask_global is not None:
+                        if use_observation_global and observation_global is not None and viz_mask_global is not None:
                             observation_global = observation_global * viz_mask_global
 
                 # Save the current masked observation_global for use as fallback in the next step.
@@ -717,8 +737,12 @@ class PettingzooRunner(Runner):
         # Call the reset function to determine whether this environment returns global observations.
         obs, share_obs, available_actions, infos = env.reset(return_info=True)
                 
-        # Get shape of observation space.
-        if "observation_global" in infos[0]:
+        # Get shape of observation space used by the predictor.
+        use_observation_global = (
+            "observation_global" in infos[0]
+            and not self.all_args.disable_observation_global
+        )
+        if use_observation_global:
             obs_shape = get_shape_from_obs_space(self.buffer.share_obs_space)
         else:
             obs_shape = get_shape_from_obs_space(self.buffer.obs_space)
@@ -738,7 +762,7 @@ class PettingzooRunner(Runner):
             self._seed_trajectory_buffer(trajectory, obs, rollout_threads, share_obs=share_obs)
 
             # Fallback (masked) observation_global used when prediction is not yet available.
-            if "observation_global" in reset_infos[0]:
+            if use_observation_global and "observation_global" in reset_infos[0]:
                 obs_global_fallback = np.array([info["observation_global"] for info in reset_infos])
                 if self.all_args.observation_mask and "visibility_mask_global" in reset_infos[0]:
                     viz_mask_global_reset = np.array([info["visibility_mask_global"] for info in reset_infos])
@@ -829,18 +853,34 @@ class PettingzooRunner(Runner):
 
                 obs, share_obs, rewards, dones, infos, available_actions = env.step(actions_env)
 
-                observation_global = np.array([info["observation_global"] for info in infos]) if "observation_global" in infos[0] else None
+                observation_global = (
+                    np.array([info["observation_global"] for info in infos])
+                    if use_observation_global and "observation_global" in infos[0]
+                    else None
+                )
                 # Save unmasked ground truth before masking, for use as prediction error reference next step.
-                ground_truth_obs_prev = observation_global.copy() if observation_global is not None else None
+                if observation_global is not None:
+                    ground_truth_obs_prev = observation_global.copy()
+                elif obs.dtype != object:
+                    ground_truth_obs_prev = obs.copy()
+                else:
+                    ground_truth_obs_prev = None
                 if hasattr(self.policy, "predictors") and not self.all_args.prediction_disable:
-                    obs, observation_global = self._apply_masks_and_update_trajectory(trajectory, obs, infos, actions, rollout_threads, global_obs=observation_global)
+                    obs, observation_global = self._apply_masks_and_update_trajectory(
+                        trajectory,
+                        obs,
+                        infos,
+                        actions,
+                        rollout_threads,
+                        global_obs=observation_global,
+                    )
                 else:
                     if self.all_args.observation_mask:
                         viz_mask_local = np.array([info["visibility_mask"] for info in infos]) if "visibility_mask" in infos[0] else np.ones_like(obs)
                         viz_mask_global = np.array([info["visibility_mask_global"] for info in infos]) if "visibility_mask_global" in infos[0] else None
                         if obs.dtype != object:
                             obs = obs * viz_mask_local
-                        if observation_global is not None and viz_mask_global is not None:
+                        if use_observation_global and observation_global is not None and viz_mask_global is not None:
                             observation_global = observation_global * viz_mask_global
 
                 # Save the current masked observation_global for use as fallback in the next step.
