@@ -1015,7 +1015,7 @@ class parallel_env(ParallelEnv):
 
                 # Build padded node_features: [max_total_nodes, node_feat_dim].
                 node_features = np.zeros((max_total_nodes, node_feat_dim), dtype=np.float32)
-                node_vis = np.zeros(max_total_nodes, dtype=np.float32)
+                node_vis = np.zeros_like(node_features)
                 idle_feat_idx = node_attrs.index("idlenessTime")
                 for i, n in enumerate(subgraphNodes):
                     feats = [float(subgraph.nodes[n][a]) for a in node_attrs]
@@ -1025,9 +1025,10 @@ class parallel_env(ParallelEnv):
                             _allIdlenessRaw[n], minimum=_minAllIdleness, maximum=_maxAllIdleness
                         )
                     node_features[i] = feats
-                    node_vis[i] = 1.0 if (n in vertices or n in agentnodes) else 0.0
-                # Padding rows: vis=1 so fix_mask=1 (not predicted, fixed at 0).
-                node_vis[num_real_nodes:] = 1.0
+                    node_vis[i, 0] = 1.0 # nodeType
+                    node_vis[i, 1] = 1.0 if n in agentnodes else 0.0 # node idleness is not visible
+                    node_vis[i, 2] = 1.0 # node degree
+                node_vis[num_real_nodes:, :] = 1.0
 
                 # Build padded edge_index [2, max_edges] and edge_attr [max_edges, edge_feat_dim].
                 node_to_idx = {n: i for i, n in enumerate(subgraphNodes)}
@@ -1066,7 +1067,7 @@ class parallel_env(ParallelEnv):
 
                 # Visibility mask: per-node for node_features; all-ones for structural fields.
                 obs_mask = {}
-                obs_mask["node_features"] = np.stack([node_vis] * node_feat_dim, axis=-1)
+                obs_mask["node_features"] = node_vis
                 obs_mask["edge_index"] = np.ones((2, max_edges), dtype=np.float32)
                 obs_mask["edge_attr"] = np.ones((max_edges, edge_feat_dim), dtype=np.float32)
                 obs_mask["agent_idx"] = np.ones((1,), dtype=np.float32)
