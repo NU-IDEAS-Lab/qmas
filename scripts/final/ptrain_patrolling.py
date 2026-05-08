@@ -65,8 +65,9 @@ for i, script in enumerate(scripts):
     args = argreplace(args, "gnn_use_dense_obs", True)
     args = argreplace(args, "state_encoder", False)
     args = argreplace(args, "disable_observation_global", True)
+    args = argreplace(args, "prediction_history_include_actions", True)
     args = argreplace(args, "diffusion_autoregression_steps", "1")
-    # args = argreplace(args, "algorithm_name", "rmappo")
+    args = argreplace(args, "algorithm_name", "mappo")
 
     # args = argreplace(args, "data_chunk_length", "2")
     # args = argreplace(args, "recurrent_N", "1")
