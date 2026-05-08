@@ -161,15 +161,6 @@ class Predictor(torch.nn.Module):
         self.register_buffer("obs_running_var", torch.ones_like(fix_mask, dtype=torch.float32))
         self.register_buffer("obs_running_count", torch.full_like(fix_mask, self.norm_eps, dtype=torch.float32))
 
-        if "diffusion" in self.diffuser.model:
-            self.diffuser.model["diffusion"] = torch.compile(
-                self.diffuser.model["diffusion"], fullgraph=False, mode="default"
-            )
-        if hasattr(self.diffuser, "model_ema") and "diffusion" in self.diffuser.model_ema:
-            self.diffuser.model_ema["diffusion"] = torch.compile(
-                self.diffuser.model_ema["diffusion"], fullgraph=False, mode="default"
-            )
-
 
     def _ensure_norm_shape(self, x: torch.Tensor):
         """Ensure normalization buffers match current trajectory feature shape."""
