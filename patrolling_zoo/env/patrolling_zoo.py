@@ -441,6 +441,12 @@ class parallel_env(ParallelEnv):
                     shape=(1,),
                     dtype=np.float32,
                 )
+                state_space["num_edges"] = spaces.Box(
+                    low=0,
+                    high=max_edges_for_space,
+                    shape=(1,),
+                    dtype=np.float32,
+                )
                 # Store layout metadata on self for use in _populateStateSpace, actor, and algorithm.
                 self._gnn_dense_layout = dict(
                     max_total_nodes=max_total_nodes,
@@ -1035,6 +1041,7 @@ class parallel_env(ParallelEnv):
                 obs["agent_idx"] = np.array([agent_idx_val], dtype=np.float32)
                 obs["neighbors_mask"] = nbr_positions
                 obs["num_nodes"] = np.array([num_real_nodes], dtype=np.float32)
+                obs["num_edges"] = np.array([num_edges], dtype=np.float32)
 
                 # Visibility mask: per-node for node_features; all-ones for structural fields.
                 obs_mask = {}
@@ -1044,6 +1051,7 @@ class parallel_env(ParallelEnv):
                 obs_mask["agent_idx"] = np.ones((1,), dtype=np.float32)
                 obs_mask["neighbors_mask"] = np.ones((n_actions,), dtype=np.float32)
                 obs_mask["num_nodes"] = np.ones((1,), dtype=np.float32)
+                obs_mask["num_edges"] = np.ones((1,), dtype=np.float32)
             else:
                 # --- PyG object observation path (original) ---
                 obs_mask = None

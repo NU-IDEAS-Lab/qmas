@@ -118,7 +118,7 @@ class QmasActor(nn.Module):
                 # Non-graph obs (observation_radius etc.) — nothing remains after removing graph keys.
                 nongraph_dim = 0
                 for key, space in dict_space.spaces.items():
-                    if key not in ("node_features", "edge_index", "edge_attr", "agent_idx", "neighbors_mask", "num_nodes"):
+                    if key not in ("node_features", "edge_index", "edge_attr", "agent_idx", "neighbors_mask", "num_nodes", "num_edges"):
                         nongraph_dim += int(np.prod(space.shape))
 
                 self.base = GNNBase(
@@ -320,7 +320,9 @@ class QmasActor(nn.Module):
                 edge_attr_pad     = _slice_cpu("edge_attr")               # (B, max_E, EF)
                 agent_idx_t       = _slice_cpu("agent_idx").long()        # (B, 1)
                 num_nodes_t       = _slice_cpu("num_nodes").squeeze(-1).long()  # (B,)
+                num_edges_t       = _slice_cpu("num_edges").squeeze(-1).long()  # (B,)
                 max_N             = layout["max_total_nodes"]
+                max_E             = layout["max_edges"]
 
                 # Node validity mask and compact node tensor.
                 node_range = torch.arange(max_N)
@@ -332,11 +334,12 @@ class QmasActor(nn.Module):
                 cum_nodes     = torch.zeros(B, dtype=torch.long)
                 cum_nodes[1:] = num_nodes_t[:-1].cumsum(0)
 
-                # Edge validity and remapping (float32 arithmetic exact for ints < 2^24).
-                n_i_f        = num_nodes_t.float().unsqueeze(1)
+                # Edge validity: only the first num_edges_t[i] slots are real; the rest
+                # are zero-padded and would otherwise look like (0, 0) self-loops.
                 ei_src_f     = edge_index_pad_f[:, 0, :]
                 ei_dst_f     = edge_index_pad_f[:, 1, :]
-                edge_valid   = (ei_src_f < n_i_f) & (ei_dst_f < n_i_f)
+                edge_range   = torch.arange(max_E)
+                edge_valid   = edge_range.unsqueeze(0) < num_edges_t.unsqueeze(1)  # (B, max_E)
                 offset_f     = cum_nodes.float().unsqueeze(1)
                 ei_src_g     = (ei_src_f + offset_f)[edge_valid].long()
                 ei_dst_g     = (ei_dst_f + offset_f)[edge_valid].long()
