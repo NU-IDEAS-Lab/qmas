@@ -247,6 +247,13 @@ class PettingzooRunner(Runner):
             pred_now = pred[:, -1]
             uncertainty_now = uncertainty[:, -1]
 
+            # When the trajectory includes actions (prepended), strip the action prefix so
+            # that pred_now and uncertainty_now contain only the obs dimensions.
+            if self.all_args.prediction_history_include_actions:
+                act_size = int(np.prod(get_shape_from_act_space(self.buffer.act_space)))
+                pred_now = pred_now[..., act_size:]
+                uncertainty_now = uncertainty_now[..., act_size:]
+
             # Replace the observation with the prediction.
             if self.all_args.prediction_during_training:
                 obs_dim = pred_now.shape[-1]
@@ -518,8 +525,14 @@ class PettingzooRunner(Runner):
         uncertainty = uncertainty.detach().cpu()
         prediction_prev = member_preds.detach().cpu()
 
-        pred_now = pred[:, -1].reshape((n_threads, self.num_agents, *obs_shape))
-        uncertainty_now = uncertainty[:, -1].reshape((n_threads, self.num_agents, *obs_shape))
+        pred_last = pred[:, -1]
+        uncertainty_last = uncertainty[:, -1]
+        if self.all_args.prediction_history_include_actions:
+            act_size = int(np.prod(get_shape_from_act_space(self.buffer.act_space)))
+            pred_last = pred_last[..., act_size:]
+            uncertainty_last = uncertainty_last[..., act_size:]
+        pred_now = pred_last.reshape((n_threads, self.num_agents, *obs_shape))
+        uncertainty_now = uncertainty_last.reshape((n_threads, self.num_agents, *obs_shape))
 
         if ground_truth_obs is not None:
             # Use the unmasked ground truth (provided by the caller from infos before masking).
@@ -617,6 +630,10 @@ class PettingzooRunner(Runner):
                 if use_prediction:
                     prediction_now = prediction[:, -1]
                     uncertainty_now = uncertainty[:, -1]
+                    if self.all_args.prediction_history_include_actions:
+                        act_size = int(np.prod(get_shape_from_act_space(self.buffer.act_space)))
+                        prediction_now = prediction_now[..., act_size:]
+                        uncertainty_now = uncertainty_now[..., act_size:]
                 else:
                     prediction_now = None
                     uncertainty_now = torch.zeros((rollout_threads, self.num_agents, *obs_shape), dtype=torch.float32)
@@ -809,6 +826,10 @@ class PettingzooRunner(Runner):
                 if use_prediction:
                     prediction_now = prediction[:, -1]
                     uncertainty_now = uncertainty[:, -1]
+                    if self.all_args.prediction_history_include_actions:
+                        act_size = int(np.prod(get_shape_from_act_space(self.buffer.act_space)))
+                        prediction_now = prediction_now[..., act_size:]
+                        uncertainty_now = uncertainty_now[..., act_size:]
 
                     for agentIdx in range(self.num_agents):
                         print(f"Mean Prediction Error ({agentIdx}): {prediction_error.mean():.2f}")

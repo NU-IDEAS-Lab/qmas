@@ -217,24 +217,41 @@ class QmasAlgorithm(Algorithm):
             obs_batch = sample[key_obs]
             rewards_batch = sample["rewards"]
             fix_mask_batch = sample[key_visibility]
+            actions_batch = sample["actions"]
         else:
             obs_batch = sample[key_obs][:, :, thread_indices]
             rewards_batch = sample["rewards"][:, :, thread_indices]
             fix_mask_batch = sample[key_visibility][:, :, thread_indices]
+            actions_batch = sample["actions"][:, :, thread_indices]
 
         # If using individual observations, we need to treat each agent as a separate batch item.
         if individual_obs:
             obs_batch = einops.rearrange(obs_batch, 'b h t n ... -> (b n) h t ...')
             fix_mask_batch = einops.rearrange(fix_mask_batch, 'b h t n ... -> (b n) h t ...')
+            actions_batch = einops.rearrange(actions_batch, 'b h t n ... -> (b n) h t ...')
+        elif self.args.prediction_history_include_actions:
+            # For global-state observations (individual_obs=False), the diffuser was initialised with
+            # transition_dim = per-agent action_dim + obs_dim.  At inference time, each
+            # (thread × agent) pair contributes its own trajectory, so we need to replicate
+            # the global obs once per agent and pair it with each agent's action before
+            # applying the standard per-agent rearrange.
+            n_agents = actions_batch.shape[3]  # [b, h, t, n_agents, action_dim]
+            obs_batch = obs_batch.unsqueeze(3).expand(-1, -1, -1, n_agents, -1)   # [b, h, t, n, obs_dim]
+            fix_mask_batch = fix_mask_batch.unsqueeze(3).expand(-1, -1, -1, n_agents, -1)
+            obs_batch = einops.rearrange(obs_batch, 'b h t n ... -> (b n) h t ...')
+            fix_mask_batch = einops.rearrange(fix_mask_batch, 'b h t n ... -> (b n) h t ...')
+            actions_batch = einops.rearrange(actions_batch, 'b h t n ... -> (b n) h t ...')
 
         if self.predictor_2d_conv:
             # Set up batches for 2D convolution.
             obs_batch = einops.rearrange(obs_batch, 'b h t c ... -> (b t) (h c) ...')
             fix_mask_batch = einops.rearrange(fix_mask_batch, 'b h t c ... -> (b t) (h c) ...')
+            actions_batch = einops.rearrange(actions_batch, 'b h t c ... -> (b t) (h c) ...')
         else:
             # Set up batches for 1D convolution.
             obs_batch = einops.rearrange(obs_batch, 'b h t ... -> (b t) h (...)')
             fix_mask_batch = einops.rearrange(fix_mask_batch, 'b h t ... -> (b t) h (...)')
+            actions_batch = einops.rearrange(actions_batch, 'b h t ... -> (b t) h (...)')
 
         # Process rewards. Sum rewards across all agents.
         rewards_batch = einops.rearrange(rewards_batch, 'b h t ... -> (b t) h ...')
@@ -247,8 +264,13 @@ class QmasAlgorithm(Algorithm):
         returns_batch = torch.sum(rewards_batch * discounts, dim=1) #.reshape((-1, 1))
 
         # Build trajectories.
-        # trajectories = torch.cat([actions_batch, obs_batch], dim=-1)
-        trajectories = obs_batch
+        if self.args.prediction_history_include_actions:
+            trajectories = torch.cat([actions_batch, obs_batch], dim=-1)
+            # Pad fix_mask with ones for action dimensions (actions are always observed).
+            action_mask = torch.ones_like(actions_batch)
+            fix_mask_batch = torch.cat([action_mask, fix_mask_batch], dim=-1)
+        else:
+            trajectories = obs_batch
 
         # Transfer tensors to the device.
         trajectories = trajectories.float().to(predictor.device)
