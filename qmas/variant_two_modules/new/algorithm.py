@@ -89,23 +89,37 @@ class QmasAlgorithm(Algorithm):
                 thread_indices = torch.arange(self.args.n_rollout_threads)
                 thread_splits = torch.split(thread_indices, split_size)
 
+                pred_streams = [
+                    torch.cuda.Stream(device=p.device) if p.device.type == "cuda" else None
+                    for p in self.predictors
+                ]
+
                 for e in range(self.args.diffusion_epoch):
                     data_generator = buffer.sample_trajectories(self.num_mini_batch, self.prediction_horizon)
                     for sample in data_generator:
-                        # For each sample, run each predictor's update in its own thread
+                        # For each sample, run each predictor's update in its own thread and CUDA stream.
                         pred_threads = []
                         pred_losses = [None] * self.num_predictors
                         pred_guides = [None] * self.num_predictors
                         pred_uncerts = [None] * self.num_predictors
 
-                        def make_pred_thread(i, predictor):
+                        def make_pred_thread(i, predictor, stream):
                             def run():
                                 try:
-                                    # Use a local dict to accumulate losses for this predictor
                                     local_info = {'diffuser_loss': 0, 'guide_loss': 0, 'uncertainty_loss': 0}
                                     if len(thread_splits[i]) == 0:
                                         raise ValueError("Thread split is empty. Check prediction_ensemble_size and n_rollout_threads.")
-                                    self.train_sample_diffuser(sample, local_info, predictor, thread_indices=thread_splits[i])
+                                    if stream is not None:
+                                        # Make this stream wait for any prior work queued on
+                                        # the default stream (e.g. data already on GPU).
+                                        stream.wait_stream(torch.cuda.current_stream(stream.device))
+                                        with torch.cuda.stream(stream):
+                                            self.train_sample_diffuser(sample, local_info, predictor, thread_indices=thread_splits[i])
+                                        # Default stream needs to wait on this one before
+                                        # downstream readers (e.g. the policy thread or next epoch).
+                                        torch.cuda.current_stream(stream.device).wait_stream(stream)
+                                    else:
+                                        self.train_sample_diffuser(sample, local_info, predictor, thread_indices=thread_splits[i])
                                     pred_losses[i] = local_info['diffuser_loss']
                                     pred_guides[i] = local_info['guide_loss']
                                     pred_uncerts[i] = local_info.get('uncertainty_loss', 0)
@@ -115,7 +129,7 @@ class QmasAlgorithm(Algorithm):
                             return run
 
                         for i, predictor in enumerate(self.predictors):
-                            t = threading.Thread(target=make_pred_thread(i, predictor))
+                            t = threading.Thread(target=make_pred_thread(i, predictor, pred_streams[i]))
                             pred_threads.append(t)
                             t.start()
 
@@ -250,9 +264,11 @@ class QmasAlgorithm(Algorithm):
         predictor.diffuser.fix_mask = fix_mask_batch
 
         # Update diffuser model.
-        diffuser_loss = predictor.diffuser.update_diffusion(
-            x0=trajectories_normalized,
-        )['diffusion_loss']
+        autocast_device = "cuda" if predictor.device.type == "cuda" else "cpu"
+        with torch.autocast(device_type=autocast_device, dtype=torch.bfloat16):
+            diffuser_loss = predictor.diffuser.update_diffusion(
+                x0=trajectories_normalized,
+            )['diffusion_loss']
         train_info['diffuser_loss'] += diffuser_loss
 
         # Calculate uncertainty estimation loss.

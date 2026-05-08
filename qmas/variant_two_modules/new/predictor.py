@@ -161,6 +161,15 @@ class Predictor(torch.nn.Module):
         self.register_buffer("obs_running_var", torch.ones_like(fix_mask, dtype=torch.float32))
         self.register_buffer("obs_running_count", torch.full_like(fix_mask, self.norm_eps, dtype=torch.float32))
 
+        if "diffusion" in self.diffuser.model:
+            self.diffuser.model["diffusion"] = torch.compile(
+                self.diffuser.model["diffusion"], fullgraph=False, mode="default"
+            )
+        if hasattr(self.diffuser, "model_ema") and "diffusion" in self.diffuser.model_ema:
+            self.diffuser.model_ema["diffusion"] = torch.compile(
+                self.diffuser.model_ema["diffusion"], fullgraph=False, mode="default"
+            )
+
 
     def _ensure_norm_shape(self, x: torch.Tensor):
         """Ensure normalization buffers match current trajectory feature shape."""
@@ -271,7 +280,8 @@ class Predictor(torch.nn.Module):
         self.diffuser.fix_mask = visibility_mask
 
         # Sample from the diffusion model.
-        with torch.enable_grad():
+        autocast_device = "cuda" if trajectory.is_cuda else "cpu"
+        with torch.enable_grad(), torch.autocast(device_type=autocast_device, dtype=torch.bfloat16):
             prediction, log = self.diffuser.sample(
                 prior=trajectory,
                 solver="ddim",
@@ -286,6 +296,7 @@ class Predictor(torch.nn.Module):
                 # warm_start_forward_level=0.3,
                 use_ema=True,
             )
+        prediction = prediction.float()
 
         # Take the mean over the samples and map back to the original observation scale.
         # prediction = prediction.mean(dim=0, keepdim=True)

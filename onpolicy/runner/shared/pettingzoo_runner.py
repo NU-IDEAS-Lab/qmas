@@ -43,7 +43,7 @@ class PettingzooRunner(Runner):
         self.env_infos = defaultdict(list)
                
         if self.all_args.torch_compile:
-            self.train_compiled = torch.compile(self.train, fullgraph=False)
+            self.train_compiled = torch.compile(self.train, fullgraph=False, mode="reduce-overhead")
 
     def run(self):
         start = time.time()
