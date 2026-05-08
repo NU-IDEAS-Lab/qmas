@@ -901,15 +901,17 @@ class parallel_env(ParallelEnv):
             # Get a dictionary of last visit times for each node.
             lastVisits = nx.get_node_attributes(g, 'visitTime')
 
-            def idlenessNorm(node):
-                return self._minMaxNormalize(self.step_count - lastVisits[node], minimum=0.0, maximum=self.step_count)
+            # def idlenessNorm(node):
+            #     return np.tanh(lastVisits[node] / 100.0)
+                # return self._minMaxNormalize(self.step_count - lastVisits[node], minimum=0.0, maximum=self.step_count)
 
             # Set attributes of patrol graph nodes.
             node_attributes = {
                 node: {
                     "lastNode": -1.0,
                     "currentAction": -1.0,
-                    "idlenessTime": idlenessNorm(node),
+                    # "idlenessTime": idlenessNorm(node),
+                    "idlenessTime": lastVisits[node],
                     "nodeType": NODE_TYPE.OBSERVABLE_NODE if node in vertices else NODE_TYPE.UNOBSERVABLE_NODE
                 } for node in g.nodes
             }
