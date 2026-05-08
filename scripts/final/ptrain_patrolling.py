@@ -1,21 +1,21 @@
 import multiprocessing
 import importlib
 
-# cuda_idx = [0, 1, 2, 3, 4, 5, 6, 7]
-cuda_idx = [5, 6]
+cuda_idx = [0, 1, 2, 3, 4, 5, 6, 7]
+# cuda_idx = [5, 6, 7]
 scripts = [
     "train_patrolling",
     "train_patrolling_pred",
-    # "train_patrolling_pred_uq",
-    # "train_patrolling_comms_pred",
+    "train_patrolling_pred_uq",
+    "train_patrolling_comms_pred",
     "train_patrolling_comms_pred_uq",
 ]
 
-# cuda_idx = [5, 6, 7]
+# cuda_idx = [6, 7]
 # scripts = [
 #     "train_patrolling",
-#     "train_patrolling_pred",
-#     "train_patrolling_comms_pred_uq",
+#     # "train_patrolling_pred",
+#     # "train_patrolling_comms_pred_uq",
 # ]
 
 # Replace args function.
@@ -50,8 +50,8 @@ for i, script in enumerate(scripts):
     args = argreplace(args, "cuda_idx", str(cuda_idx[i]))
     # args = argreplace(args, "state_encoder_output_dim", f"128")
     args = argreplace(args, "observation_mask", True)
-    args = argreplace(args, "n_rollout_threads", "33")
-    args = argreplace(args, "num_mini_batch", "50")
+    args = argreplace(args, "n_rollout_threads", "66")
+    args = argreplace(args, "num_mini_batch", "20")
     # args = argreplace(args, "beta", "0.5")
     # args = argreplace(args, "alpha", "1.0")
     # args = argreplace(args, "reward_comms_penalty_weight", "0.0")
@@ -65,8 +65,11 @@ for i, script in enumerate(scripts):
     args = argreplace(args, "gnn_use_dense_obs", True)
     args = argreplace(args, "state_encoder", False)
     args = argreplace(args, "disable_observation_global", True)
-    # args = argreplace(args, "algorithm_name", "mappo")
+    args = argreplace(args, "diffusion_autoregression_steps", "1")
+    # args = argreplace(args, "algorithm_name", "rmappo")
 
+    # args = argreplace(args, "data_chunk_length", "2")
+    # args = argreplace(args, "recurrent_N", "1")
 
     # TEST WITH SMALL GRAPH
     # args = argreplace(args, "experiment_name", f"noVisitConstraint-{script}")
