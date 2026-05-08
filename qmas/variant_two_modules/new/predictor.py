@@ -130,6 +130,12 @@ class Predictor(torch.nn.Module):
             
         ).to(device)
 
+        # Deregister fix_mask as nn.Parameter so per-batch assignments are plain
+        # attribute sets (no _parameters bookkeeping, no EMA tracking).
+        if "fix_mask" in self.diffuser._parameters:
+            initial_fix_mask = self.diffuser._parameters.pop("fix_mask").data
+            self.diffuser.fix_mask = initial_fix_mask
+
         # Update the diffuser optimizers.
         self.diffuser.manual_optimizers = {}
         self.diffuser.configure_manual_optimizers()
@@ -262,7 +268,7 @@ class Predictor(torch.nn.Module):
 
         # The trajectory and visibility_mask represent the known data and are applied as described by Janner et al.
         # We set the fix_mask manually here as a workaround for CleanDiffuser not taking it as an input.
-        self.diffuser.fix_mask = torch.nn.Parameter(visibility_mask, requires_grad=False)
+        self.diffuser.fix_mask = visibility_mask
 
         # Sample from the diffusion model.
         with torch.enable_grad():

@@ -247,7 +247,7 @@ class QmasAlgorithm(Algorithm):
 
         # Update the fix_mask. This determines which parts of the trajectory are fixed and which are predicted.
         # This applies to both update_diffusion and update_classifier.
-        predictor.diffuser.fix_mask = torch.nn.Parameter(fix_mask_batch, requires_grad=False)
+        predictor.diffuser.fix_mask = fix_mask_batch
 
         # Update diffuser model.
         diffuser_loss = predictor.diffuser.update_diffusion(
