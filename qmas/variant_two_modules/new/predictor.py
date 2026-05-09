@@ -126,8 +126,7 @@ class Predictor(torch.nn.Module):
             diffusion_steps=256,
             # classifier=self.guide,
             predict_noise=False,
-            # ema_rate=0.9999,
-            
+            ema_rate=0.995,
         ).to(device)
 
         # Deregister fix_mask as nn.Parameter so per-batch assignments are plain
@@ -311,8 +310,8 @@ class Predictor(torch.nn.Module):
                 prior=trajectory,
                 solver="ddim",
                 n_samples=trajectory.shape[0],
-                temperature=0.6,
-                sample_steps=20,
+                temperature=0.0,
+                sample_steps=50,
                 condition_cg=trajectory,
                 condition_cg_mask=visibility_mask,
                 w_cg=0.0,
