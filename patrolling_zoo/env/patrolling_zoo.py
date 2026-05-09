@@ -911,7 +911,7 @@ class parallel_env(ParallelEnv):
                     "lastNode": -1.0,
                     "currentAction": -1.0,
                     # "idlenessTime": idlenessNorm(node),
-                    "idlenessTime": lastVisits[node],
+                    "idlenessTime": self.step_count - lastVisits[node],
                     "nodeType": NODE_TYPE.OBSERVABLE_NODE if node in vertices else NODE_TYPE.UNOBSERVABLE_NODE
                 } for node in g.nodes
             }

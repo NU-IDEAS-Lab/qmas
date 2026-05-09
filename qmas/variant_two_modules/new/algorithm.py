@@ -286,11 +286,9 @@ class QmasAlgorithm(Algorithm):
         predictor.diffuser.fix_mask = fix_mask_batch
 
         # Update diffuser model.
-        autocast_device = "cuda" if predictor.device.type == "cuda" else "cpu"
-        with torch.autocast(device_type=autocast_device, dtype=torch.bfloat16):
-            diffuser_loss = predictor.diffuser.update_diffusion(
-                x0=trajectories_normalized,
-            )['diffusion_loss']
+        diffuser_loss = predictor.diffuser.update_diffusion(
+            x0=trajectories_normalized,
+        )['diffusion_loss']
         train_info['diffuser_loss'] += diffuser_loss
 
         # Calculate uncertainty estimation loss.
