@@ -185,6 +185,7 @@ class parallel_env(ParallelEnv):
                  attrition_min_agents = 2,
                  attrition_fixed_times = [],
                  max_cycles: int = -1,
+                 episode_length: int = 200,
                  max_nodes: int = 50,
                  max_neighbors: int = 15,
                  reward_interval: int = -1,
@@ -209,6 +210,7 @@ class parallel_env(ParallelEnv):
         self.observation_radius_random_min = observation_radius_random_min
         self.observation_radius_random_max = observation_radius_random_max
         self.max_cycles = max_cycles
+        self.episode_length = episode_length
         self.comms_model = CommunicationModel(model=communication_model, p=communication_probability)
         self.action_method = action_method
         self.action_full_max_nodes = action_full_max_nodes
@@ -611,7 +613,7 @@ class parallel_env(ParallelEnv):
         # Extract predicted vertex idleness if available.
         pred_vertex_state = None
         if pred_unflattened is not None and "vertex_state" in self.state_space.spaces:
-            pred_vertex_state = {node: float(pred_unflattened["vertex_state"][node])
+            pred_vertex_state = {node: self._denorm_idleness(float(pred_unflattened["vertex_state"][node]))
                                  for node in self.pg.graph.nodes}
 
         nx.draw_networkx(self.pg.graph,
@@ -772,6 +774,23 @@ class parallel_env(ParallelEnv):
         return state
 
 
+    def _norm_idleness(self, t):
+        ''' Map raw idleness (steps since last visit) into [0, 1] via log1p, using the
+            episode length as the scale. Stationary by construction so the predictor's
+            targets aren't a moving distribution.'''
+        scale = math.log1p(self.episode_length)
+        if isinstance(t, np.ndarray):
+            return np.log1p(np.maximum(t, 0.0)) / scale
+        return math.log1p(max(float(t), 0.0)) / scale
+
+    def _denorm_idleness(self, y):
+        ''' Inverse of `_norm_idleness`. Used to put predicted idleness back on the raw
+            scale for display/comparison.'''
+        scale = math.log1p(self.episode_length)
+        if isinstance(y, np.ndarray):
+            return np.expm1(y * scale)
+        return math.expm1(float(y) * scale)
+
     def observe(self, agent, radius=None, allow_done_agents=False, senders=set(), force_idleness_visible=False):
         ''' Returns the observation for the given agent.'''
 
@@ -835,7 +854,7 @@ class parallel_env(ParallelEnv):
             # Fill in actual values.
             # obs_mask is always False for vertex_state (idleness is never revealed to agents).
             for node in range(self.pg.graph.number_of_nodes()):
-                obs["vertex_state"][node] = self.pg.getNodeIdlenessTime(node, self.step_count)
+                obs["vertex_state"][node] = self._norm_idleness(self.pg.getNodeIdlenessTime(node, self.step_count))
                 obs_mask["vertex_state"][node] = np.array([idleness_visible or node in visited_nodes], dtype=bool)
 
         # Add vertex 2D coordinates.
@@ -901,17 +920,12 @@ class parallel_env(ParallelEnv):
             # Get a dictionary of last visit times for each node.
             lastVisits = nx.get_node_attributes(g, 'visitTime')
 
-            # def idlenessNorm(node):
-            #     return np.tanh(lastVisits[node] / 100.0)
-                # return self._minMaxNormalize(self.step_count - lastVisits[node], minimum=0.0, maximum=self.step_count)
-
             # Set attributes of patrol graph nodes.
             node_attributes = {
                 node: {
                     "lastNode": -1.0,
                     "currentAction": -1.0,
-                    # "idlenessTime": idlenessNorm(node),
-                    "idlenessTime": self.step_count - lastVisits[node],
+                    "idlenessTime": self._norm_idleness(self.step_count - lastVisits[node]),
                     "nodeType": NODE_TYPE.OBSERVABLE_NODE if node in vertices else NODE_TYPE.UNOBSERVABLE_NODE
                 } for node in g.nodes
             }
