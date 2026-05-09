@@ -148,6 +148,11 @@ class PettingzooRunner(Runner):
         observation_global = None
         if "observation_global" in infos[0] and not self.all_args.disable_observation_global:
             observation_global = np.array([info["observation_global"] for info in infos])
+
+        # Capture raw (pre-UQ-padding) versions for seeding the trajectory buffer below.
+        obs_raw = obs
+        observation_global_raw = observation_global
+
         # If UQ will be appended during rollout, pre-pad with zeros here so the
         # buffer slot has the correct shape (2× obs_dim) from the start.
         # collect() will overwrite this with [pred | uncertainty] on the first step.
@@ -198,14 +203,45 @@ class PettingzooRunner(Runner):
         )
 
         # Reset and seed training trajectory buffer with the initial observations.
-        act_size = np.prod(get_shape_from_act_space(self.buffer.act_space))
+        # Mirrors _apply_masks_and_update_trajectory but uses zero actions and the
+        # raw (pre-UQ-padding) obs so the predictor sees the correct observation size.
         self.train_prediction_prev = None
         self.train_trajectory.reset()
-        # self.train_trajectory.add(
-        #     obs=torch.from_numpy(obs).to(self.device),
-        #     visibility_mask=torch.ones(obs.shape, dtype=torch.float32, device=self.device),
-        #     action=torch.zeros(act_size, dtype=torch.float32, device=self.device)
-        # )
+
+        if observation_global_raw is not None:
+            traj_obs = observation_global_raw
+            traj_visibility_mask = (
+                visibility_mask_global
+                if visibility_mask_global is not None
+                else np.ones_like(traj_obs, dtype=np.float32)
+            )
+        elif obs_raw.dtype == object:
+            raise ValueError(
+                "Must have observation_global in infos to use object-type observations "
+                "(e.g. pyg graph observations). Check that environment is providing this information."
+            )
+        else:
+            traj_obs = obs_raw
+            traj_visibility_mask = visibility_mask
+
+        if self.all_args.observation_mask:
+            traj_obs = traj_obs * traj_visibility_mask
+
+        traj_obs = einops.rearrange(traj_obs, "t n ... -> (t n) ...")
+        traj_visibility_mask = einops.rearrange(traj_visibility_mask, "t n ... -> (t n) ...")
+
+        act_size = int(np.prod(get_shape_from_act_space(self.buffer.act_space)))
+        traj_actions = torch.zeros(
+            (self.n_rollout_threads * self.num_agents, act_size),
+            dtype=torch.float32,
+            device=self.device,
+        )
+
+        self.train_trajectory.add(
+            obs=torch.from_numpy(traj_obs).to(self.device),
+            visibility_mask=torch.from_numpy(traj_visibility_mask).to(self.device),
+            action=traj_actions,
+        )
 
 
     @torch.no_grad()
