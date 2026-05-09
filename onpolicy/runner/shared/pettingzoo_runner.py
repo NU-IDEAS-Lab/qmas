@@ -40,10 +40,60 @@ class PettingzooRunner(Runner):
         )
         self.train_prediction_prev = None
 
+        # Per-log-window diagnostic accumulators for the predictor.
+        # All counters here reset together inside `_flush_pred_diagnostics` so that
+        # each value reported in train_infos describes the latest log window only.
+        self._reset_pred_diagnostics()
+
         self.env_infos = defaultdict(list)
                
         if self.all_args.torch_compile:
             self.train_compiled = torch.compile(self.train, fullgraph=False, mode="reduce-overhead")
+
+    def _reset_pred_diagnostics(self):
+        """Reset all per-log-window predictor diagnostic accumulators."""
+        # #1 buffer writeback check, #2 predictor firing, #3 prediction quality.
+        self._pred_collect_calls = 0
+        self._pred_fires = 0
+        self._pred_writeback_checks = 0
+        self._pred_writeback_failures = 0
+        self._pred_quality_abs_err_sum = 0.0
+        self._pred_quality_target_abs_sum = 0.0
+        self._pred_quality_count = 0
+        self._pred_quality_visible_err_sum = 0.0
+
+    def _flush_pred_diagnostics(self, train_infos):
+        """Merge predictor diagnostic counters into train_infos and reset them.
+
+        Values describe the log window since the last call. Empty/zero windows
+        report NaN for ratios/MAEs so the chart shows a gap rather than a misleading 0.
+        """
+        calls = self._pred_collect_calls
+        fires = self._pred_fires
+        wb_checks = self._pred_writeback_checks
+        wb_fails = self._pred_writeback_failures
+        q_count = self._pred_quality_count
+
+        train_infos["pred_collect_calls"] = calls
+        train_infos["pred_fires"] = fires
+        train_infos["pred_fire_ratio"] = (fires / calls) if calls > 0 else float("nan")
+        train_infos["pred_writeback_checks"] = wb_checks
+        train_infos["pred_writeback_failures"] = wb_fails
+
+        if q_count > 0:
+            masked_mae = self._pred_quality_abs_err_sum / q_count
+            target_mag = self._pred_quality_target_abs_sum / q_count
+            train_infos["pred_masked_mae"] = masked_mae
+            train_infos["pred_masked_target_mag"] = target_mag
+            train_infos["pred_masked_norm_err"] = masked_mae / max(target_mag, 1e-9)
+            train_infos["pred_visible_mae"] = self._pred_quality_visible_err_sum / q_count
+        else:
+            train_infos["pred_masked_mae"] = float("nan")
+            train_infos["pred_masked_target_mag"] = float("nan")
+            train_infos["pred_masked_norm_err"] = float("nan")
+            train_infos["pred_visible_mae"] = float("nan")
+
+        self._reset_pred_diagnostics()
 
     def run(self):
         start = time.time()
@@ -101,9 +151,22 @@ class PettingzooRunner(Runner):
 
             # log information
             if total_num_steps % self.log_interval == 0:
-                
+
                 train_infos["average_episode_rewards"] = avg_episode_rewards
                 train_infos["fps"] = self.episode_length * self.n_rollout_threads / (end - start_episode)
+                # Predictor diagnostics (firing count, buffer writeback verification,
+                # prediction quality at masked vs visible positions) — reset per window.
+                self._flush_pred_diagnostics(train_infos)
+                print(
+                    f"[DIAG] episode={episode} "
+                    f"pred_fires={train_infos['pred_fires']}/{train_infos['pred_collect_calls']} "
+                    f"(ratio={train_infos['pred_fire_ratio']:.4f}), "
+                    f"writeback_failures={train_infos['pred_writeback_failures']}/{train_infos['pred_writeback_checks']}, "
+                    f"masked_mae={train_infos['pred_masked_mae']:.4g} "
+                    f"(target_mag={train_infos['pred_masked_target_mag']:.4g}, "
+                    f"norm_err={train_infos['pred_masked_norm_err']:.3f}), "
+                    f"visible_mae={train_infos['pred_visible_mae']:.4g}"
+                )
                 self.log_train(train_infos, total_num_steps)
                 self.log_env(self.env_infos, total_num_steps)
                 self.env_infos = defaultdict(list)
@@ -263,6 +326,9 @@ class PettingzooRunner(Runner):
             and self.train_trajectory.ready()
             and (self.all_args.prediction_during_training or self.all_args.prediction_uq_injection_method != "none")
         )
+        self._pred_collect_calls += 1
+        if use_prediction:
+            self._pred_fires += 1
         if use_prediction:
             # Get the prediction and the uncertainty.
             trajectory, visibility_mask = self.train_trajectory.get_trajectory()
@@ -342,6 +408,75 @@ class PettingzooRunner(Runner):
             updates["observation_global"] = global_obs.reshape((self.n_rollout_threads, self.num_agents, *global_obs.shape[1:]))
         if updates:
             self.buffer.update_step(step, **updates)
+
+            # DIAGNOSTIC #1: confirm pred_now actually landed in the buffer that the
+            # trainer will read. Sample a few entries and compare to what we wrote.
+            # If this assertion fires, the storage write is silently dropped.
+            if use_prediction and update_obs:
+                self._pred_writeback_checks += 1
+                check_share_obs, check_obs, check_global_obs, *_ = self.buffer.compatibility_get_policy_input(step)
+                # Compare on the slice we actually overwrote.
+                expected = obs[..., :pred_now.shape[-1]]
+                got = check_obs[..., :pred_now.shape[-1]]
+                if not torch.allclose(
+                    got.float() if isinstance(got, torch.Tensor) else torch.as_tensor(got, dtype=torch.float32),
+                    expected.float() if isinstance(expected, torch.Tensor) else torch.as_tensor(expected, dtype=torch.float32),
+                    atol=1e-5, rtol=1e-4,
+                ):
+                    self._pred_writeback_failures += 1
+                    diff = (got - expected).abs()
+                    print(
+                        f"[DIAG] update_step did NOT stick at step={step}: "
+                        f"max|got-expected|={diff.max().item():.4g}, "
+                        f"mean|got-expected|={diff.mean().item():.4g}"
+                    )
+
+            # DIAGNOSTIC #3: how good is pred_now at the masked positions?
+            # Compares pred_now against the ground-truth `obs_full` stored in the
+            # buffer (the un-masked obs from this step). Splits the error into:
+            #   - masked positions (fix_mask=0): predictor's job — should shrink with training.
+            #   - visible positions (fix_mask=1): preserved by diffuser fix_mask — should be ~0.
+            if use_prediction and update_obs and pred_now is not None:
+                try:
+                    sample = self.buffer[step]
+                    if "obs_full" in sample:
+                        obs_full_step = sample["obs_full"].flatten(0, 1).float()  # (B, D_full)
+                        # Slice to the predictor's output dim (handles UQ padding).
+                        D = pred_now.shape[-1]
+                        obs_full_step = obs_full_step[..., :D].cpu()
+                        pred_cpu = pred_now.float().cpu()
+
+                        # Per-step visibility mask from the trajectory we just used.
+                        # When actions are prepended to transitions, viz has shape
+                        # (B, D_action + D_obs); strip the action prefix so the mask
+                        # aligns with pred_now and obs_full (both D_obs wide). Without
+                        # this, every column gets relabeled by D_action and the
+                        # masked/visible reports become meaningless.
+                        viz_now = visibility_mask[:, -1].float().cpu()  # 1=visible, 0=masked
+                        if self.all_args.prediction_history_include_actions:
+                            act_size = int(np.prod(get_shape_from_act_space(self.buffer.act_space)))
+                            if viz_now.shape[-1] >= D + act_size:
+                                viz_now = viz_now[..., act_size:act_size + D]
+                        if viz_now.shape[-1] > D:
+                            viz_now = viz_now[..., :D]
+                        elif viz_now.shape[-1] < D:
+                            # Pad with ones to match (shouldn't normally happen).
+                            pad = torch.ones((*viz_now.shape[:-1], D - viz_now.shape[-1]))
+                            viz_now = torch.cat([viz_now, pad], dim=-1)
+
+                        masked = (viz_now < 0.5)   # positions the predictor must fill
+                        visible = ~masked
+
+                        diff = (pred_cpu - obs_full_step).abs()
+                        if masked.any():
+                            self._pred_quality_abs_err_sum += diff[masked].sum().item()
+                            self._pred_quality_target_abs_sum += obs_full_step[masked].abs().sum().item()
+                            self._pred_quality_count += int(masked.sum().item())
+                        if visible.any():
+                            self._pred_quality_visible_err_sum += diff[visible].sum().item()
+                except Exception as e:
+                    # Don't let diagnostics break training.
+                    print(f"[DIAG] prediction-quality check failed: {e}")
 
         return values, actions, action_log_probs, rnn_states, rnn_states_critic, actions_env
 
