@@ -1002,10 +1002,13 @@ class parallel_env(ParallelEnv):
                 # Build padded node_features: [max_total_nodes, node_feat_dim].
                 node_features = np.zeros((max_total_nodes, node_feat_dim), dtype=np.float32)
                 node_vis = np.zeros_like(node_features)
+                # Patrol nodes currently occupied by a visible agent reveal their
+                # idleness (it is implicitly 0).
+                visited_nodes = {a.lastNode for a in agents if a.edge is None}
                 for i, n in enumerate(nodelist):
                     node_features[i] = [float(g.nodes[n][a]) for a in node_attrs]
                     node_vis[i, 0] = 1.0 # nodeType
-                    node_vis[i, 1] = 1.0 if n in agentnodes else 0.0 # node idleness is not visible
+                    node_vis[i, 1] = 1.0 if (n in agentnodes or n in visited_nodes) else 0.0 # idleness visible only at occupied nodes
                     node_vis[i, 2] = 1.0 # node degree
                 node_vis[num_real_nodes:, :] = 1.0
 
