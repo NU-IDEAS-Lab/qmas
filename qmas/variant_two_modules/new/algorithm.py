@@ -94,6 +94,22 @@ class QmasAlgorithm(Algorithm):
                     for p in self.predictors
                 ]
 
+                # One-shot seed of normalization stats from a large sample, before any
+                # diffuser updates run. Without this, running mean/var crawl up from the
+                # zero-mean / unit-var prior over many minibatches and the diffuser
+                # chases a moving normalization target.
+                seed_targets = [i for i, p in enumerate(self.predictors) if not bool(p.normalizer_seeded.item())]
+                if seed_targets:
+                    seed_sample = next(buffer.sample_trajectories(1, self.prediction_horizon))
+                    for i in seed_targets:
+                        predictor = self.predictors[i]
+                        if len(thread_splits[i]) == 0:
+                            continue
+                        seed_trajs, _, _ = self._build_training_trajectories(
+                            seed_sample, predictor, thread_indices=thread_splits[i]
+                        )
+                        predictor.seed_normalization_stats(seed_trajs)
+
                 for e in range(self.args.diffusion_epoch):
                     data_generator = buffer.sample_trajectories(self.num_mini_batch, self.prediction_horizon)
                     for sample in data_generator:
@@ -191,9 +207,11 @@ class QmasAlgorithm(Algorithm):
 
         return train_info
 
-    def train_sample_diffuser(self, sample, train_info, predictor, thread_indices=None):
-        ''' Performs update for a single sample for a given predictor. '''
-        
+    def _build_training_trajectories(self, sample, predictor, thread_indices=None):
+        ''' Build (trajectories, fix_mask_batch, returns_batch) the way the diffuser
+            consumes them. Extracted from train_sample_diffuser so other callers
+            (e.g. one-shot normalization seeding) can reuse the same construction. '''
+
         if "state_visibility_mask" in sample:
             key_obs = "share_obs"
             key_visibility = "state_visibility_mask"
@@ -277,6 +295,15 @@ class QmasAlgorithm(Algorithm):
         trajectories = trajectories.float().to(predictor.device)
         returns_batch = returns_batch.float().to(predictor.device)
         fix_mask_batch = fix_mask_batch.float().to(predictor.device)
+
+        return trajectories, fix_mask_batch, returns_batch
+
+    def train_sample_diffuser(self, sample, train_info, predictor, thread_indices=None):
+        ''' Performs update for a single sample for a given predictor. '''
+
+        trajectories, fix_mask_batch, returns_batch = self._build_training_trajectories(
+            sample, predictor, thread_indices=thread_indices
+        )
 
         # Update running stats from training trajectories and train in normalized space.
         predictor.update_normalization_stats(trajectories)

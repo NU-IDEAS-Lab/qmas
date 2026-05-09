@@ -160,6 +160,9 @@ class Predictor(torch.nn.Module):
         self.register_buffer("obs_running_mean", torch.zeros_like(fix_mask, dtype=torch.float32))
         self.register_buffer("obs_running_var", torch.ones_like(fix_mask, dtype=torch.float32))
         self.register_buffer("obs_running_count", torch.full_like(fix_mask, self.norm_eps, dtype=torch.float32))
+        # Tracks whether the running stats have been one-shot seeded from a large batch.
+        # Persisted as a buffer so it survives checkpoint save/load.
+        self.register_buffer("normalizer_seeded", torch.tensor(False))
 
 
     def _ensure_norm_shape(self, x: torch.Tensor):
@@ -169,6 +172,38 @@ class Predictor(torch.nn.Module):
             self.obs_running_mean = torch.zeros(feature_shape, dtype=torch.float32, device=x.device)
             self.obs_running_var = torch.ones(feature_shape, dtype=torch.float32, device=x.device)
             self.obs_running_count = torch.full(feature_shape, self.norm_eps, dtype=torch.float32, device=x.device)
+
+
+    @torch.no_grad()
+    def seed_normalization_stats(self, x: torch.Tensor, visibility_mask: torch.Tensor = None):
+        """One-shot initialization of running mean/var from a large batch.
+
+        Why: incremental Welford updates take many minibatches to converge from the
+        zero-mean / unit-var prior, so the diffuser chases a moving normalization
+        target during early training. Seeding once with a large sample sets
+        `obs_running_count` high enough that subsequent incremental updates barely
+        move the stats, giving the diffuser stationary normalized inputs.
+        """
+        self._ensure_norm_shape(x)
+
+        if visibility_mask is None:
+            valid = torch.ones_like(x, dtype=torch.float32)
+        else:
+            valid = visibility_mask.to(dtype=torch.float32)
+
+        x_float = x.to(dtype=torch.float32)
+        raw_count = valid.sum(dim=0)
+        has_obs = raw_count > 0
+        safe_count = torch.where(has_obs, raw_count, torch.ones_like(raw_count))
+
+        batch_mean = (x_float * valid).sum(dim=0) / safe_count
+        centered = x_float - batch_mean.unsqueeze(0)
+        batch_var = (centered.pow(2) * valid).sum(dim=0) / safe_count
+
+        self.obs_running_mean = torch.where(has_obs, batch_mean, self.obs_running_mean)
+        self.obs_running_var = torch.where(has_obs, batch_var.clamp_min(self.norm_eps), self.obs_running_var)
+        self.obs_running_count = torch.where(has_obs, raw_count, self.obs_running_count)
+        self.normalizer_seeded.fill_(True)
 
 
     @torch.no_grad()
