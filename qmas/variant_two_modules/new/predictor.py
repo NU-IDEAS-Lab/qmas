@@ -271,8 +271,7 @@ class Predictor(torch.nn.Module):
         self.diffuser.fix_mask = visibility_mask
 
         # Sample from the diffusion model.
-        autocast_device = "cuda" if trajectory.is_cuda else "cpu"
-        with torch.enable_grad(), torch.autocast(device_type=autocast_device, dtype=torch.bfloat16):
+        with torch.enable_grad():
             prediction, log = self.diffuser.sample(
                 prior=trajectory,
                 solver="ddim",
