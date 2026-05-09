@@ -30,14 +30,23 @@ class TrajectoryBuffer:
         self.buffer.append((transition, visibility_mask))
 
     def ready(self):
-        ''' Check if the buffer has enough data to be used for prediction. '''
-        return len(self.buffer) == self.history_length
+        ''' Check if the buffer has at least one transition and can produce a trajectory. '''
+        return len(self.buffer) > 0
 
     def get_trajectory(self):
-        ''' Get the current trajectory as a tensor. '''
+        ''' Get the current trajectory as a tensor.
+
+        If fewer than history_length transitions have been added, the trajectory is
+        left-padded by repeating the earliest real transition (and its visibility mask)
+        so the output always has length history_length.
+        '''
         if len(self.buffer) == 0:
             return None, None
         transitions, visibility_masks = zip(*self.buffer)
+        pad_count = self.history_length - len(self.buffer)
+        if pad_count > 0:
+            transitions = (transitions[0],) * pad_count + transitions
+            visibility_masks = (visibility_masks[0],) * pad_count + visibility_masks
         trajectory = torch.stack(transitions, dim=0)
         visibility_mask = torch.stack(visibility_masks, dim=0)
         return trajectory, visibility_mask
