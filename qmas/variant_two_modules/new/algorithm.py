@@ -110,14 +110,15 @@ class QmasAlgorithm(Algorithm):
                                     if len(thread_splits[i]) == 0:
                                         raise ValueError("Thread split is empty. Check prediction_ensemble_size and n_rollout_threads.")
                                     if stream is not None:
-                                        # Make this stream wait for any prior work queued on
-                                        # the default stream (e.g. data already on GPU).
-                                        stream.wait_stream(torch.cuda.current_stream(stream.device))
-                                        with torch.cuda.stream(stream):
-                                            self.train_sample_diffuser(sample, local_info, predictor, thread_indices=thread_splits[i])
-                                        # Default stream needs to wait on this one before
-                                        # downstream readers (e.g. the policy thread or next epoch).
-                                        torch.cuda.current_stream(stream.device).wait_stream(stream)
+                                        with torch.cuda.device(predictor.device):
+                                            # Make this stream wait for any prior work queued on
+                                            # the default stream (e.g. data already on GPU).
+                                            stream.wait_stream(torch.cuda.current_stream(stream.device))
+                                            with torch.cuda.stream(stream):
+                                                self.train_sample_diffuser(sample, local_info, predictor, thread_indices=thread_splits[i])
+                                            # Default stream needs to wait on this one before
+                                            # downstream readers (e.g. the policy thread or next epoch).
+                                            torch.cuda.current_stream(stream.device).wait_stream(stream)
                                     else:
                                         self.train_sample_diffuser(sample, local_info, predictor, thread_indices=thread_splits[i])
                                     pred_losses[i] = local_info['diffuser_loss']
