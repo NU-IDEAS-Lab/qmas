@@ -568,7 +568,7 @@ class parallel_env(ParallelEnv):
         }
 
         for agent in self.agents:
-            _, obs_mask = self.observe(agent)
+            _, obs_mask = self.observe(agent, force_idleness_visible=True)
             info[agent]["visibility_mask"] = obs_mask
             og, vmg = self._populateStateSpace(self.observe_method_global, agent, radius=None, allow_done_agents=False)
             info[agent]["observation_global"] = og
@@ -772,7 +772,7 @@ class parallel_env(ParallelEnv):
         return state
 
 
-    def observe(self, agent, radius=None, allow_done_agents=False, senders=set(), force_idleness_visible=True):
+    def observe(self, agent, radius=None, allow_done_agents=False, senders=set(), force_idleness_visible=False):
         ''' Returns the observation for the given agent.'''
 
         return self._populateStateSpace(self.observe_method, agent, radius, allow_done_agents, senders=senders, force_idleness_visible=force_idleness_visible)
@@ -784,7 +784,7 @@ class parallel_env(ParallelEnv):
         return self.available_actions_dict[agent]
 
 
-    def _populateStateSpace(self, observe_method, agent, radius, allow_done_agents, global_state=False, senders=set(), force_idleness_visible=True):
+    def _populateStateSpace(self, observe_method, agent, radius, allow_done_agents, global_state=False, senders=set(), force_idleness_visible=False):
         ''' Returns a populated state/observation space.'''
 
         if radius == None:
@@ -1008,7 +1008,7 @@ class parallel_env(ParallelEnv):
                 for i, n in enumerate(nodelist):
                     node_features[i] = [float(g.nodes[n][a]) for a in node_attrs]
                     node_vis[i, 0] = 1.0 # nodeType
-                    node_vis[i, 1] = 1.0 if (n in agentnodes or n in visited_nodes) else 0.0 # idleness visible only at occupied nodes
+                    node_vis[i, 1] = 1.0 if (force_idleness_visible or n in agentnodes or n in visited_nodes) else 0.0 # idleness visible only at occupied nodes
                     node_vis[i, 2] = 1.0 # node degree
                 node_vis[num_real_nodes:, :] = 1.0
 
