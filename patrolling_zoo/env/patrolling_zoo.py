@@ -841,7 +841,7 @@ class parallel_env(ParallelEnv):
         #     obs["agent_id"] = agent.id
         #     obs_mask["agent_id"] = np.array([True], dtype=bool)
 
-        # Add vertex idleness time (raw).
+        # Add vertex idleness time.
         if observe_method in ["adjacency", "coordinates"]:
             obs["vertex_state"] = {}
             obs_mask["vertex_state"] = {}
