@@ -6,7 +6,7 @@ import torch.nn.functional as F
 import gymnasium.spaces as spaces
 import numpy as np
 
-from torch_geometric.data import Batch
+from torch_geometric.data import Batch, Data
 from torch_geometric.utils import to_dense_batch
 
 from onpolicy.models.utils.util import init, check
@@ -16,7 +16,7 @@ from onpolicy.models.utils.gnn import GNNBase
 from onpolicy.models.utils.rnn import RNNLayer
 from onpolicy.models.utils.act import ACTLayer
 from onpolicy.models.utils.attention import SelfAttention
-from onpolicy.utils.util import get_shape_from_obs_space, get_graph_obs_space, strip_graph_obs_space, get_graph_obs_space_idx
+from onpolicy.utils.util import get_shape_from_obs_space, get_graph_obs_space, strip_graph_obs_space, get_graph_obs_space_idx, has_graph_obs_space
 from onpolicy.models.r_actor_critic import R_Actor as Actor, R_Critic as Critic
 
 class StateEncoder(nn.Module):
@@ -90,33 +90,107 @@ class QmasActor(nn.Module):
         self._use_rnn = self._use_naive_recurrent_policy or self._use_recurrent_policy
         
         if self._use_gnn:
-            # Split up the graph and non-graph space.
-            obs_space_graph = get_graph_obs_space(obs_space)
-            obs_space_nongraph = strip_graph_obs_space(obs_space)
-            self.obs_space_graph_idx = get_graph_obs_space_idx(obs_space)
+            # Check whether the env provides dense tensor obs or PyG object obs.
+            self._use_gnn_dense_obs = getattr(args, 'gnn_use_dense_obs', False) and not has_graph_obs_space(obs_space)
 
-            self.base = GNNBase(
-                layers=args.gnn_layer_N,
-                node_dim=get_shape_from_obs_space(obs_space_graph.node_space)[0],
-                edge_dim=get_shape_from_obs_space(obs_space_graph.edge_space)[0],
-                hidden_dim=args.gnn_hidden_size,
-                output_dim=args.gnn_hidden_size, #self.hidden_size,
-                dropout_rate=args.gnn_dropout_rate,
-                jk=args.gnn_skip_connections,
-                use_orthogonal=args.use_orthogonal,
-                use_ReLU=args.use_ReLU,
-            )
-            
-            if args.gnn_neighbor_scoring:
-                # Support the neighbor scoring mechanism from Goeckner et al., DOI: 10.1109/IROS58592.2024.10802510.
-                self.neighbor_scorer = MLPLayer(input_dim=args.gnn_hidden_size, output_dim=1, hidden_size=self.hidden_size, layer_N=3, use_orthogonal=args.use_orthogonal, use_ReLU=args.use_ReLU, use_layer_norm=False)
-                input_dim = self.MAX_NEIGHBORS + get_shape_from_obs_space(obs_space_nongraph)[0]
+            if self._use_gnn_dense_obs:
+                # Dense obs: the wrapper may have flattened the Dict space into a Box.
+                # Recover the original Dict space from the attached attribute if needed.
+                dict_space = getattr(obs_space, '_original_dict_space', None) or obs_space
+                nf_space = dict_space.spaces["node_features"]   # (max_total_nodes, node_feat_dim)
+                ea_space = dict_space.spaces["edge_attr"]        # (max_edges, edge_feat_dim)
+                max_total_nodes, node_feat_dim = nf_space.shape
+                max_edges, edge_feat_dim = ea_space.shape
+                self.gnn_dense_obs_layout = dict(
+                    max_total_nodes=max_total_nodes,
+                    node_feat_dim=node_feat_dim,
+                    edge_feat_dim=edge_feat_dim,
+                    max_edges=max_edges,
+                )
+                # Compute flat obs offsets for each sub-space (gymnasium Dict flatten order).
+                self._gnn_dense_offsets = {}
+                offset = 0
+                for key, space in dict_space.spaces.items():
+                    size = int(np.prod(space.shape))
+                    self._gnn_dense_offsets[key] = (offset, offset + size, space.shape)
+                    offset += size
+
+                # Non-graph obs (observation_radius etc.) — nothing remains after removing graph keys.
+                nongraph_dim = 0
+                for key, space in dict_space.spaces.items():
+                    if key not in ("node_features", "edge_index", "edge_attr", "agent_idx", "neighbors_mask", "num_nodes", "num_edges"):
+                        nongraph_dim += int(np.prod(space.shape))
+
+                self.base = GNNBase(
+                    layers=args.gnn_layer_N,
+                    node_dim=node_feat_dim,
+                    edge_dim=edge_feat_dim,
+                    hidden_dim=args.gnn_hidden_size,
+                    output_dim=args.gnn_hidden_size,
+                    dropout_rate=args.gnn_dropout_rate,
+                    jk=args.gnn_skip_connections,
+                    use_orthogonal=args.use_orthogonal,
+                    use_ReLU=args.use_ReLU,
+                )
+
+                if args.gnn_neighbor_scoring:
+                    # Support the neighbor scoring mechanism from Goeckner et al., DOI: 10.1109/IROS58592.2024.10802510.
+                    # When a state encoder is present, the scorer receives per-node GNN features concatenated
+                    # with the broadcast global context, so idleness can condition per-neighbor scores.
+                    scorer_input_dim = args.gnn_hidden_size
+                    if args.state_encoder:
+                        scorer_input_dim += args.state_encoder_output_dim
+                    self.neighbor_scorer = MLPLayer(input_dim=scorer_input_dim, output_dim=None, hidden_size=self.hidden_size, layer_N=3, use_orthogonal=args.use_orthogonal, use_ReLU=args.use_ReLU, use_layer_norm=False)
+                    self.neighbor_scorer_head = nn.Linear(self.hidden_size, 1)
+                    n_actions = dict_space.spaces["neighbors_mask"].shape[0]
+                    self._n_actions = n_actions
+                    input_dim = n_actions + nongraph_dim
+                else:
+                    input_dim = args.gnn_hidden_size + nongraph_dim
+
+                if self._use_gnn_mlp:
+                    if args.state_encoder:
+                        input_dim += args.state_encoder_output_dim
+                    self.mlp0 = MLPLayer(input_dim=input_dim, output_dim=self.hidden_size, hidden_size=self.hidden_size, layer_N=args.layer_N, use_orthogonal=args.use_orthogonal, use_ReLU=args.use_ReLU)
+                    input_dim = self.hidden_size
             else:
-                input_dim = args.gnn_hidden_size + get_shape_from_obs_space(obs_space_nongraph)[0]
+                # PyG object obs: original path.
+                obs_space_graph = get_graph_obs_space(obs_space)
+                obs_space_nongraph = strip_graph_obs_space(obs_space)
+                self.obs_space_graph_idx = get_graph_obs_space_idx(obs_space)
 
-            if self._use_gnn_mlp:
-                self.mlp0 = MLPLayer(input_dim=input_dim, output_dim=self.hidden_size, hidden_size=self.hidden_size, layer_N=args.layer_N, use_orthogonal=args.use_orthogonal, use_ReLU=args.use_ReLU)
-                input_dim = self.hidden_size
+                self.base = GNNBase(
+                    layers=args.gnn_layer_N,
+                    node_dim=get_shape_from_obs_space(obs_space_graph.node_space)[0],
+                    edge_dim=get_shape_from_obs_space(obs_space_graph.edge_space)[0],
+                    hidden_dim=args.gnn_hidden_size,
+                    output_dim=args.gnn_hidden_size,
+                    dropout_rate=args.gnn_dropout_rate,
+                    jk=args.gnn_skip_connections,
+                    use_orthogonal=args.use_orthogonal,
+                    use_ReLU=args.use_ReLU,
+                )
+
+                if args.gnn_neighbor_scoring:
+                    # Support the neighbor scoring mechanism from Goeckner et al., DOI: 10.1109/IROS58592.2024.10802510.
+                    # When a state encoder is present, the scorer receives per-node GNN features concatenated
+                    # with the broadcast global context, so idleness can condition per-neighbor scores.
+                    scorer_input_dim = args.gnn_hidden_size
+                    if args.state_encoder:
+                        scorer_input_dim += args.state_encoder_output_dim
+                    # Body MLP (no output_dim → no final activation), then a bare linear head.
+                    # Using output_dim=1 bakes a ReLU into the last layer, killing all gradients.
+                    self.neighbor_scorer = MLPLayer(input_dim=scorer_input_dim, output_dim=None, hidden_size=self.hidden_size, layer_N=3, use_orthogonal=args.use_orthogonal, use_ReLU=args.use_ReLU, use_layer_norm=False)
+                    self.neighbor_scorer_head = nn.Linear(self.hidden_size, 1)
+                    input_dim = self.MAX_NODES + get_shape_from_obs_space(obs_space_nongraph)[0]
+                else:
+                    input_dim = args.gnn_hidden_size + get_shape_from_obs_space(obs_space_nongraph)[0]
+
+                if self._use_gnn_mlp:
+                    if args.state_encoder:
+                        input_dim += args.state_encoder_output_dim
+                    self.mlp0 = MLPLayer(input_dim=input_dim, output_dim=self.hidden_size, hidden_size=self.hidden_size, layer_N=args.layer_N, use_orthogonal=args.use_orthogonal, use_ReLU=args.use_ReLU)
+                    input_dim = self.hidden_size
         else:
             obs_shape = get_shape_from_obs_space(obs_space)
             if args.prediction_uq_injection_method == "append" and not args.state_encoder:
@@ -137,6 +211,8 @@ class QmasActor(nn.Module):
                 input_dim = input_dim
 
             if self._use_mlp:
+                if args.state_encoder:
+                    input_dim += args.state_encoder_output_dim
                 self.mlp = MLPBase(args, input_dim)
                 input_dim = self.hidden_size
         
@@ -157,7 +233,9 @@ class QmasActor(nn.Module):
                 use_orthogonal=args.use_orthogonal,
                 device=device
             )
-            input_dim += args.state_encoder_output_dim
+            # Only add to input_dim when the encoded state is not absorbed by mlp0/mlp.
+            if not (self._use_gnn_mlp or self._use_mlp):
+                input_dim += args.state_encoder_output_dim
 
         if self._use_rnn:
             self.rnn = RNNLayer(input_dim, self.hidden_size, self._recurrent_N, self._use_orthogonal)
@@ -217,60 +295,152 @@ class QmasActor(nn.Module):
         if available_actions is not None:
             available_actions = check(available_actions).to(**self.tpdv)
 
+        # Compute encoded state early so it can be injected into the base models.
+        encoded_state = None
+        if self._use_state_encoder:
+            encoded_state = self._encode_global_state(global_obs, rnn_states.shape[0])
+
         if self._use_gnn:
-            # Split observation into graph and non-graph components.
-            obs_graph = obs[:, self.obs_space_graph_idx]
-            nonGraphIdx = [i for i in range(obs.shape[1]) if i != self.obs_space_graph_idx]
-            obs_nongraph = obs[:, nonGraphIdx]
-            if len(obs_nongraph.shape) > 1 and obs_nongraph.shape[1] > 0:
-                # The non-graph data is stored as an object dtype. Need to convert to float32.
-                obs_non_graph_float = np.zeros((obs_nongraph.shape[0], *obs_nongraph[0, 0].shape), dtype=np.float32)
-                for i in range(obs_nongraph.shape[0]):
-                    obs_non_graph_float[i] = obs_nongraph[i, 0]
-                obs_nongraph = obs_non_graph_float
-            obs_nongraph = check(obs_nongraph.astype(np.float32)).to(**self.tpdv)
+            # Each branch below prepares the flat (compact, no-padding) GNN inputs and
+            # any path-specific bookkeeping, then falls through to the shared post-GNN block.
+            if self._use_gnn_dense_obs:
+                # --- Dense obs: strip padding on CPU, move only compact tensors to GPU ---
+                obs_cpu = check(obs)  # numpy → tensor; stays on CPU
+                offsets = self._gnn_dense_offsets
+                layout  = self.gnn_dense_obs_layout
+                B       = obs_cpu.shape[0]
+                dev     = self.device
 
-            # Batch the graphs and pass through GNN.
-            graphs = Batch.from_data_list(obs_graph).to(self.device, "x", "edge_attr", "edge_index")
-            actor_features = self.base(graphs.x, graphs.edge_attr, graphs.edge_index)
+                def _slice_cpu(key):
+                    s, e, shape = offsets[key]
+                    return obs_cpu[:, s:e].reshape(B, *shape)
 
-            # Restore the original shape of [batch_size, num_nodes (including agents), num_feats] from [batch_size*num_nodes, num_feats]
-            actor_features, _ = to_dense_batch(actor_features, graphs.batch.to(self.device))
+                node_features_pad = _slice_cpu("node_features")           # (B, max_N, F)
+                edge_index_pad_f  = _slice_cpu("edge_index")              # (B, 2, max_E) float32
+                edge_attr_pad     = _slice_cpu("edge_attr")               # (B, max_E, EF)
+                agent_idx_t       = _slice_cpu("agent_idx").long()        # (B, 1)
+                num_nodes_t       = _slice_cpu("num_nodes").squeeze(-1).long()  # (B,)
+                num_edges_t       = _slice_cpu("num_edges").squeeze(-1).long()  # (B,)
+                max_N             = layout["max_total_nodes"]
+                max_E             = layout["max_edges"]
 
-            # Perform the neighbor scoring from Goeckner et al., DOI: 10.1109/IROS58592.2024.10802510
-            if hasattr(graphs, "neighbors") and self.args.gnn_neighbor_scoring:
-                # Pad actor_features to max neighbors.
-                if self.MAX_NODES - actor_features.shape[1] > 0:
-                    actor_features = F.pad(actor_features, (0, 0, 0, self.MAX_NODES - actor_features.shape[1]), mode='constant', value=0.0)
+                # Node validity mask and compact node tensor.
+                node_range = torch.arange(max_N)
+                node_mask  = node_range.unsqueeze(0) < num_nodes_t.unsqueeze(1)  # (B, max_N)
+                x_flat_cpu    = node_features_pad[node_mask]                     # (sum_n, F)
+                batch_vec_cpu = torch.repeat_interleave(torch.arange(B), num_nodes_t)
 
-                neighbors_mask = check(np.array(graphs.neighbors_mask)).to(**self.tpdv).bool()
-                # Extend the mask for the full feature size.
-                neighbors_mask = neighbors_mask.unsqueeze(2).repeat(1, 1, actor_features.shape[-1])
-                actor_features_masked = torch.where(neighbors_mask, actor_features, 0.0)
-                scores = self.neighbor_scorer(actor_features_masked)
-                
-                # Shift the scores to the correct position.
-                scores_shifted = torch.zeros((actor_features.shape[0], self.MAX_NEIGHBORS), **self.tpdv)
-                for i in range(actor_features.shape[0]):
-                    nbrs = check(np.array(graphs.neighbors[i])).to(**self.tpdv).int()
-                    scores_shifted[i, :nbrs.shape[0]] = scores[i, nbrs, 0]
+                # Cumulative node offsets for global edge index remapping.
+                cum_nodes     = torch.zeros(B, dtype=torch.long)
+                cum_nodes[1:] = num_nodes_t[:-1].cumsum(0)
 
-                actor_features = scores_shifted
+                # Edge validity: only the first num_edges_t[i] slots are real; the rest
+                # are zero-padded and would otherwise look like (0, 0) self-loops.
+                ei_src_f     = edge_index_pad_f[:, 0, :]
+                ei_dst_f     = edge_index_pad_f[:, 1, :]
+                edge_range   = torch.arange(max_E)
+                edge_valid   = edge_range.unsqueeze(0) < num_edges_t.unsqueeze(1)  # (B, max_E)
+                offset_f     = cum_nodes.float().unsqueeze(1)
+                ei_src_g     = (ei_src_f + offset_f)[edge_valid].long()
+                ei_dst_g     = (ei_dst_f + offset_f)[edge_valid].long()
 
-            # Perform evaluation only for a node of interest (typically agent position).
-            elif hasattr(graphs, "agent_idx"):
-                agent_idx = torch.from_numpy(np.array(graphs.agent_idx)).reshape(-1, 1).to(self.device)
-                actor_features = self.base.gatherNodeFeats(actor_features, agent_idx)
-            
-            # Use the entire graph as the actor features.
+                # Move only compact tensors to GPU.
+                x_flat          = x_flat_cpu.to(dev)
+                edge_index_flat = torch.stack([ei_src_g, ei_dst_g], dim=0).to(dev)
+                edge_attr_flat  = edge_attr_pad[edge_valid].to(dev)
+                batch_vec       = batch_vec_cpu.to(dev)
+                agent_idx_t     = agent_idx_t.to(dev)
+
+                # Neighbor positions in action order: (B, n_actions) float, -1 = invalid.
+                nbr_mask_cpu = _slice_cpu("neighbors_mask") if self.args.gnn_neighbor_scoring else None
+
+                # Non-graph remainder (e.g. observation_radius).
+                s_r, e_r, _ = offsets.get("observation_radius", (0, 0, (0,)))
+                obs_nongraph = obs_cpu[:, s_r:e_r].to(dev) if e_r > s_r else torch.zeros(B, 0, **self.tpdv)
+
+            else:
+                # --- PyG object obs path ---
+                obs_graph    = obs[:, self.obs_space_graph_idx]
+                nonGraphIdx  = [i for i in range(obs.shape[1]) if i != self.obs_space_graph_idx]
+                obs_nongraph_np = obs[:, nonGraphIdx]
+                if len(obs_nongraph_np.shape) > 1 and obs_nongraph_np.shape[1] > 0:
+                    tmp = np.zeros((obs_nongraph_np.shape[0], *obs_nongraph_np[0, 0].shape), dtype=np.float32)
+                    for i in range(obs_nongraph_np.shape[0]):
+                        tmp[i] = obs_nongraph_np[i, 0]
+                    obs_nongraph_np = tmp
+                obs_nongraph = check(obs_nongraph_np.astype(np.float32)).to(**self.tpdv)
+
+                graphs = Batch.from_data_list(obs_graph).to(self.device, "x", "edge_attr", "edge_index")
+                x_flat          = graphs.x
+                edge_index_flat = graphs.edge_index
+                edge_attr_flat  = graphs.edge_attr
+                batch_vec       = graphs.batch.to(self.device)
+                B               = int(batch_vec.max().item()) + 1
+                max_N           = self.MAX_NODES
+
+                agent_idx_t  = torch.from_numpy(np.array(graphs.agent_idx)).reshape(-1, 1).to(self.device) \
+                               if hasattr(graphs, "agent_idx") else None
+                nbr_mask_cpu = check(np.array(graphs.neighbors_mask)) \
+                               if (hasattr(graphs, "neighbors") and self.args.gnn_neighbor_scoring) else None
+
+            # ---- Shared post-GNN block ----
+            out            = self.base(x_flat, edge_attr_flat, edge_index_flat)  # (sum_n, hidden)
+            actor_features, _ = to_dense_batch(out, batch_vec)                  # (B, max_n_i, hidden)
+            max_n_i        = actor_features.shape[1]
+
+            if nbr_mask_cpu is not None:
+                # nbr_mask_cpu[i, k] = node position (in padded array) for action k,
+                # or -1.0 if action k has no valid neighbor.  Shape: (B, n_actions).
+                # This encodes neighbors in ACTION ORDER so actor_features[i, k] directly
+                # gives the GNN score for the target of action k.
+                n_actions   = nbr_mask_cpu.shape[1]
+                dev         = self.device
+
+                # Valid actions: position >= 0  (invalid slots store -1.0)
+                valid_mask  = (nbr_mask_cpu > -0.5).to(dev)                        # (B, n_actions) bool
+                # Clamp invalid (-1) positions to 0 for gather; they will be zeroed by valid_mask.
+                gather_idx  = nbr_mask_cpu.clamp(min=0).long().to(dev)             # (B, n_actions) long
+                gather_idx  = gather_idx.clamp(max=max(max_n_i - 1, 0))
+
+                # Rebuild per-node boolean mask for the scorer (which nodes are reachable neighbors).
+                nbr_node_mask_int = torch.zeros(B, max_n_i, dtype=torch.long, device=dev)
+                nbr_node_mask_int.scatter_add_(
+                    1,
+                    gather_idx.clamp(max=max_n_i - 1),
+                    valid_mask.long(),
+                )
+                nbr_mask_1d = nbr_node_mask_int.bool()  # (B, max_n_i)
+
+                if self._use_state_encoder and encoded_state is not None:
+                    enc_bc = encoded_state.unsqueeze(1).expand(-1, max_n_i, -1)
+                    features_for_scorer = torch.cat([actor_features, enc_bc], dim=-1)
+                else:
+                    features_for_scorer = actor_features
+
+                nbr_mask_3d = nbr_mask_1d.unsqueeze(2).expand_as(features_for_scorer)
+                hidden = self.neighbor_scorer(
+                    torch.where(nbr_mask_3d, features_for_scorer, features_for_scorer.new_zeros(())))
+                scores = self.neighbor_scorer_head(hidden)  # (B, max_n_i, 1) — no final activation
+
+                scores_flat    = scores[:, :, 0]            # (B, max_n_i)
+                actor_features = torch.gather(scores_flat, 1, gather_idx) * valid_mask.float()
+                # actor_features shape: (B, n_actions) — score for each action's target node.
+
+            elif agent_idx_t is not None:
+                actor_features = self.base.gatherNodeFeats(actor_features, agent_idx_t)
+
             else:
                 actor_features = self.base.graphAggr(actor_features, aggr="mean")
 
-            # Concatenate the graph and non-graph features.
             actor_features = torch.cat([actor_features, obs_nongraph], dim=-1)
 
             if self._use_gnn_mlp:
+                if self._use_state_encoder and encoded_state is not None:
+                    actor_features = torch.cat([actor_features, encoded_state], dim=-1)
                 actor_features = self.mlp0(actor_features)
+            elif self._use_state_encoder:
+                # No mlp0: concat encoded state here before RNN.
+                actor_features = torch.cat([actor_features, encoded_state], dim=-1)
         else:
             obs = check(obs).to(**self.tpdv)
 
@@ -279,32 +449,37 @@ class QmasActor(nn.Module):
                 actor_features = self.cnn(actor_features)
             if self._use_attention:
                 actor_features = self.attention(actor_features)
+            if self._use_state_encoder:
+                actor_features = torch.cat([actor_features, encoded_state], dim=-1)
             if self._use_mlp:
                 actor_features = self.mlp(actor_features)
-
-        # Handle global observation.
-        if self._use_state_encoder:
-            if global_obs == None:
-                # If no global state is provided, use zeros.
-                batch_size = actor_features.shape[0]
-                encoded_state = torch.zeros((batch_size, self.args.state_encoder_output_dim), device=actor_features.device)
-            else:
-                global_obs = check(global_obs).to(**self.tpdv)
-                global_obs = torch.nan_to_num(global_obs, nan=0.0, posinf=0.0, neginf=0.0)
-                # Encode the global state
-                encoded_state = self.state_encoder(global_obs)
-                # Repeat the encoded state for each agent if necessary.
-                if encoded_state.shape[0] < actor_features.shape[0]:
-                    if actor_features.shape[0] % encoded_state.shape[0] != 0:
-                        raise ValueError("Batch size of obs is not a multiple of batch size of share_obs.")
-                    encoded_state = encoded_state.repeat_interleave(actor_features.shape[0] // encoded_state.shape[0], dim=0)
-            actor_features = torch.cat([actor_features, encoded_state], dim=-1)
 
         # Recurrent network.
         if self._use_rnn:
             actor_features, rnn_states = self.rnn(actor_features, rnn_states, masks)
 
         return actor_features, rnn_states
+
+
+    def _encode_global_state(self, global_obs, batch_size):
+        '''
+        This function encodes the global state using the state encoder.
+        batch_size: the per-agent batch size (e.g. n_threads * n_agents).
+        '''
+        if global_obs is None:
+            # If no global state is provided, use zeros.
+            encoded_state = torch.zeros((batch_size, self.args.state_encoder_output_dim), device=self.device)
+        else:
+            global_obs = check(global_obs).to(**self.tpdv)
+            global_obs = torch.nan_to_num(global_obs, nan=0.0, posinf=0.0, neginf=0.0)
+            # Encode the global state.
+            encoded_state = self.state_encoder(global_obs)
+            # Repeat the encoded state for each agent if necessary.
+            if encoded_state.shape[0] < batch_size:
+                if batch_size % encoded_state.shape[0] != 0:
+                    raise ValueError("Batch size of obs is not a multiple of batch size of share_obs.")
+                encoded_state = encoded_state.repeat_interleave(batch_size // encoded_state.shape[0], dim=0)
+        return encoded_state
 
 
 class QmasCritic(Critic):

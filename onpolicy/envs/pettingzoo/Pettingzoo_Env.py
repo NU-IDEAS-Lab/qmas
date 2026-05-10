@@ -51,7 +51,16 @@ class PettingzooEnv(object):
 
         # Set up observation space.
         if self.flatten_observations:
-            self.observation_space = [flatten_space(self.env.observation_space(a)) for a in self.env.possible_agents]
+            flat_spaces = []
+            for a in self.env.possible_agents:
+                orig = self.env.observation_space(a)
+                flat = flatten_space(orig)
+                # Preserve the original Dict space so downstream code (e.g. actor with
+                # gnn_use_dense_obs) can recover per-key shapes after flattening.
+                if isinstance(orig, Dict):
+                    flat._original_dict_space = orig
+                flat_spaces.append(flat)
+            self.observation_space = flat_spaces
         else:
             self.observation_space = [self.env.observation_space(a) for a in self.env.possible_agents]
         

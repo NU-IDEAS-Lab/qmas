@@ -61,6 +61,9 @@ class QmasAlgorithm(Algorithm):
             frac = episode / episodes
             if frac < self.args.episode_fraction_start_prediction:
                 update_predictor = False
+            if frac < self.args.episode_fraction_start_policy:
+                update_actor = False
+                update_critic = False
             if frac > self.args.episode_fraction_stop_policy:
                 update_actor = False
                 update_critic = False
@@ -86,23 +89,54 @@ class QmasAlgorithm(Algorithm):
                 thread_indices = torch.arange(self.args.n_rollout_threads)
                 thread_splits = torch.split(thread_indices, split_size)
 
+                pred_streams = [
+                    torch.cuda.Stream(device=p.device) if p.device.type == "cuda" else None
+                    for p in self.predictors
+                ]
+
+                # One-shot seed of normalization stats from a large sample, before any
+                # diffuser updates run. Without this, running mean/var crawl up from the
+                # zero-mean / unit-var prior over many minibatches and the diffuser
+                # chases a moving normalization target.
+                seed_targets = [i for i, p in enumerate(self.predictors) if not bool(p.normalizer_seeded.item())]
+                if seed_targets:
+                    seed_sample = next(buffer.sample_trajectories(1, self.prediction_horizon))
+                    for i in seed_targets:
+                        predictor = self.predictors[i]
+                        if len(thread_splits[i]) == 0:
+                            continue
+                        seed_trajs, _, _ = self._build_training_trajectories(
+                            seed_sample, predictor, thread_indices=thread_splits[i]
+                        )
+                        predictor.seed_normalization_stats(seed_trajs)
+
                 for e in range(self.args.diffusion_epoch):
                     data_generator = buffer.sample_trajectories(self.num_mini_batch, self.prediction_horizon)
                     for sample in data_generator:
-                        # For each sample, run each predictor's update in its own thread
+                        # For each sample, run each predictor's update in its own thread and CUDA stream.
                         pred_threads = []
                         pred_losses = [None] * self.num_predictors
                         pred_guides = [None] * self.num_predictors
                         pred_uncerts = [None] * self.num_predictors
 
-                        def make_pred_thread(i, predictor):
+                        def make_pred_thread(i, predictor, stream):
                             def run():
                                 try:
-                                    # Use a local dict to accumulate losses for this predictor
                                     local_info = {'diffuser_loss': 0, 'guide_loss': 0, 'uncertainty_loss': 0}
                                     if len(thread_splits[i]) == 0:
                                         raise ValueError("Thread split is empty. Check prediction_ensemble_size and n_rollout_threads.")
-                                    self.train_sample_diffuser(sample, local_info, predictor, thread_indices=thread_splits[i])
+                                    if stream is not None:
+                                        with torch.cuda.device(predictor.device):
+                                            # Make this stream wait for any prior work queued on
+                                            # the default stream (e.g. data already on GPU).
+                                            stream.wait_stream(torch.cuda.current_stream(stream.device))
+                                            with torch.cuda.stream(stream):
+                                                self.train_sample_diffuser(sample, local_info, predictor, thread_indices=thread_splits[i])
+                                            # Default stream needs to wait on this one before
+                                            # downstream readers (e.g. the policy thread or next epoch).
+                                            torch.cuda.current_stream(stream.device).wait_stream(stream)
+                                    else:
+                                        self.train_sample_diffuser(sample, local_info, predictor, thread_indices=thread_splits[i])
                                     pred_losses[i] = local_info['diffuser_loss']
                                     pred_guides[i] = local_info['guide_loss']
                                     pred_uncerts[i] = local_info.get('uncertainty_loss', 0)
@@ -112,7 +146,7 @@ class QmasAlgorithm(Algorithm):
                             return run
 
                         for i, predictor in enumerate(self.predictors):
-                            t = threading.Thread(target=make_pred_thread(i, predictor))
+                            t = threading.Thread(target=make_pred_thread(i, predictor, pred_streams[i]))
                             pred_threads.append(t)
                             t.start()
 
@@ -173,9 +207,11 @@ class QmasAlgorithm(Algorithm):
 
         return train_info
 
-    def train_sample_diffuser(self, sample, train_info, predictor, thread_indices=None):
-        ''' Performs update for a single sample for a given predictor. '''
-        
+    def _build_training_trajectories(self, sample, predictor, thread_indices=None):
+        ''' Build (trajectories, fix_mask_batch, returns_batch) the way the diffuser
+            consumes them. Extracted from train_sample_diffuser so other callers
+            (e.g. one-shot normalization seeding) can reuse the same construction. '''
+
         if "state_visibility_mask" in sample:
             key_obs = "share_obs"
             key_visibility = "state_visibility_mask"
@@ -200,24 +236,41 @@ class QmasAlgorithm(Algorithm):
             obs_batch = sample[key_obs]
             rewards_batch = sample["rewards"]
             fix_mask_batch = sample[key_visibility]
+            actions_batch = sample["actions"]
         else:
             obs_batch = sample[key_obs][:, :, thread_indices]
             rewards_batch = sample["rewards"][:, :, thread_indices]
             fix_mask_batch = sample[key_visibility][:, :, thread_indices]
+            actions_batch = sample["actions"][:, :, thread_indices]
 
         # If using individual observations, we need to treat each agent as a separate batch item.
         if individual_obs:
             obs_batch = einops.rearrange(obs_batch, 'b h t n ... -> (b n) h t ...')
             fix_mask_batch = einops.rearrange(fix_mask_batch, 'b h t n ... -> (b n) h t ...')
+            actions_batch = einops.rearrange(actions_batch, 'b h t n ... -> (b n) h t ...')
+        elif self.args.prediction_history_include_actions:
+            # For global-state observations (individual_obs=False), the diffuser was initialised with
+            # transition_dim = per-agent action_dim + obs_dim.  At inference time, each
+            # (thread × agent) pair contributes its own trajectory, so we need to replicate
+            # the global obs once per agent and pair it with each agent's action before
+            # applying the standard per-agent rearrange.
+            n_agents = actions_batch.shape[3]  # [b, h, t, n_agents, action_dim]
+            obs_batch = obs_batch.unsqueeze(3).expand(-1, -1, -1, n_agents, -1)   # [b, h, t, n, obs_dim]
+            fix_mask_batch = fix_mask_batch.unsqueeze(3).expand(-1, -1, -1, n_agents, -1)
+            obs_batch = einops.rearrange(obs_batch, 'b h t n ... -> (b n) h t ...')
+            fix_mask_batch = einops.rearrange(fix_mask_batch, 'b h t n ... -> (b n) h t ...')
+            actions_batch = einops.rearrange(actions_batch, 'b h t n ... -> (b n) h t ...')
 
         if self.predictor_2d_conv:
             # Set up batches for 2D convolution.
             obs_batch = einops.rearrange(obs_batch, 'b h t c ... -> (b t) (h c) ...')
             fix_mask_batch = einops.rearrange(fix_mask_batch, 'b h t c ... -> (b t) (h c) ...')
+            actions_batch = einops.rearrange(actions_batch, 'b h t c ... -> (b t) (h c) ...')
         else:
             # Set up batches for 1D convolution.
             obs_batch = einops.rearrange(obs_batch, 'b h t ... -> (b t) h (...)')
             fix_mask_batch = einops.rearrange(fix_mask_batch, 'b h t ... -> (b t) h (...)')
+            actions_batch = einops.rearrange(actions_batch, 'b h t ... -> (b t) h (...)')
 
         # Process rewards. Sum rewards across all agents.
         rewards_batch = einops.rearrange(rewards_batch, 'b h t ... -> (b t) h ...')
@@ -230,13 +283,27 @@ class QmasAlgorithm(Algorithm):
         returns_batch = torch.sum(rewards_batch * discounts, dim=1) #.reshape((-1, 1))
 
         # Build trajectories.
-        # trajectories = torch.cat([actions_batch, obs_batch], dim=-1)
-        trajectories = obs_batch
+        if self.args.prediction_history_include_actions:
+            trajectories = torch.cat([actions_batch, obs_batch], dim=-1)
+            # Pad fix_mask with ones for action dimensions (actions are always observed).
+            action_mask = torch.ones_like(actions_batch)
+            fix_mask_batch = torch.cat([action_mask, fix_mask_batch], dim=-1)
+        else:
+            trajectories = obs_batch
 
         # Transfer tensors to the device.
         trajectories = trajectories.float().to(predictor.device)
         returns_batch = returns_batch.float().to(predictor.device)
         fix_mask_batch = fix_mask_batch.float().to(predictor.device)
+
+        return trajectories, fix_mask_batch, returns_batch
+
+    def train_sample_diffuser(self, sample, train_info, predictor, thread_indices=None):
+        ''' Performs update for a single sample for a given predictor. '''
+
+        trajectories, fix_mask_batch, returns_batch = self._build_training_trajectories(
+            sample, predictor, thread_indices=thread_indices
+        )
 
         # Update running stats from training trajectories and train in normalized space.
         predictor.update_normalization_stats(trajectories)
@@ -244,7 +311,7 @@ class QmasAlgorithm(Algorithm):
 
         # Update the fix_mask. This determines which parts of the trajectory are fixed and which are predicted.
         # This applies to both update_diffusion and update_classifier.
-        predictor.diffuser.fix_mask = torch.nn.Parameter(fix_mask_batch, requires_grad=False)
+        predictor.diffuser.fix_mask = fix_mask_batch
 
         # Update diffuser model.
         diffuser_loss = predictor.diffuser.update_diffusion(
@@ -252,16 +319,16 @@ class QmasAlgorithm(Algorithm):
         )['diffusion_loss']
         train_info['diffuser_loss'] += diffuser_loss
 
-        # Get prediction.
-        predictions = predictor.get_prediction(
-            trajectories,
-            visibility_mask=fix_mask_batch,
-            has_sample_dim=True,
-        ).detach()
-        predictions_error = predictions - trajectories
-
         # Calculate uncertainty estimation loss.
         if self.args.prediction_uq_method == "estimation":
+            # Get prediction.
+            predictions = predictor.get_prediction(
+                trajectories,
+                visibility_mask=fix_mask_batch,
+                has_sample_dim=True,
+            ).detach()
+            predictions_error = predictions - trajectories
+
             predictions_masked = predictions * fix_mask_batch
             predicted_lb, predicted_ub = predictor.get_uncertainty_bounds(predictions_masked)
             uncertainty_loss = predictor.uncertainty_bounds_estimator.loss(

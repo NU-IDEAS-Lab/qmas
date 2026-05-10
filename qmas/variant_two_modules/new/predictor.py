@@ -126,9 +126,14 @@ class Predictor(torch.nn.Module):
             diffusion_steps=256,
             # classifier=self.guide,
             predict_noise=False,
-            # ema_rate=0.9999,
-            
+            ema_rate=0.995,
         ).to(device)
+
+        # Deregister fix_mask as nn.Parameter so per-batch assignments are plain
+        # attribute sets (no _parameters bookkeeping, no EMA tracking).
+        if "fix_mask" in self.diffuser._parameters:
+            initial_fix_mask = self.diffuser._parameters.pop("fix_mask").data
+            self.diffuser.fix_mask = initial_fix_mask
 
         # Update the diffuser optimizers.
         self.diffuser.manual_optimizers = {}
@@ -154,6 +159,9 @@ class Predictor(torch.nn.Module):
         self.register_buffer("obs_running_mean", torch.zeros_like(fix_mask, dtype=torch.float32))
         self.register_buffer("obs_running_var", torch.ones_like(fix_mask, dtype=torch.float32))
         self.register_buffer("obs_running_count", torch.full_like(fix_mask, self.norm_eps, dtype=torch.float32))
+        # Tracks whether the running stats have been one-shot seeded from a large batch.
+        # Persisted as a buffer so it survives checkpoint save/load.
+        self.register_buffer("normalizer_seeded", torch.tensor(False))
 
 
     def _ensure_norm_shape(self, x: torch.Tensor):
@@ -163,6 +171,38 @@ class Predictor(torch.nn.Module):
             self.obs_running_mean = torch.zeros(feature_shape, dtype=torch.float32, device=x.device)
             self.obs_running_var = torch.ones(feature_shape, dtype=torch.float32, device=x.device)
             self.obs_running_count = torch.full(feature_shape, self.norm_eps, dtype=torch.float32, device=x.device)
+
+
+    @torch.no_grad()
+    def seed_normalization_stats(self, x: torch.Tensor, visibility_mask: torch.Tensor = None):
+        """One-shot initialization of running mean/var from a large batch.
+
+        Why: incremental Welford updates take many minibatches to converge from the
+        zero-mean / unit-var prior, so the diffuser chases a moving normalization
+        target during early training. Seeding once with a large sample sets
+        `obs_running_count` high enough that subsequent incremental updates barely
+        move the stats, giving the diffuser stationary normalized inputs.
+        """
+        self._ensure_norm_shape(x)
+
+        if visibility_mask is None:
+            valid = torch.ones_like(x, dtype=torch.float32)
+        else:
+            valid = visibility_mask.to(dtype=torch.float32)
+
+        x_float = x.to(dtype=torch.float32)
+        raw_count = valid.sum(dim=0)
+        has_obs = raw_count > 0
+        safe_count = torch.where(has_obs, raw_count, torch.ones_like(raw_count))
+
+        batch_mean = (x_float * valid).sum(dim=0) / safe_count
+        centered = x_float - batch_mean.unsqueeze(0)
+        batch_var = (centered.pow(2) * valid).sum(dim=0) / safe_count
+
+        self.obs_running_mean = torch.where(has_obs, batch_mean, self.obs_running_mean)
+        self.obs_running_var = torch.where(has_obs, batch_var.clamp_min(self.norm_eps), self.obs_running_var)
+        self.obs_running_count = torch.where(has_obs, raw_count, self.obs_running_count)
+        self.normalizer_seeded.fill_(True)
 
 
     @torch.no_grad()
@@ -262,7 +302,7 @@ class Predictor(torch.nn.Module):
 
         # The trajectory and visibility_mask represent the known data and are applied as described by Janner et al.
         # We set the fix_mask manually here as a workaround for CleanDiffuser not taking it as an input.
-        self.diffuser.fix_mask = torch.nn.Parameter(visibility_mask, requires_grad=False)
+        self.diffuser.fix_mask = visibility_mask
 
         # Sample from the diffusion model.
         with torch.enable_grad():
@@ -270,8 +310,8 @@ class Predictor(torch.nn.Module):
                 prior=trajectory,
                 solver="ddim",
                 n_samples=trajectory.shape[0],
-                temperature=0.6,
-                sample_steps=20,
+                temperature=0.0,
+                sample_steps=50,
                 condition_cg=trajectory,
                 condition_cg_mask=visibility_mask,
                 w_cg=0.0,
@@ -280,6 +320,7 @@ class Predictor(torch.nn.Module):
                 # warm_start_forward_level=0.3,
                 use_ema=True,
             )
+        prediction = prediction.float()
 
         # Take the mean over the samples and map back to the original observation scale.
         # prediction = prediction.mean(dim=0, keepdim=True)

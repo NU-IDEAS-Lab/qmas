@@ -243,6 +243,10 @@ def get_config():
                         help="Maximum number of neighbors that each node may have.")
     parser.add_argument("--gnn_neighbor_scoring", action='store_true',
                         default=False, help='Whether to use GNN-based neighbor scoring.')
+    parser.add_argument("--gnn_use_dense_obs", action=argparse.BooleanOptionalAction, default=False,
+                        help="Use dense tensor observations instead of PyG graph objects. Enables predictor training on graph observations.")
+    parser.add_argument("--disable_observation_global", action='store_true', default=False,
+                        help="Ignore observation_global from env infos and use obs for everything, including predictor UQ injection. Useful when the predictor feeds directly into the GNN via obs.")
 
     # recurrent parameters
     parser.add_argument("--use_naive_recurrent_policy", action=argparse.BooleanOptionalAction,
@@ -362,6 +366,9 @@ def get_config():
     # diffuser parameters
     parser.add_argument("--episode_fraction_start_prediction", type=float, default=0.0,
                         help="The fraction of episodes at which to start training the prediction model.")
+    parser.add_argument("--episode_fraction_start_policy", type=float, default=0.0,
+                        help="The fraction of episodes at which to start training the policy, "
+                             "allowing the predictor to be partially trained first.")
     parser.add_argument("--episode_fraction_stop_policy", type=float, default=1.0,
                         help="The fraction of episodes at which to stop training the policy.")
     parser.add_argument("--prediction_during_training", action=argparse.BooleanOptionalAction, default=False,

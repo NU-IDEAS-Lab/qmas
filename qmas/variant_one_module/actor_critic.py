@@ -106,11 +106,12 @@ class QmasActorOneModule(nn.Module):
             )
             if args.gnn_neighbor_scoring:
                 self.neighbor_scorer = MLPLayer(
-                    input_dim=args.gnn_hidden_size, output_dim=1,
+                    input_dim=args.gnn_hidden_size, output_dim=None,
                     hidden_size=self.hidden_size, layer_N=3,
                     use_orthogonal=args.use_orthogonal, use_ReLU=args.use_ReLU,
                     use_layer_norm=False,
                 )
+                self.neighbor_scorer_head = nn.Linear(self.hidden_size, 1)
                 actor_base_out = self.MAX_NEIGHBORS + get_shape_from_obs_space(obs_space_nongraph)[0]
             else:
                 actor_base_out = args.gnn_hidden_size + get_shape_from_obs_space(obs_space_nongraph)[0]
@@ -232,12 +233,19 @@ class QmasActorOneModule(nn.Module):
                 neighbors_mask = check(np.array(graphs.neighbors_mask)).to(**self.tpdv).bool()
                 neighbors_mask = neighbors_mask.unsqueeze(2).repeat(1, 1, feats.shape[-1])
                 feats_masked = torch.where(neighbors_mask, feats, 0.0)
-                scores = self.neighbor_scorer(feats_masked)
-                scores_shifted = torch.zeros((feats.shape[0], self.MAX_NEIGHBORS), **self.tpdv)
-                for i in range(feats.shape[0]):
-                    nbrs = check(np.array(graphs.neighbors[i])).to(**self.tpdv).int()
-                    scores_shifted[i, :nbrs.shape[0]] = scores[i, nbrs, 0]
-                feats = scores_shifted
+                scores = self.neighbor_scorer_head(self.neighbor_scorer(feats_masked))
+                # Build gather index without breaking the autograd graph.
+                B_f = feats.shape[0]
+                gather_idx = torch.zeros(B_f, self.MAX_NEIGHBORS, dtype=torch.long, device=self.device)
+                valid_mask  = torch.zeros(B_f, self.MAX_NEIGHBORS, dtype=torch.bool,  device=self.device)
+                for i in range(B_f):
+                    nbrs = check(np.array(graphs.neighbors[i])).long().to(self.device)
+                    n = nbrs.shape[0]
+                    gather_idx[i, :n] = nbrs
+                    valid_mask[i, :n]  = True
+                scores_flat = scores[:, :, 0]
+                gather_idx = gather_idx.clamp(max=scores_flat.shape[1] - 1)
+                feats = torch.gather(scores_flat, 1, gather_idx) * valid_mask.float()
             elif hasattr(graphs, "agent_idx"):
                 agent_idx = torch.from_numpy(np.array(graphs.agent_idx)).reshape(-1, 1).to(self.device)
                 feats = self.base.gatherNodeFeats(feats, agent_idx)

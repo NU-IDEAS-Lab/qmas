@@ -180,7 +180,16 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
             if obs_full is None:
                 obs_full = obs.clone()
             if not self.obs_object:
-                obs = obs * visibility_mask
+                mask_dim = visibility_mask.shape[-1]
+                obs_dim = obs.shape[-1]
+                if mask_dim < obs_dim:
+                    # obs was padded (e.g. UQ appended); only mask the original portion.
+                    obs = torch.cat([
+                        obs[..., :mask_dim] * visibility_mask,
+                        obs[..., mask_dim:]
+                    ], dim=-1)
+                else:
+                    obs = obs * visibility_mask
         elif obs_full is None:
             obs_full = obs
 
@@ -296,7 +305,10 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
                 if self._use_proper_time_limits:
                     gae = gae * self.bad_masks[step + 1]
 
-                self["returns"][step] = gae + value_normalizer.denormalize(self["value_preds"][step])
+                if self._use_popart or self._use_valuenorm:
+                    self["returns"][step] = gae + value_normalizer.denormalize(self["value_preds"][step])
+                else:
+                    self["returns"][step] = gae + self["value_preds"][step]
 
         else:
             self["returns"][last_step] = next_value
