@@ -29,6 +29,11 @@ class QmasAlgorithm(Algorithm):
         self.prediction_horizon = args.prediction_history_window
         self.predictor_2d_conv = args.diffusion_model_type == "unet2d"
 
+        self._pred_streams = [
+            torch.cuda.Stream(device=p.device) if p.device.type == "cuda" else None
+            for p in self.predictors
+        ]
+
         print(f"Initialized QmasAlgorithm with {self.num_predictors} predictors. Threaded training: {self.use_threads}")
 
     def train(self, buffer, update_actor=True, update_critic=True, last_step=-1, episode=None, episodes=None):
@@ -89,10 +94,7 @@ class QmasAlgorithm(Algorithm):
                 thread_indices = torch.arange(self.args.n_rollout_threads)
                 thread_splits = torch.split(thread_indices, split_size)
 
-                pred_streams = [
-                    torch.cuda.Stream(device=p.device) if p.device.type == "cuda" else None
-                    for p in self.predictors
-                ]
+                pred_streams = self._pred_streams
 
                 # One-shot seed of normalization stats from a large sample, before any
                 # diffuser updates run. Without this, running mean/var crawl up from the
