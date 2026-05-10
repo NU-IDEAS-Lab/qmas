@@ -11,10 +11,10 @@ args = [
 
     "--num_agents", "1",
     "--agent_speed", "40.0",
-    "--action_method", "neighbors",
-    "--observe_method", "pyg",
+    "--action_method", "velocity",
+    "--observe_method", "coordinates",
     "--observe_method_global", "coordinates",
-    "--observation_mask",
+    # "--observation_mask",
     "--observation_radius", "200.0",
     "--observation_radius_random_min", "50.0",
     "--observation_radius_random_max", "300.0",
@@ -29,7 +29,7 @@ args = [
     # "--graph_name", "milwaukee",
     # "--graph_file", "../patrolling_zoo/graphs/milwaukee.graph",
     "--graph_random",
-    "--graph_random_nodes", "4",
+    "--graph_random_nodes", "6",
     "--regenerate_graph_on_reset",
     "--regenerate_graph_every", "1",
 
@@ -40,8 +40,8 @@ args = [
 
     "--algorithm_class", "qmas.variant_two_modules.new.algorithm.QmasAlgorithm",
     "--policy_class", "qmas.variant_two_modules.new.policy.QmasPolicy",
-    "--algorithm_name", "rmappo",
-    "--use_gnn_policy",
+    "--algorithm_name", "mappo",
+    # "--use_gnn_policy",
     # "--use_gnn_mlp_policy",
     "--gnn_layer_N", "5",
     "--gnn_hidden_size", "32",
@@ -59,7 +59,7 @@ args = [
     # "--critic_hidden_size", "512",
     "--layer_N", "3",
     # "--use_linear_lr_decay",
-    "--ppo_epoch", "5",
+    # "--ppo_epoch", "5",
     "--seed", "42",
 
     "--diffusion_model_type", "dit1d",
@@ -71,20 +71,21 @@ args = [
     # "--prediction_ensemble_size", "3",
     "--diffusion_autoregression_steps", "1",
     # "--state_encoder",
+    "--disable_observation_global",
 
     # "--episode_fraction_start_prediction", "0.0",
 
-    "--n_rollout_threads", "72",
+    "--n_rollout_threads", "100",
     "--cuda",
-    "--cuda_idx", "7",
+    "--cuda_idx", "1",
     # "--cuda_idx_predictor", "6",
     "--threaded_training",
     "--n_training_threads", "16",
 
     "--save_interval", "100000",
-    # "--save_awcheckpoints",
-    "--results_dir", "/data/group/mas/qmas/results",
-    "--use_wandb",
+    # "--save_checkpoints",
+    # "--results_dir", "/data/group/mas/qmas/results",
+    # "--use_wandb",
 ]
 
 if __name__ == "__main__":
