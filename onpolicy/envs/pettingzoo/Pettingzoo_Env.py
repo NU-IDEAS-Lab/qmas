@@ -181,6 +181,8 @@ class PettingzooEnv(object):
         self.env.close()
 
     def _available_actions_wrapper(self, available_actions):
+        if any(available_actions[a] is None for a in self.env.possible_agents):
+            return np.full(self.num_agents, None, dtype=object)
         res = np.array([available_actions[a] for a in self.env.possible_agents])
         return res
 

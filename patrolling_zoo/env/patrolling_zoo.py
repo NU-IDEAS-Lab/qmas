@@ -61,11 +61,13 @@ def add_args(parser):
     parser.add_argument("--agent_speed", type=float, default=10.0,
                         help="the speed of each agent")
     parser.add_argument("--action_method", type=str, default="full",
-                        choices=["full", "neighbors", "neighbors_with_comm_boolean"],
+                        choices=["full", "neighbors", "neighbors_with_comm_boolean", "velocity"],
                         help="the action method to use. 'neighbors_with_comm_boolean' extends "
                              "'neighbors' with a binary communication-request action: agents "
                              "may request a broadcast from all other agents, who respond by "
-                             "sharing their local observations.")
+                             "sharing their local observations. 'velocity' issues 2D velocity "
+                             "commands (vx, vy), clipped to agent_speed in magnitude; nodes "
+                             "are visited when the agent enters action_velocity_acceptance_radius.")
     parser.add_argument("--observe_method", type=str, default="adjacency", 
                         choices=["adjacency", "coordinates", "pyg"],
                         help="the observation method to use")
@@ -105,6 +107,9 @@ def add_args(parser):
                         help="The maximum number of nodes in the full action space.")
     parser.add_argument("--action_neighbors_max_degree", type=int, default=10,
                         help="The maximum degree of neighbors in the neighbors action space.")
+    parser.add_argument("--action_velocity_acceptance_radius", type=float, default=5.0,
+                        help="In velocity action mode, distance within which an agent has "
+                             "'reached' a node (and thus visits it).")
 
 
 def validate_args(parsed_args):
@@ -132,18 +137,19 @@ class PatrolAgent():
     def __init__(self, id, position=(0.0, 0.0), speed = 1.0, observationRadius=np.inf, startingNode=None, currentState = 1, max_nodes = 50):
         self.id = id
         self.name = f"agent_{id}"
-        self.startingPosition = position
+        self.startingPosition = np.asarray(position, dtype=np.float32)
         self.startingSpeed = speed
         self.startingNode = startingNode
         self.observationRadius = observationRadius
         self.currentState = currentState
         self.max_nodes = max_nodes
         self.reset()
-    
-    
+
+
     def reset(self):
-        self.position = self.startingPosition
-        self.speed = self.startingSpeed
+        self.position = np.array(self.startingPosition, dtype=np.float32)
+        self.velocity = np.zeros(2, dtype=np.float32)
+        self.speed_max = self.startingSpeed
         self.edge = None
         self.currentAction = -1.0
         self.lastNode = self.startingNode
@@ -173,6 +179,7 @@ class parallel_env(ParallelEnv):
                  action_method = "full",
                  action_full_max_nodes = 40,
                  action_neighbors_max_degree = 15,
+                 action_velocity_acceptance_radius = 5.0,
                  reward_method_terminal = "average",
                  observation_radius = np.inf,
                  observation_radius_random_min = 0.0,
@@ -215,6 +222,8 @@ class parallel_env(ParallelEnv):
         self.action_method = action_method
         self.action_full_max_nodes = action_full_max_nodes
         self.action_neighbors_max_degree = action_neighbors_max_degree
+        self.action_velocity_acceptance_radius = action_velocity_acceptance_radius
+        self.agent_speed = agent_speed
         self.reward_method_terminal = reward_method_terminal
         self.observe_method = observe_method
         self.observe_method_global = observe_method_global if observe_method_global != "" else observe_method
@@ -312,6 +321,16 @@ class parallel_env(ParallelEnv):
                 )
             })
 
+        elif action_method == "velocity":
+            # 2D velocity command (vx, vy). Per-component bounds are ±agent_speed;
+            # combined magnitude is clipped to agent_speed at step time.
+            speed = float(self.agent_speed)
+            return spaces.Box(
+                low = np.array([-speed, -speed], dtype=np.float32),
+                high = np.array([speed, speed], dtype=np.float32),
+                dtype = np.float32,
+            )
+
 
     def _buildStateSpace(self, observe_method):
         ''' Creates a state space given the observation method.
@@ -371,6 +390,17 @@ class parallel_env(ParallelEnv):
         # Add agent 2D coordinates.
         if observe_method in ["coordinates"]:
             state_space["agent_position"] = spaces.Dict({
+                a: spaces.Box(
+                    low = -np.inf,
+                    high = np.inf,
+                    shape=(2,),
+                    dtype=np.float32,
+                ) for a in self.possible_agents
+            }) # type: ignore
+
+        # Add agent 2D velocity (bounded by per-agent max speed).
+        if observe_method in ["coordinates"]:
+            state_space["agent_velocity"] = spaces.Dict({
                 a: spaces.Box(
                     low = -np.inf,
                     high = np.inf,
@@ -530,7 +560,7 @@ class parallel_env(ParallelEnv):
         startingPositions = [self.pg.getNodePosition(i) for i in self.agentOrigins]
         self.agents = copy(self.possible_agents)
         for agent in self.possible_agents:
-            agent.startingPosition = startingPositions[agent.id]
+            agent.startingPosition = np.asarray(startingPositions[agent.id], dtype=np.float32)
             agent.startingNode = self.agentOrigins[agent.id]
             agent.observationRadius = self.observation_radius
             agent.reset()
@@ -748,6 +778,12 @@ class parallel_env(ParallelEnv):
                     high = np.ones(shape, dtype=np.int32),
                     dtype = np.int32
                 )
+            elif action_space.__class__.__name__ == "Box" and action_space.dtype == np.float32:
+                return spaces.Box(
+                    low = np.zeros(action_space.shape, dtype=np.float32),
+                    high = np.ones(action_space.shape, dtype=np.float32),
+                    dtype = np.float32
+                )
             else:
                 raise NotImplementedError(f"Action space {action_space} not supported for action masking.")
         return get_available_action_space(action_space)
@@ -841,7 +877,7 @@ class parallel_env(ParallelEnv):
         #     obs["agent_id"] = agent.id
         #     obs_mask["agent_id"] = np.array([True], dtype=bool)
 
-        # Add vertex idleness time (raw).
+        # Add vertex idleness time.
         if observe_method in ["adjacency", "coordinates"]:
             obs["vertex_state"] = {}
             obs_mask["vertex_state"] = {}
@@ -874,6 +910,14 @@ class parallel_env(ParallelEnv):
             for a in self.possible_agents:
                 obs["agent_position"][a] = np.array(a.position, dtype=np.float32)
                 obs_mask["agent_position"][a] = np.ones(2, dtype=bool) if a in agents else np.zeros(2, dtype=bool)
+
+        # Add agent 2D velocity.
+        if observe_method in ["coordinates"]:
+            obs["agent_velocity"] = {}
+            obs_mask["agent_velocity"] = {}
+            for a in self.possible_agents:
+                obs["agent_velocity"][a] = np.array(a.velocity, dtype=np.float32)
+                obs_mask["agent_velocity"][a] = np.ones(2, dtype=bool) if a in agents else np.zeros(2, dtype=bool)
 
         # Add weighted adjacency matrix (normalized).
         if observe_method in ["adjacency"]:
@@ -1185,45 +1229,51 @@ class parallel_env(ParallelEnv):
                     raise ValueError(f"Invalid action {action} of type {type(action)} provided.")
 
                 # Get the agent's movement action.
-                if self.action_method in ["full", "neighbors"]:
-                    action_movement = int(action)
-                elif self.action_method == "neighbors_with_comm_boolean":
-                    action_movement = int(action["movement"])
+                if self.action_method == "velocity":
+                    # Velocity action mode: 2D continuous velocity command.
+                    self._stepVelocity(agent, action, reward_dict, info_dict)
 
-                # Store this as the agent's last movement action.
-                agent.currentAction = action_movement
+                else:
+                    # Graph-based action modes: discrete actions indicate node to move towards.
+                    if self.action_method in ["full", "neighbors"]:
+                        action_movement = int(action)
+                    elif self.action_method == "neighbors_with_comm_boolean":
+                        action_movement = int(action["movement"])
 
-                # Get the destination node.
-                dstNode = self.getDestinationNode(agent, action_movement)
-                
-                # Calculate the shortest path.
-                path = self._getPathToNode(agent, dstNode)
-                pathLen = self._getAgentPathLength(agent, path)
-                
-                # Take a step towards the next node.
-                stepSize = np.random.normal(loc=agent.speed, scale=1.0)
-                for nextNode in path:
-                    reached, stepSize = self._moveTowardsNode(agent, nextNode, stepSize)
+                    # Store this as the agent's last movement action.
+                    agent.currentAction = action_movement
 
-                    # The agent has reached the next node.
-                    if reached:
-                        if nextNode == dstNode or not self.requireExplicitVisit:
-                            # The agent has reached its destination, visiting the node.
-                            # The agent receives a reward for visiting the node.
-                            r = self.onNodeVisit(nextNode, self.step_count)
-                            reward_dict[agent] += r
+                    # Get the destination node.
+                    dstNode = self.getDestinationNode(agent, action_movement)
 
-                            agent.lastNodeVisited = nextNode
-                            if nextNode == dstNode:
-                                agent.currentAction = -1.0
-                                info_dict[agent]["ready"] = True
-                        # Agent reached the destination, assign a new speed from normal distribution
-                        # agent.speed = max(np.random.normal(loc=agent.startingSpeed, scale=5.0), 1.0)
-            
-                    # The agent has exceeded its movement budget for this step.
-                    if stepSize <= 0.0:
-                        break
-                
+                    # Calculate the shortest path.
+                    path = self._getPathToNode(agent, dstNode)
+                    pathLen = self._getAgentPathLength(agent, path)
+
+                    # Take a step towards the next node.
+                    stepSize = np.random.normal(loc=agent.speed_max, scale=1.0)
+                    for nextNode in path:
+                        reached, stepSize = self._moveTowardsNode(agent, nextNode, stepSize)
+
+                        # The agent has reached the next node.
+                        if reached:
+                            if nextNode == dstNode or not self.requireExplicitVisit:
+                                # The agent has reached its destination, visiting the node.
+                                # The agent receives a reward for visiting the node.
+                                r = self.onNodeVisit(nextNode, self.step_count)
+                                reward_dict[agent] += r
+
+                                agent.lastNodeVisited = nextNode
+                                if nextNode == dstNode:
+                                    agent.currentAction = -1.0
+                                    info_dict[agent]["ready"] = True
+                            # Agent reached the destination, assign a new speed from normal distribution
+                            # agent.speed_max = max(np.random.normal(loc=agent.startingSpeed, scale=5.0), 1.0)
+
+                        # The agent has exceeded its movement budget for this step.
+                        if stepSize <= 0.0:
+                            break
+
                 # Handle communication.
                 if self.action_method in ["full", "neighbors"]:
                     # Hack - we are doing broadcast-based requests, so always receive from all agents.
@@ -1359,21 +1409,57 @@ class parallel_env(ParallelEnv):
         return dstNode
 
 
+    def _stepVelocity(self, agent, action, reward_dict, info_dict):
+        ''' Apply a 2D velocity command to the agent and visit any nodes that
+            fall within the acceptance radius after the move. '''
+
+        velocity = np.asarray(action, dtype=np.float32).reshape(-1)
+        # Clip command magnitude to the agent's max speed.
+        mag = float(np.linalg.norm(velocity))
+        if mag > agent.speed_max and mag > 0.0:
+            velocity = velocity * (agent.speed_max / mag)
+
+        agent.velocity = velocity
+        agent.position = (agent.position + velocity).astype(np.float32)
+
+        # No edge concept in continuous mode.
+        agent.edge = None
+        agent.currentAction = -1.0
+
+        # Visit every node within the acceptance radius. Track the closest one
+        # so lastNode reflects the agent's current "occupied" node when applicable.
+        radius = self.action_velocity_acceptance_radius
+        closestNode = None
+        closestDist = float("inf")
+        for node in self.pg.graph.nodes:
+            d = self._dist(agent.position, self.pg.getNodePosition(node))
+            if d <= radius:
+                r = self.onNodeVisit(node, self.step_count)
+                reward_dict[agent] += r
+                agent.lastNodeVisited = node
+                if d < closestDist:
+                    closestDist = d
+                    closestNode = node
+
+        if closestNode is not None:
+            agent.lastNode = closestNode
+
+        # Velocity actions complete every step (no multi-step destination).
+        info_dict[agent]["ready"] = True
+
+
     def _moveTowardsNode(self, agent, node, stepSize):
         ''' Takes a single step towards the next node.
             Returns a tuple containing whether the agent has reached the node
             and the remaining step size. '''
 
         # Take a step towards the next node.
-        posNextNode = self.pg.getNodePosition(node)
+        posNextNode = np.asarray(self.pg.getNodePosition(node), dtype=np.float32)
         distCurrToNext = self._dist(agent.position, posNextNode)
         reached = distCurrToNext <= stepSize
         step = distCurrToNext if reached else stepSize
         if distCurrToNext > 0.0:
-            agent.position = (
-                agent.position[0] + (posNextNode[0] - agent.position[0]) * step / distCurrToNext,
-                agent.position[1] + (posNextNode[1] - agent.position[1]) * step / distCurrToNext
-            )
+            agent.position = agent.position + (posNextNode - agent.position) * (step / distCurrToNext)
         
         # Set information about the node/edge which the agent is currently on.
         if reached:
@@ -1490,5 +1576,8 @@ class parallel_env(ParallelEnv):
             # Flatten the action map.
             flat = spaces.flatten(self.available_actions_space(agent), actionMap)
             return flat
+
+        elif self.action_method == "velocity":
+            return None
         else:
             raise ValueError(f"Invalid action method {self.action_method}")
