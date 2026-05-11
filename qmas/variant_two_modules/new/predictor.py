@@ -585,7 +585,7 @@ class Predictor(torch.nn.Module):
                 solver="ddim",
                 n_samples=trajectory.shape[0],
                 temperature=0.0,
-                sample_steps=20,
+                sample_steps=self.args.diffusion_sample_steps,
                 condition_cg=trajectory,
                 condition_cg_mask=visibility_mask,
                 w_cg=0.0,
