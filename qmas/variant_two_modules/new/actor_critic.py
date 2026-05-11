@@ -19,6 +19,8 @@ from onpolicy.models.utils.attention import SelfAttention
 from onpolicy.utils.util import get_shape_from_obs_space, get_graph_obs_space, strip_graph_obs_space, get_graph_obs_space_idx, has_graph_obs_space
 from onpolicy.models.r_actor_critic import R_Actor as Actor, R_Critic as Critic
 
+from qmas.variant_two_modules.new.gnn_layout import build_gnn_dense_offsets
+
 class StateEncoder(nn.Module):
     ''' This class encodes the global state for communication purposes. '''
 
@@ -94,32 +96,19 @@ class QmasActor(nn.Module):
             self._use_gnn_dense_obs = getattr(args, 'gnn_use_dense_obs', False) and not has_graph_obs_space(obs_space)
 
             if self._use_gnn_dense_obs:
-                # Dense obs: the wrapper may have flattened the Dict space into a Box.
-                # Recover the original Dict space from the attached attribute if needed.
-                dict_space = getattr(obs_space, '_original_dict_space', None) or obs_space
-                nf_space = dict_space.spaces["node_features"]   # (max_total_nodes, node_feat_dim)
-                ea_space = dict_space.spaces["edge_attr"]        # (max_edges, edge_feat_dim)
-                max_total_nodes, node_feat_dim = nf_space.shape
-                max_edges, edge_feat_dim = ea_space.shape
-                self.gnn_dense_obs_layout = dict(
-                    max_total_nodes=max_total_nodes,
-                    node_feat_dim=node_feat_dim,
-                    edge_feat_dim=edge_feat_dim,
-                    max_edges=max_edges,
-                )
-                # Compute flat obs offsets for each sub-space (gymnasium Dict flatten order).
-                self._gnn_dense_offsets = {}
-                offset = 0
-                for key, space in dict_space.spaces.items():
-                    size = int(np.prod(space.shape))
-                    self._gnn_dense_offsets[key] = (offset, offset + size, space.shape)
-                    offset += size
+                # Dense obs: layout/offsets are built by a shared util so the predictor
+                # and the actor agree on byte boundaries for the flattened Dict obs.
+                self.gnn_dense_obs_layout, self._gnn_dense_offsets = build_gnn_dense_offsets(obs_space)
+                max_total_nodes = self.gnn_dense_obs_layout["max_total_nodes"]
+                node_feat_dim = self.gnn_dense_obs_layout["node_feat_dim"]
+                max_edges = self.gnn_dense_obs_layout["max_edges"]
+                edge_feat_dim = self.gnn_dense_obs_layout["edge_feat_dim"]
 
                 # Non-graph obs (observation_radius etc.) — nothing remains after removing graph keys.
                 nongraph_dim = 0
-                for key, space in dict_space.spaces.items():
+                for key, (start, end, shape) in self._gnn_dense_offsets.items():
                     if key not in ("node_features", "edge_index", "edge_attr", "agent_idx", "neighbors_mask", "num_nodes", "num_edges"):
-                        nongraph_dim += int(np.prod(space.shape))
+                        nongraph_dim += int(np.prod(shape))
 
                 self.base = GNNBase(
                     layers=args.gnn_layer_N,
@@ -142,7 +131,7 @@ class QmasActor(nn.Module):
                         scorer_input_dim += args.state_encoder_output_dim
                     self.neighbor_scorer = MLPLayer(input_dim=scorer_input_dim, output_dim=None, hidden_size=self.hidden_size, layer_N=3, use_orthogonal=args.use_orthogonal, use_ReLU=args.use_ReLU, use_layer_norm=False)
                     self.neighbor_scorer_head = nn.Linear(self.hidden_size, 1)
-                    n_actions = dict_space.spaces["neighbors_mask"].shape[0]
+                    n_actions = self._gnn_dense_offsets["neighbors_mask"][2][0]
                     self._n_actions = n_actions
                     input_dim = n_actions + nongraph_dim
                 else:

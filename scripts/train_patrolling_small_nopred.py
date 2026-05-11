@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-    "--experiment_name", "patrolling-small-predGNN-featureNormalization-sampleSteps20",
+    "--experiment_name", "patrolling-small-noPred",
     "--project_name", "qmas",
     "--env_class", "patrolling_zoo.patrolling_zoo_v0.parallel_env",
     "--user_name", "ideas-mas",
@@ -14,7 +14,7 @@ args = [
     "--action_method", "neighbors",
     "--observe_method", "pyg",
     "--observe_method_global", "adjacency",
-    "--observation_mask",
+    # "--observation_mask",
     "--observation_radius", "200.0",
     "--observation_radius_random_min", "50.0",
     "--observation_radius_random_max", "300.0",
@@ -62,12 +62,12 @@ args = [
     # "--ppo_epoch", "5",
     "--seed", "42",
 
-    "--diffusion_model_type", "gnn",
+    # "--diffusion_model_type", "gnn",
     # "--prediction_history_window", "16",
-    "--prediction_during_training",
+    # "--prediction_during_training",
     # "--prediction_uq_method", "ensemble",
     # "--prediction_uq_injection_method", "append",
-    # "--prediction_disable",
+    "--prediction_disable",
     # "--prediction_ensemble_size", "3",
     "--diffusion_autoregression_steps", "1",
     # "--state_encoder",
@@ -79,9 +79,9 @@ args = [
 
     # "--episode_fraction_start_prediction", "0.0",
 
-    "--n_rollout_threads", "99",
+    "--n_rollout_threads", "200",
     "--cuda",
-    "--cuda_idx", "4",
+    "--cuda_idx", "2",
     # "--cuda_idx_predictor", "6",
     "--threaded_training",
     "--n_training_threads", "16",

@@ -383,10 +383,25 @@ def get_config():
     parser.add_argument("--diffusion_steps", type=int, default=20)
     parser.add_argument("--diffusion_autoregression_steps", type=int, default=0)
     parser.add_argument("--diffusion_model_type", type=str, default="dit1d",
-                        choices=["jannerunet", "dit1d", "unet2d"],
+                        choices=["jannerunet", "dit1d", "unet2d", "gnn"],
                         help="Type of diffusion model to use")
     parser.add_argument("--diffusion_epoch", type=int, default=5,
                         help="Number of epochs to train the diffusion model for at each training step")
+    # GNN backbone hyperparams (only used when --diffusion_model_type=gnn).
+    parser.add_argument("--gnn_diffusion_d_model", type=int, default=128,
+                        help="Hidden node-feature dim inside the GNN diffusion backbone.")
+    parser.add_argument("--gnn_diffusion_d_edge", type=int, default=32,
+                        help="Hidden edge-feature dim inside the GNN diffusion backbone.")
+    parser.add_argument("--gnn_diffusion_d_y", type=int, default=64,
+                        help="Hidden graph-level (y) dim inside the GNN diffusion backbone.")
+    parser.add_argument("--gnn_diffusion_depth", type=int, default=4,
+                        help="Number of XEy transformer layers per timestep.")
+    parser.add_argument("--gnn_diffusion_n_heads", type=int, default=4,
+                        help="Attention heads in each GNN diffusion layer.")
+    parser.add_argument("--gnn_diffusion_temporal_depth", type=int, default=2,
+                        help="Number of temporal transformer layers across the prediction horizon.")
+    parser.add_argument("--gnn_diffusion_temporal_n_heads", type=int, default=4,
+                        help="Attention heads in the temporal mixer.")
     
     # UQ parameters
     parser.add_argument("--prediction_estimate_uncertainty", action=argparse.BooleanOptionalAction, default=False) # DEPRECATED
