@@ -1,0 +1,3 @@
+[submodule "third_party/SparseDiff"]
+	path = third_party/SparseDiff
+	url = https://github.com/qym7/SparseDiff

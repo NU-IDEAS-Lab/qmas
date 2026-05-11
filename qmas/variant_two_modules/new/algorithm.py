@@ -52,7 +52,14 @@ class QmasAlgorithm(Algorithm):
         1. Policy training (actor-critic)
         2. Diffusion model training (ensemble)
         """
-        
+
+        if torch.cuda.is_available():
+            dev = self.predictors[0].device if self.predictors else torch.device("cuda:0")
+            a = torch.cuda.memory_allocated(dev) / 1e9
+            r = torch.cuda.memory_reserved(dev) / 1e9
+            print(f"[VRAM] train() entry: alloc={a:.3f}GB reserved={r:.3f}GB", flush=True)
+            torch.cuda.empty_cache()
+
         train_info = {}
         self.train_initialize_info(train_info)
 
@@ -180,7 +187,7 @@ class QmasAlgorithm(Algorithm):
             t_policy.start()
         else:
             train_policy()
-        
+
         # Start predictor training if enabled
         if update_predictor:
             if self.use_threads:
@@ -313,6 +320,14 @@ class QmasAlgorithm(Algorithm):
 
         # Update the fix_mask. This determines which parts of the trajectory are fixed and which are predicted.
         # This applies to both update_diffusion and update_classifier.
+        # For the GNN backbone, OR-merge the edge-pin template so structural
+        # slots (edge_index, edge_attr, num_nodes/edges, agent_idx) are not
+        # corrupted by the forward noise process during training.
+        if getattr(predictor, "_gnn_edge_fix_template", None) is not None:
+            edge_pin = predictor.gnn_edge_fix_template.to(
+                device=fix_mask_batch.device, dtype=fix_mask_batch.dtype
+            )
+            fix_mask_batch = torch.maximum(fix_mask_batch, edge_pin)
         predictor.diffuser.fix_mask = fix_mask_batch
 
         # Update diffuser model.
