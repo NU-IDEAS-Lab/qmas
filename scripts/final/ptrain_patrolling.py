@@ -1,5 +1,8 @@
 import multiprocessing
 import importlib
+import os
+
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 cuda_idx = [1, 2, 3, 4, 7]
 # cuda_idx = [5, 6, 7]
@@ -51,8 +54,8 @@ for i, script in enumerate(scripts):
     # args = argreplace(args, "state_encoder_output_dim", f"128")
     args = argreplace(args, "observation_mask", True)
     args = argreplace(args, "observe_method_global", "adjacency")
-    args = argreplace(args, "n_rollout_threads", "54")
-    args = argreplace(args, "num_mini_batch", "10")
+    args = argreplace(args, "n_rollout_threads", "66")
+    args = argreplace(args, "num_mini_batch", "30")
     # args = argreplace(args, "beta", "0.5")
     # args = argreplace(args, "alpha", "1.0")
     # args = argreplace(args, "reward_comms_penalty_weight", "0.0")
@@ -68,9 +71,11 @@ for i, script in enumerate(scripts):
     args = argreplace(args, "state_encoder", False)
     args = argreplace(args, "disable_observation_global", True)
     # args = argreplace(args, "prediction_history_include_actions", True)
-    args = argreplace(args, "diffusion_autoregression_steps", "1")
     args = argreplace(args, "algorithm_name", "mappo")
 
+    args = argreplace(args, "diffusion_model_type", "gnn")
+    args = argreplace(args, "diffusion_sample_steps", "5")
+    args = argreplace(args, "diffusion_autoregression_steps", "1")
     args = argreplace(args, "gnn_diffusion_depth", "2")
     args = argreplace(args, "gnn_diffusion_d_model", "32")
     args = argreplace(args, "gnn_diffusion_temporal_depth", "1")
