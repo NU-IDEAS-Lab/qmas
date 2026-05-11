@@ -4,15 +4,18 @@ import os
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-cuda_idx = [1, 2, 3, 4, 7]
+cuda_idx = [1, 2, 3, 4, 6, 7]
 # cuda_idx = [5, 6, 7]
-scripts = [
-    "train_patrolling",
-    "train_patrolling_pred",
-    "train_patrolling_pred_uq",
-    "train_patrolling_comms_pred",
-    "train_patrolling_comms_pred_uq",
-]
+scripts = {
+    "train_patrolling": {
+        "algorithm_name": "rmappo",
+    },
+    "train_patrolling": {},
+    "train_patrolling_pred": {},
+    "train_patrolling_pred_uq": {},
+    "train_patrolling_comms_pred": {},
+    "train_patrolling_comms_pred_uq": {},
+}
 
 # cuda_idx = [6, 7]
 # scripts = [
@@ -92,6 +95,10 @@ for i, script in enumerate(scripts):
     # args = argreplace(args, "max_cycles", "100")
 
     # args = argreplace(args, "use_wandb", False)
+
+    overrides = scripts[script]
+    for key in overrides:
+        args = argreplace(args, key, overrides[key])
 
     p = multiprocessing.Process(target=module.main, args=(args,))
     p.start()
