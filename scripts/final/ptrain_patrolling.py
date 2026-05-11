@@ -4,15 +4,19 @@ import os
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-cuda_idx = [1, 2, 3, 4, 6, 7]
+cuda_idx = [2, 3, 4, 7]
+# cuda_idx = [1, 1, 2, 3, 4, 6, 7]
 # cuda_idx = [5, 6, 7]
 scripts = {
-    "train_patrolling": {
-        "algorithm_name": "rmappo",
-    },
+    # "train_patrolling": {
+    #     "algorithm_name": "rmappo",
+    # },
+    # "train_patrolling": {
+    #     "observation_mask": False,
+    # },
     "train_patrolling": {},
     "train_patrolling_pred": {},
-    "train_patrolling_pred_uq": {},
+    # "train_patrolling_pred_uq": {},
     "train_patrolling_comms_pred": {},
     "train_patrolling_comms_pred_uq": {},
 }
@@ -57,7 +61,10 @@ for i, script in enumerate(scripts):
     # args = argreplace(args, "state_encoder_output_dim", f"128")
     args = argreplace(args, "observation_mask", True)
     args = argreplace(args, "observe_method_global", "adjacency")
+    args = argreplace(args, "observation_radius_random_min", "0.0")
+    args = argreplace(args, "observation_radius_random_max", "300.0")
     args = argreplace(args, "n_rollout_threads", "66")
+    args = argreplace(args, "num_env_steps", "500000")
     args = argreplace(args, "num_mini_batch", "30")
     # args = argreplace(args, "beta", "0.5")
     # args = argreplace(args, "alpha", "1.0")
@@ -69,6 +76,7 @@ for i, script in enumerate(scripts):
     # args = argreplace(args, "gnn_skip_connections", True)
     args = argreplace(args, "use_gnn_mlp_policy", False)
     # args = argreplace(args, "gnn_layer_N", "2")
+    args = argreplace(args, "gnn_hidden_size", "64")
     args = argreplace(args, "ppo_epoch", "15")
     args = argreplace(args, "gnn_use_dense_obs", True)
     args = argreplace(args, "state_encoder", False)
