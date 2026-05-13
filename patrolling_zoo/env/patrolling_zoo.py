@@ -205,7 +205,6 @@ class parallel_env(ParallelEnv):
                  graph_random_size_x = 500.0,
                  graph_random_size_y = 500.0,
                  graph_file = os.path.join(os.path.dirname(patrolling_zoo.graphs.__file__), "cumberland.graph"),
-                 ex_env_communication_mode = "none",
                 ):
         """
         Initialize the patrolling environment.
@@ -245,7 +244,6 @@ class parallel_env(ParallelEnv):
         self.alpha = alpha
         self.beta = beta
         self.reward_comms_penalty_weight = reward_comms_penalty_weight
-        self.ex_env_communication_mode = ex_env_communication_mode
 
         # Create patrol graph.
         if graph_random:
@@ -588,9 +586,8 @@ class parallel_env(ParallelEnv):
             obs, obs_mask = self.observe(agent)
             observation[agent] = obs
             info[agent]["visibility_mask"] = obs_mask
-            if self.ex_env_communication_mode != "none":
-                # No comms have happened yet on reset.
-                info[agent]["received_comms"] = False
+            # No comms have happened yet on reset.
+            info[agent]["received_comms"] = False
 
         return observation, info
 
@@ -610,8 +607,7 @@ class parallel_env(ParallelEnv):
             og, vmg = self._populateStateSpace(self.observe_method_global, agent, radius=None, allow_done_agents=False)
             info[agent]["observation_global"] = og
             info[agent]["visibility_mask_global"] = vmg
-            if self.ex_env_communication_mode != "none":
-                info[agent]["received_comms"] = False
+            info[agent]["received_comms"] = False
 
         _, state_visibility_mask = self._state()
         info["state_visibility_mask"] = state_visibility_mask
@@ -1320,12 +1316,8 @@ class parallel_env(ParallelEnv):
             info_dict[agent]["observation_global"] = og
             info_dict[agent]["visibility_mask_global"] = vmg
 
-            # Per-agent communication flag. True iff this agent received comms this
-            # step (via the existing comms_model or a learned action). The runner
-            # uses this together with predictor uncertainty to merge in the best
-            # estimate from any sender for each element of this agent's obs.
-            if self.ex_env_communication_mode != "none":
-                info_dict[agent]["received_comms"] = bool(comms_requests.get(agent))
+            # Communication received flag.
+            info_dict[agent]["received_comms"] = agent in comms_requests
 
         # Add the state fixed mask. (Nothing is fixed.)
         _, state_visibility_mask = self._state()
