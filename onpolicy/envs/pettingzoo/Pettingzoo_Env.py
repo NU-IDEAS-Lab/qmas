@@ -276,6 +276,15 @@ class PettingzooEnv(object):
                 all_viz = np.array(all_viz, dtype=np.float32)
                 info["visibility_mask_global"] = all_viz
 
+        # Stack the per-agent communication flags into a single (n_agents,) array.
+        # Whether an agent received comms is binary per agent (doesn't vary per
+        # element), so no flatten_mask plumbing is needed.
+        if "received_comms" not in info and "received_comms" in info[self.env.possible_agents[0]]:
+            info["received_comms"] = np.array(
+                [info[a]["received_comms"] for a in self.env.possible_agents],
+                dtype=np.float32,
+            )
+
         # Flatten the state visibility mask if needed.
         if "state_visibility_mask" in info and self.flatten_observations_global:
             svm = info["state_visibility_mask"]

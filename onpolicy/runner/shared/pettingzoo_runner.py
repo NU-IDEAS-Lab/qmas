@@ -45,6 +45,11 @@ class PettingzooRunner(Runner):
         # each value reported in train_infos describes the latest log window only.
         self._reset_pred_diagnostics()
 
+        # Per-agent receive flag from the most recent env step (or reset). Cached
+        # in warmup()/insert() and consumed in the next collect() call alongside
+        # the just-computed predictor uncertainty.
+        self.last_received_comms = None
+
         self.env_infos = defaultdict(list)
                
         if self.all_args.torch_compile:
@@ -208,6 +213,13 @@ class PettingzooRunner(Runner):
         if "visibility_mask_global" in infos[0]:
             visibility_mask_global = np.array([info["visibility_mask_global"] for info in infos], dtype=np.float32)
 
+        # Cache the env's per-agent receive flag. Consumed in the next collect()
+        # call alongside the just-computed predictor uncertainty.
+        self.last_received_comms = (
+            np.array([info["received_comms"] for info in infos], dtype=np.float32)
+            if "received_comms" in infos[0] else None
+        )
+
         observation_global = None
         if "observation_global" in infos[0] and not self.all_args.disable_observation_global:
             observation_global = np.array([info["observation_global"] for info in infos])
@@ -356,6 +368,27 @@ class PettingzooRunner(Runner):
                 pred_now = pred_now[..., act_size:]
                 uncertainty_now = uncertainty_now[..., act_size:]
 
+            # External comms merge. Uses the *just-computed* predictor uncertainty as
+            # the selector and the env's per-agent receive flag (cached by warmup/
+            # insert). pred_now and uncertainty_now are always merged so any
+            # downstream injection writes communicated values. When prediction won't
+            # be injected (prediction_during_training=False), obs / global_obs is
+            # also merged directly and flagged for buffer writeback.
+            predictor_target_is_global = (
+                (self.all_args.state_encoder and global_obs is not None)
+                or (hasattr(obs, "dtype") and obs.dtype == object)
+            )
+            if self._comms_enabled():
+                merge_targets = [pred_now, uncertainty_now]
+                if not self.all_args.prediction_during_training:
+                    if predictor_target_is_global and global_obs is not None:
+                        merge_targets.append(global_obs)
+                        update_global_obs = True
+                    elif not predictor_target_is_global and hasattr(obs, "dtype") and obs.dtype != object:
+                        merge_targets.append(obs)
+                        update_obs = True
+                self._comms_merge(merge_targets, uncertainty_now, self.last_received_comms)
+
             # Replace the observation with the prediction.
             if self.all_args.prediction_during_training:
                 obs_dim = pred_now.shape[-1]
@@ -365,7 +398,7 @@ class PettingzooRunner(Runner):
                 else:
                     obs[..., :obs_dim] = pred_now
                     update_obs = True
-            
+
             # Inject uncertainty into the observation.
             if self.all_args.prediction_uq_injection_method == "append":
                 obs_dim = uncertainty_now.shape[-1]
@@ -482,7 +515,7 @@ class PettingzooRunner(Runner):
 
     def insert(self, data):
         obs, share_obs, rewards, dones, infos, values, actions, action_log_probs, rnn_states, rnn_states_critic, delta_steps, available_actions = data
-        
+
         # update env_infos if done
         dones_env = np.all(dones, axis=-1)
 
@@ -493,7 +526,14 @@ class PettingzooRunner(Runner):
         visibility_mask_global = None
         if "visibility_mask_global" in infos[0]:
             visibility_mask_global = np.array([info["visibility_mask_global"] for info in infos])
-        
+
+        # Cache the env's per-agent receive flag for the next collect() call.
+        # Matches the obs in `buffer[step+1]` (this insert's slot).
+        self.last_received_comms = (
+            np.array([info["received_comms"] for info in infos], dtype=np.float32)
+            if "received_comms" in infos[0] else None
+        )
+
         obs_full = None
         obs_raw = obs  # unpadded, for trajectory buffer
         if "observation_global" in infos[0] and not self.all_args.disable_observation_global:
@@ -723,6 +763,64 @@ class PettingzooRunner(Runner):
 
         return pred, uncertainty, prediction_prev, prediction_error, True
 
+
+    def _comms_enabled(self):
+        return getattr(self.all_args, "ex_env_communication_mode", "none") == "merge_minimum_uq"
+
+    def _comms_merge(self, targets, uncertainty, received_comms):
+        """Per-agent comms merge.
+
+        For each agent with received_comms=1, replace its per-element values in
+        every entry of `targets` with the values from the agent that has the
+        lowest `uncertainty` at that element. Non-requesters are left untouched.
+
+        targets: iterable of CPU torch.Tensor / numpy arrays, each of shape
+                 (T*N, ...). Modified in place. None / object-dtype entries are
+                 silently skipped (e.g. pyg graph obs can't be merged elementwise).
+        uncertainty: (T*N, D_unc) selector. Snapshotted before any mutation so it
+                     may itself be one of the targets.
+        received_comms: (T, N) per-agent receive flag — broadcasts across elements.
+        """
+        if (not self._comms_enabled()
+                or not targets or uncertainty is None or received_comms is None):
+            return
+
+        # Per-agent receive bool, broadcasts across the element axis.
+        mask = np.asarray(received_comms, dtype=np.float32)
+        if mask.ndim < 2:
+            return
+        T, N = mask.shape[:2]
+        mask_bool = mask.reshape(T, N, 1) > 0.5
+
+        # Snapshot uncertainty (uncertainty may itself be among targets).
+        u_snap = uncertainty.detach().cpu().numpy().copy() if isinstance(uncertainty, torch.Tensor) else np.asarray(uncertainty).copy()
+        u_flat = u_snap.reshape(T, N, -1)
+        D_u = u_flat.shape[-1]
+        if D_u <= 0:
+            return
+        best = np.argmin(u_flat, axis=1)  # (T, D_u)
+
+        # Apply the same selector to every target. CPU torch tensors share storage
+        # with their .numpy() view so writes propagate back to the original tensor.
+        for target in targets:
+            if target is None:
+                continue
+            if isinstance(target, torch.Tensor):
+                if target.device.type != "cpu":
+                    continue
+                t_arr = target.numpy()
+            else:
+                t_arr = np.asarray(target)
+                if t_arr.dtype == object:
+                    continue
+            t_flat = t_arr.reshape(T, N, -1)
+            D = min(D_u, t_flat.shape[-1])
+            if D <= 0:
+                continue
+            best_vals = np.take_along_axis(t_flat[..., :D], best[:, None, :D], axis=1)
+            t_flat[..., :D] = np.where(mask_bool, best_vals, t_flat[..., :D])
+
+
     @torch.no_grad()
     def eval(self):
         log_root = zarr.open_group(self.all_args.eval_output_file, mode="a")
@@ -765,6 +863,9 @@ class PettingzooRunner(Runner):
         for i_episode in range(episodes):
             # Reset the environment and get the initial observations.
             obs, share_obs, available_actions, reset_infos = env.reset(return_info=True)
+            # Track the most recent infos (reset / env.step) so the comms merge below
+            # can read comms_mask / comms_mask_global aligned with the current obs.
+            current_infos = reset_infos
             rnn_states = torch.zeros((rollout_threads * self.num_agents, self.recurrent_N, self.hidden_size), dtype=torch.float32)
             masks = torch.ones((rollout_threads * self.num_agents, 1), dtype=torch.float32)
             self._seed_trajectory_buffer(trajectory, obs, rollout_threads, share_obs=share_obs)
@@ -805,6 +906,15 @@ class PettingzooRunner(Runner):
                         act_size = int(np.prod(get_shape_from_act_space(self.buffer.act_space)))
                         prediction_now = prediction_now[..., act_size:]
                         uncertainty_now = uncertainty_now[..., act_size:]
+
+                    # External comms merge. obs_policy / global_obs below alias
+                    # prediction_now / uncertainty_now, so merging the predictor
+                    # outputs is sufficient for the policy to see communicated values.
+                    received = (
+                        np.array([info["received_comms"] for info in current_infos], dtype=np.float32)
+                        if (current_infos and "received_comms" in current_infos[0]) else None
+                    )
+                    self._comms_merge([prediction_now, uncertainty_now], uncertainty_now, received)
                 else:
                     prediction_now = None
                     uncertainty_now = torch.zeros((rollout_threads, self.num_agents, *obs_shape), dtype=torch.float32)
@@ -855,6 +965,9 @@ class PettingzooRunner(Runner):
                 actions_env = [actions[idx, :, :].numpy() for idx in range(rollout_threads)]
 
                 obs, share_obs, rewards, dones, infos, available_actions = env.step(actions_env)
+                # Keep current_infos pointing at the freshest masks (next iter's merge
+                # reads comms_mask / comms_mask_global from here).
+                current_infos = infos
 
                 observation_global = (
                     np.array([info["observation_global"] for info in infos])
@@ -956,6 +1069,9 @@ class PettingzooRunner(Runner):
         for i_episode in range(episodes):
             # Reset the environment and get the initial observations.
             obs, share_obs, available_actions, reset_infos = env.reset(return_info=True)
+            # Track the most recent infos (reset / env.step) so the comms merge below
+            # can read comms_mask / comms_mask_global aligned with the current obs.
+            current_infos = reset_infos
             rnn_states = torch.zeros((rollout_threads * self.num_agents, self.recurrent_N, self.hidden_size), dtype=torch.float32)
             masks = torch.ones((rollout_threads * self.num_agents, 1), dtype=torch.float32)
             self._seed_trajectory_buffer(trajectory, obs, rollout_threads, share_obs=share_obs)
@@ -969,7 +1085,7 @@ class PettingzooRunner(Runner):
             else:
                 obs_global_fallback = None
 
-            if self.all_args.save_gifs:        
+            if self.all_args.save_gifs:
                 frames = []
                 image = self.envs.envs[0].env.unwrapped.observation()[0]["frame"]
                 frames.append(image)
@@ -1001,6 +1117,15 @@ class PettingzooRunner(Runner):
                         act_size = int(np.prod(get_shape_from_act_space(self.buffer.act_space)))
                         prediction_now = prediction_now[..., act_size:]
                         uncertainty_now = uncertainty_now[..., act_size:]
+
+                    # External comms merge — mirrors collect()/eval(). obs_policy and
+                    # global_obs below alias prediction_now / uncertainty_now, so the
+                    # in-place merge propagates to whatever the policy ends up reading.
+                    received = (
+                        np.array([info["received_comms"] for info in current_infos], dtype=np.float32)
+                        if (current_infos and "received_comms" in current_infos[0]) else None
+                    )
+                    self._comms_merge([prediction_now, uncertainty_now], uncertainty_now, received)
 
                     for agentIdx in range(self.num_agents):
                         print(f"Mean Prediction Error ({agentIdx}): {prediction_error.mean():.2f}")
@@ -1055,6 +1180,8 @@ class PettingzooRunner(Runner):
                 actions_env = [actions[idx, :, :].numpy() for idx in range(rollout_threads)]
 
                 obs, share_obs, rewards, dones, infos, available_actions = env.step(actions_env)
+                # Keep current_infos pointing at the freshest masks for next iter's merge.
+                current_infos = infos
 
                 observation_global = (
                     np.array([info["observation_global"] for info in infos])
