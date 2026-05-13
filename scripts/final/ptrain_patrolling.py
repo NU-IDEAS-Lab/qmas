@@ -1,3 +1,4 @@
+from copy import copy
 import multiprocessing
 import importlib
 import os
@@ -5,28 +6,36 @@ import os
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 cuda_idx = [1, 6, 1, 2, 4, 5, 7]
-# cuda_idx = [1, 1, 2, 3, 4, 6, 7]
-# cuda_idx = [5, 6, 7]
-scripts = {
-    "train_patrolling": {
-        "algorithm_name": "rmappo",
+scripts = [
+    {
+        "script": "train_patrolling",
+        "overrides": {
+            "algorithm_name": "rmappo",
+        }
     },
-    "train_patrolling": {
-        "observation_mask": False,
+    {
+        "script": "train_patrolling",
+        "overrides": {
+            "observation_mask": False,
+        }
     },
-    "train_patrolling": {},
-    "train_patrolling_pred": {},
-    "train_patrolling_pred_uq": {},
-    "train_patrolling_comms_pred": {},
-    "train_patrolling_comms_pred_uq": {},
-}
+    {
+        "script": "train_patrolling"
+    },
+    {
+        "script": "train_patrolling_pred"
+    },
+    {
+        "script": "train_patrolling_pred_uq"
+    },
+    {
+        "script": "train_patrolling_comms_pred"
+    },
+    {
+        "script": "train_patrolling_comms_pred_uq"
+    },
+]
 
-# cuda_idx = [6, 7]
-# scripts = [
-#     "train_patrolling",
-#     # "train_patrolling_pred",
-#     # "train_patrolling_comms_pred_uq",
-# ]
 
 # Replace args function.
 def argreplace(args, arg_name, arg_value):
@@ -55,8 +64,8 @@ def argreplace(args, arg_name, arg_value):
 
 threads = []
 for i, script in enumerate(scripts):
-    module = importlib.import_module(f"{script}")
-    args = module.args
+    module = importlib.import_module(f"{script['script']}")
+    args = copy(module.args)
     args = argreplace(args, "cuda_idx", str(cuda_idx[i]))
     # args = argreplace(args, "state_encoder_output_dim", f"128")
     args = argreplace(args, "observation_mask", True)
@@ -107,7 +116,7 @@ for i, script in enumerate(scripts):
 
     # args = argreplace(args, "use_wandb", False)
 
-    overrides = scripts[script]
+    overrides = script.get("overrides", {})
     for key in overrides:
         args = argreplace(args, key, overrides[key])
 
