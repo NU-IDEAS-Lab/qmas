@@ -98,7 +98,7 @@ for i, script in enumerate(scripts):
 
     args = argreplace(args, "diffusion_model_type", "gnn")
     args = argreplace(args, "diffusion_sample_steps", "5")
-    args = argreplace(args, "diffusion_autoregression_steps", "1")
+    args = argreplace(args, "diffusion_autoregression_steps", "7")
     args = argreplace(args, "gnn_diffusion_depth", "2")
     args = argreplace(args, "gnn_diffusion_d_model", "32")
     args = argreplace(args, "gnn_diffusion_temporal_depth", "1")
