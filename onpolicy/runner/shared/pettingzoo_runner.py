@@ -685,6 +685,7 @@ class PettingzooRunner(Runner):
             hasattr(self.policy, "predictors")
             and trajectory_buffer.ready()
             and not self.all_args.prediction_disable
+            and (self.all_args.prediction_during_training or self.all_args.prediction_uq_injection_method != "none")
         )
         if not use_prediction:
             return None, None, prediction_prev, None, False
@@ -910,27 +911,31 @@ class PettingzooRunner(Runner):
                 else:
                     obs_policy = torch.from_numpy(obs.reshape(-1, *obs.shape[2:])).float()
 
-                if self.all_args.state_encoder and use_prediction:
+                replace_with_pred = use_prediction and self.all_args.prediction_during_training
+                append_uq = self.all_args.prediction_uq_injection_method == "append"
+                if self.all_args.state_encoder and replace_with_pred:
                     global_obs = prediction_now
-                    if self.all_args.prediction_uq_injection_method == "append":
+                    if append_uq:
                         global_obs = torch.cat([global_obs, uncertainty_now], dim=-1)
                 else:
                     if self.all_args.state_encoder and obs_global_fallback is not None:
                         global_obs = torch.from_numpy(
                             obs_global_fallback.reshape(rollout_threads * self.num_agents, *obs_global_fallback.shape[2:])
                         ).float()
-                        if self.all_args.prediction_uq_injection_method == "append":
-                            global_obs = torch.cat([global_obs, torch.zeros_like(global_obs)], dim=-1)
+                        if append_uq:
+                            uq_pad = uncertainty_now if use_prediction else torch.zeros_like(global_obs)
+                            global_obs = torch.cat([global_obs, uq_pad], dim=-1)
                     else:
                         global_obs = None
                     # For GNN envs (object-dtype obs), the prediction cannot replace the graph obs directly.
                     # The prediction (from observation_global) can only feed the state encoder.
-                    if use_prediction and obs.dtype != object:
+                    if replace_with_pred and obs.dtype != object:
                         obs_policy = prediction_now
-                        if self.all_args.prediction_uq_injection_method == "append":
+                        if append_uq:
                             obs_policy = torch.cat([obs_policy, uncertainty_now], dim=-1)
-                    elif obs.dtype != object and self.all_args.prediction_uq_injection_method == "append":
-                        obs_policy = torch.cat([obs_policy, torch.zeros_like(obs_policy)], dim=-1)
+                    elif obs.dtype != object and append_uq:
+                        uq_pad = uncertainty_now if use_prediction else torch.zeros_like(obs_policy)
+                        obs_policy = torch.cat([obs_policy, uq_pad], dim=-1)
 
 
                 actions, rnn_states = self.trainer.policy.act(
@@ -1124,27 +1129,31 @@ class PettingzooRunner(Runner):
                 else:
                     obs_policy = torch.from_numpy(obs.reshape(-1, *obs.shape[2:])).float()
 
-                if self.all_args.state_encoder and use_prediction:
+                replace_with_pred = use_prediction and self.all_args.prediction_during_training
+                append_uq = self.all_args.prediction_uq_injection_method == "append"
+                if self.all_args.state_encoder and replace_with_pred:
                     global_obs = prediction_now
-                    if self.all_args.prediction_uq_injection_method == "append":
+                    if append_uq:
                         global_obs = torch.cat([global_obs, uncertainty_now], dim=-1)
                 else:
                     if self.all_args.state_encoder and obs_global_fallback is not None:
                         global_obs = torch.from_numpy(
                             obs_global_fallback.reshape(rollout_threads * self.num_agents, *obs_global_fallback.shape[2:])
                         ).float()
-                        if self.all_args.prediction_uq_injection_method == "append":
-                            global_obs = torch.cat([global_obs, torch.zeros_like(global_obs)], dim=-1)
+                        if append_uq:
+                            uq_pad = uncertainty_now if use_prediction else torch.zeros_like(global_obs)
+                            global_obs = torch.cat([global_obs, uq_pad], dim=-1)
                     else:
                         global_obs = None
                     # For GNN envs (object-dtype obs), the prediction cannot replace the graph obs directly.
                     # The prediction (from observation_global) can only feed the state encoder.
-                    if use_prediction and obs.dtype != object:
+                    if replace_with_pred and obs.dtype != object:
                         obs_policy = prediction_now
-                        if self.all_args.prediction_uq_injection_method == "append":
+                        if append_uq:
                             obs_policy = torch.cat([obs_policy, uncertainty_now], dim=-1)
-                    elif obs.dtype != object and self.all_args.prediction_uq_injection_method == "append":
-                        obs_policy = torch.cat([obs_policy, torch.zeros_like(obs_policy)], dim=-1)
+                    elif obs.dtype != object and append_uq:
+                        uq_pad = uncertainty_now if use_prediction else torch.zeros_like(obs_policy)
+                        obs_policy = torch.cat([obs_policy, uq_pad], dim=-1)
 
 
                 actions, rnn_states = self.trainer.policy.act(
