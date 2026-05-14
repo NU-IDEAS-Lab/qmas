@@ -52,8 +52,6 @@ class QmasPolicy(R_MAPPOPolicy):
         else:
             uncertainty = torch.zeros_like(prediction)
 
-        # Remove actions from the prediction.
-        prediction = prediction[:, :, self.action_dim:]
-        uncertainty = uncertainty[:, :, self.action_dim:]
-
+        if return_member_preds:
+            return prediction, uncertainty, predictions
         return prediction, uncertainty
