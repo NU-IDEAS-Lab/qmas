@@ -26,13 +26,19 @@ scripts = [
         "script": "train_patrolling_pred"
     },
     {
-        "script": "train_patrolling_pred_uq"
+        "script": "train_patrolling_pred_uq",
+        "overrides": {
+            "ex_env_communication_mode": "merge_minimum_uq",
+        }
     },
     {
         "script": "train_patrolling_comms_pred"
     },
     {
-        "script": "train_patrolling_comms_pred_uq"
+        "script": "train_patrolling_comms_pred_uq",
+        "overrides": {
+            "ex_env_communication_mode": "merge_minimum_uq",
+        }
     },
 ]
 
@@ -73,7 +79,7 @@ for i, script in enumerate(scripts):
     args = argreplace(args, "observation_radius_random_min", "0.0")
     args = argreplace(args, "observation_radius_random_max", "300.0")
 
-    args = argreplace(args, "ex_env_communication_mode", "merge_minimum_uq")
+    # args = argreplace(args, "ex_env_communication_mode", "merge_minimum_uq")
 
     args = argreplace(args, "n_rollout_threads", "66")
     args = argreplace(args, "num_env_steps", "500000")
