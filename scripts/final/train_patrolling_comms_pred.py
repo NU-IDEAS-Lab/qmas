@@ -40,7 +40,7 @@ args = [
     "--policy_class", "qmas.variant_two_modules.new.policy.QmasPolicy",
     "--algorithm_name", "rmappo",
     "--use_gnn_policy",
-    # "--use_gnn_mlp_policy",
+    "--use_gnn_mlp_policy",
     "--gnn_layer_N", "5",
     "--gnn_hidden_size", "32",
     "--gnn_skip_connections",

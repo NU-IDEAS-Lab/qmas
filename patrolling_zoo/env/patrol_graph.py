@@ -73,6 +73,12 @@ class PatrolGraph():
             if i[1][j] > self.longestPathLength:
                 self.longestPathLength = i[1][j]
 
+        # Store out-degree and neighbor indices on each node.
+        for node in self.graph.nodes:
+            self.graph.nodes[node]["degree"] = self.graph.out_degree(node)
+            for idx, neighbor in enumerate(self.graph.neighbors(node)):
+                self.graph.edges[(node, neighbor)]["neighborIndex"] = idx
+
 
     def generateRandomGraph(self, numNodes, radius=75, sizeX=500.0, sizeY=500.0, seed=None):
         ''' Generates a random graph with the given parameters. '''
@@ -117,7 +123,13 @@ class PatrolGraph():
             for j in i[1]:
                 if i[1][j] > self.longestPathLength:
                     self.longestPathLength = i[1][j]
-        
+
+        # Store out-degree and neighbor indices on each node.
+        for node in self.graph.nodes:
+            self.graph.nodes[node]["degree"] = self.graph.out_degree(node)
+            for idx, neighbor in enumerate(self.graph.neighbors(node)):
+                self.graph.edges[(node, neighbor)]["neighborIndex"] = idx
+
         # print(f"Finished generating random graph with {numNodes} nodes and degree {self.graph.degree()}.")
 
 

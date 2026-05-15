@@ -39,6 +39,22 @@ class QmasPolicy(Policy):
         share_obs_dim = np.prod(share_obs_shape) # observation space for one agent
         action_dim = np.prod(get_shape_from_act_space(act_space)) # action space for one agent
 
+        # When observation_global is disabled, the predictor operates on local obs instead.
+        if getattr(args, "disable_observation_global", False):
+            predictor_obs_shape = get_shape_from_obs_space(self.obs_space, flatten_dicts=False)
+            predictor_obs_dim = np.prod(predictor_obs_shape)
+            predictor_obs_space = self.obs_space
+        else:
+            predictor_obs_shape = share_obs_shape
+            predictor_obs_dim = share_obs_dim
+            predictor_obs_space = self.share_obs_space
+
+        # The GNN backbone needs the original Dict obs space to recover the
+        # gnn_dense_obs layout/offsets. Other backbones ignore obs_dict_space.
+        predictor_obs_dict_space = predictor_obs_space if (
+            getattr(args, "diffusion_model_type", None) == "gnn"
+        ) else None
+
         if args.prediction_ensemble_size > 1:
             print(f"Creating ensemble of {args.prediction_ensemble_size} predictors.")
         
@@ -55,13 +71,26 @@ class QmasPolicy(Policy):
                 device_predictor = self.device
 
             predictor = Predictor(
-                share_obs_dim,
+                predictor_obs_dim,
                 action_dim,
                 args,
-                obs_shape=share_obs_shape,
-                device=device_predictor
+                obs_shape=predictor_obs_shape,
+                device=device_predictor,
+                obs_dict_space=predictor_obs_dict_space,
             ).to(device_predictor)
             self.predictors.append(predictor)
+
+        # Assert the predictor and actor agree on dense GNN obs offsets so a
+        # silent layout drift cannot cause the actor to read structure from
+        # different bytes than the predictor wrote to.
+        if (
+            getattr(args, "diffusion_model_type", None) == "gnn"
+            and getattr(self.actor, "_gnn_dense_offsets", None) is not None
+            and self.predictors
+            and getattr(self.predictors[0], "_gnn_offsets", None) is not None
+        ):
+            from qmas.variant_two_modules.new.gnn_layout import assert_offsets_equal
+            assert_offsets_equal(self.actor._gnn_dense_offsets, self.predictors[0]._gnn_offsets)
 
 
     def get_actions(self, cent_obs, obs, rnn_states_actor, rnn_states_critic, masks, available_actions=None,

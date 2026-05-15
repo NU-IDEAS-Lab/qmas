@@ -243,6 +243,10 @@ def get_config():
                         help="Maximum number of neighbors that each node may have.")
     parser.add_argument("--gnn_neighbor_scoring", action='store_true',
                         default=False, help='Whether to use GNN-based neighbor scoring.')
+    parser.add_argument("--gnn_use_dense_obs", action=argparse.BooleanOptionalAction, default=False,
+                        help="Use dense tensor observations instead of PyG graph objects. Enables predictor training on graph observations.")
+    parser.add_argument("--disable_observation_global", action='store_true', default=False,
+                        help="Ignore observation_global from env infos and use obs for everything, including predictor UQ injection. Useful when the predictor feeds directly into the GNN via obs.")
 
     # recurrent parameters
     parser.add_argument("--use_naive_recurrent_policy", action=argparse.BooleanOptionalAction,
@@ -362,6 +366,9 @@ def get_config():
     # diffuser parameters
     parser.add_argument("--episode_fraction_start_prediction", type=float, default=0.0,
                         help="The fraction of episodes at which to start training the prediction model.")
+    parser.add_argument("--episode_fraction_start_policy", type=float, default=0.0,
+                        help="The fraction of episodes at which to start training the policy, "
+                             "allowing the predictor to be partially trained first.")
     parser.add_argument("--episode_fraction_stop_policy", type=float, default=1.0,
                         help="The fraction of episodes at which to stop training the policy.")
     parser.add_argument("--prediction_during_training", action=argparse.BooleanOptionalAction, default=False,
@@ -373,13 +380,28 @@ def get_config():
     parser.add_argument("--prediction_history_include_actions", action=argparse.BooleanOptionalAction, default=False,
                         help="Whether to include past actions in the input to the prediction model.")
     parser.add_argument("--prediction_disable", action=argparse.BooleanOptionalAction, default=False)
-    parser.add_argument("--diffusion_steps", type=int, default=20)
+    parser.add_argument("--diffusion_sample_steps", type=int, default=20)
     parser.add_argument("--diffusion_autoregression_steps", type=int, default=0)
     parser.add_argument("--diffusion_model_type", type=str, default="dit1d",
-                        choices=["jannerunet", "dit1d", "unet2d"],
+                        choices=["jannerunet", "dit1d", "unet2d", "gnn"],
                         help="Type of diffusion model to use")
     parser.add_argument("--diffusion_epoch", type=int, default=5,
                         help="Number of epochs to train the diffusion model for at each training step")
+    # GNN backbone hyperparams (only used when --diffusion_model_type=gnn).
+    parser.add_argument("--gnn_diffusion_d_model", type=int, default=128,
+                        help="Hidden node-feature dim inside the GNN diffusion backbone.")
+    parser.add_argument("--gnn_diffusion_d_edge", type=int, default=32,
+                        help="Hidden edge-feature dim inside the GNN diffusion backbone.")
+    parser.add_argument("--gnn_diffusion_d_y", type=int, default=64,
+                        help="Hidden graph-level (y) dim inside the GNN diffusion backbone.")
+    parser.add_argument("--gnn_diffusion_depth", type=int, default=4,
+                        help="Number of XEy transformer layers per timestep.")
+    parser.add_argument("--gnn_diffusion_n_heads", type=int, default=4,
+                        help="Attention heads in each GNN diffusion layer.")
+    parser.add_argument("--gnn_diffusion_temporal_depth", type=int, default=2,
+                        help="Number of temporal transformer layers across the prediction horizon.")
+    parser.add_argument("--gnn_diffusion_temporal_n_heads", type=int, default=4,
+                        help="Attention heads in the temporal mixer.")
     
     # UQ parameters
     parser.add_argument("--prediction_estimate_uncertainty", action=argparse.BooleanOptionalAction, default=False) # DEPRECATED
@@ -389,6 +411,20 @@ def get_config():
     parser.add_argument("--prediction_uq_injection_method", type=str, default="none",
                         choices=["none", "append"],
                         help="Method to inject uncertainty estimates into the policy input")
+    parser.add_argument("--eval_prediction_uq_noise", type=float, default=0.0,
+                        help="Std of Gaussian noise added to uncertainty estimates before policy injection "
+                             "during evaluation. Used to ablate the importance of UQ to decision-making.")
+
+    # External (runner-side) communication parameters.
+    parser.add_argument("--ex_env_communication_mode", type=str, default="none",
+                        choices=["none", "merge_minimum_uq"],
+                        help="How communications between agents are handled outside the environment. "
+                             "'none': no external comms merge. "
+                             "'merge_minimum_uq': for elements indicated by the env's comms_mask, "
+                             "replace each agent's observation with the observation of the agent "
+                             "(including itself) that has the lowest uncertainty estimate for that "
+                             "element. The env must emit `comms_mask` / `comms_mask_global` in info "
+                             "for this to take effect.")
 
     # One-module variant parameters.
     parser.add_argument("--prediction_loss_coef", type=float, default=1.0,

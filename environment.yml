@@ -31,7 +31,7 @@ dependencies:
       - certifi==2025.4.26
       - cffi==1.17.1
       - charset-normalizer==3.4.2
-      - git+https://github.com/NU-IDEAS-Lab/CleanDiffuser.git@lightning#egg=cleandiffuser
+      - git+https://github.com/NU-IDEAS-Lab/CleanDiffuser.git@feature/improved-loss#egg=cleandiffuser
       - click==8.2.1
       - comm==0.2.2
       - cycler==0.12.1
