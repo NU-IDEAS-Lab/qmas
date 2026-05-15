@@ -414,6 +414,9 @@ def get_config():
     parser.add_argument("--eval_prediction_uq_noise", type=float, default=0.0,
                         help="Std of Gaussian noise added to uncertainty estimates before policy injection "
                              "during evaluation. Used to ablate the importance of UQ to decision-making.")
+    parser.add_argument("--eval_prediction_uq_multiplier", type=float, default=1.0,
+                        help="Scalar multiplied into uncertainty estimates before policy injection during "
+                             "evaluation. Set to 0 to zero out UQ and ablate its effect on decision-making.")
 
     # External (runner-side) communication parameters.
     parser.add_argument("--ex_env_communication_mode", type=str, default="none",

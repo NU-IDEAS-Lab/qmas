@@ -1133,8 +1133,10 @@ class PettingzooRunner(Runner):
                 append_uq = self.all_args.prediction_uq_injection_method == "append"
 
                 uq_for_policy = uncertainty_now
+                if append_uq and self.all_args.eval_prediction_uq_multiplier != 1.0:
+                    uq_for_policy = uq_for_policy * self.all_args.eval_prediction_uq_multiplier
                 if append_uq and self.all_args.eval_prediction_uq_noise > 0.0:
-                    uq_for_policy = uncertainty_now + torch.randn_like(uncertainty_now) * self.all_args.eval_prediction_uq_noise
+                    uq_for_policy = uq_for_policy + torch.randn_like(uq_for_policy) * self.all_args.eval_prediction_uq_noise
 
                 if self.all_args.state_encoder and replace_with_pred:
                     global_obs = prediction_now
