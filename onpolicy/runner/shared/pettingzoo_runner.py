@@ -345,9 +345,17 @@ class PettingzooRunner(Runner):
             self.train_prediction_prev = member_preds.detach().cpu()
             uncertainty = uncertainty.detach().cpu()
 
-            # Get the currrent state.
+            # Get the predicted current state.
             pred_now = pred[:, -1]
             uncertainty_now = uncertainty[:, -1]
+
+            # Apply any ex-environment comms merge (no-op when disabled).
+            pred_now = self._apply_ex_env_comms_merge(
+                pred_now,
+                uncertainty_now,
+                self.env_infos.get("received_comms", []),
+                self.train_prediction_prev,
+            )
 
             # When the trajectory includes actions (prepended), strip the action prefix so
             # that pred_now and uncertainty_now contain only the obs dimensions.
@@ -378,6 +386,7 @@ class PettingzooRunner(Runner):
                     obs[..., obs_dim:] = uncertainty_now
                     update_obs = True
 
+        # Call the policy.
         values, action, action_log_prob, rnn_states, rnn_states_critic = self.trainer.policy.get_actions(
             share_obs,
             obs,
@@ -676,6 +685,7 @@ class PettingzooRunner(Runner):
             hasattr(self.policy, "predictors")
             and trajectory_buffer.ready()
             and not self.all_args.prediction_disable
+            and (self.all_args.prediction_during_training or self.all_args.prediction_uq_injection_method != "none")
         )
         if not use_prediction:
             return None, None, prediction_prev, None, False
@@ -722,6 +732,79 @@ class PettingzooRunner(Runner):
             prediction_error = torch.abs(pred_now - transition_now) * visibility_mask_now
 
         return pred, uncertainty, prediction_prev, prediction_error, True
+
+    def _apply_ex_env_comms_merge(self, pred_now, uncertainty_now, received_comms_per_thread, prediction_prev):
+        """Apply the configured ex-environment comms merge to ``pred_now`` and persist into autoregression.
+
+        For each receiver agent (per ``received_comms_per_thread``), replace its prediction with the
+        per-element values from the (within-thread) agent with the lowest uncertainty. Senders = all agents
+        in the thread (including the receiver itself). Visibility is disregarded — assumes agents send
+        their full prediction + uncertainty.
+
+        Args:
+            pred_now: ``(n_threads * n_agents, D)`` — per-agent prediction at the current step.
+            uncertainty_now: ``(n_threads * n_agents, D)`` — per-agent uncertainty at the current step.
+            received_comms_per_thread: iterable of length ``n_threads`` with each element either a
+                per-thread bool (whole thread received) or a per-agent array of length ``n_agents``.
+            prediction_prev: ``(n_ensemble, n_threads * n_agents, T, D)`` autoregression source.
+                Receiver rows of the last timestep are overwritten in place with the merged values.
+
+        Shapes are reshaped to ``(n_threads, n_agents, D)`` so argmin stays within each thread — mixing
+        across threads is meaningless because they're independent rollouts.
+
+        Timing: the caller is responsible for passing flags that describe the same env transition as
+        ``pred_now``'s target obs (i.e., the most-recent step seen by the predictor). In ``collect`` this
+        is ``self.env_infos`` (populated by the prior iteration's ``insert()``); in ``eval``/``render`` it's
+        the cached previous-iter ``infos`` list.
+
+        Persistence: writing back at receiver rows lets the next predictor call autoregress on the
+        communicated info. Non-receivers retain per-ensemble diversity. Requires
+        ``diffusion_autoregression_steps > 0`` (or ``prediction_warm_start`` for a softer effect) to
+        actually carry forward — ideally with ``diffusion_autoregression_steps = prediction_history_window - 1``.
+
+        Returns ``pred_now`` (possibly modified). No-op when the mode is disabled or no receivers fired.
+        """
+        if self.all_args.ex_env_communication_mode != "merge_minimum_uq":
+            return pred_now
+
+        n_agents = self.num_agents
+        B = pred_now.shape[0]
+        if B % n_agents != 0:
+            return pred_now  # unexpected shape; skip rather than corrupt
+        n_threads = B // n_agents
+        D = pred_now.shape[-1]
+
+        # Build the per-(thread, agent) receivers mask. The caller may pass per-thread scalars (whole
+        # thread received) or per-agent arrays; both are accepted.
+        receivers_mask = torch.zeros((n_threads, n_agents), dtype=torch.bool)
+        for t_idx, flag in enumerate(list(received_comms_per_thread)[:n_threads]):
+            if isinstance(flag, (list, tuple, np.ndarray, torch.Tensor)):
+                receivers_mask[t_idx] = torch.as_tensor(np.asarray(flag), dtype=torch.bool).reshape(-1)[:n_agents]
+            else:
+                receivers_mask[t_idx] = bool(flag)
+
+        if not receivers_mask.any():
+            return pred_now
+
+        pred_per = pred_now.reshape(n_threads, n_agents, D)
+        uq_per = uncertainty_now.reshape(n_threads, n_agents, D)
+
+        # Per-element argmin across agents within each thread → (n_threads, 1, D), then gather the
+        # corresponding per-element predictions.
+        best_idx = torch.argmin(uq_per, dim=1, keepdim=True)
+        best_preds = torch.gather(pred_per, dim=1, index=best_idx)  # (n_threads, 1, D)
+
+        # Merge only at receiver rows; non-receivers keep their own predictions.
+        merge_select = receivers_mask.unsqueeze(-1)  # (n_threads, n_agents, 1)
+        pred_per = torch.where(merge_select, best_preds.expand_as(pred_per), pred_per)
+        pred_now = pred_per.reshape(B, D)
+
+        # Persist the merged values at receiver rows of the autoregression source.
+        receivers_flat = receivers_mask.reshape(-1)
+        if prediction_prev is not None:
+            prediction_prev[:, receivers_flat, -1, :] = pred_now[receivers_flat]
+
+        return pred_now
 
     @torch.no_grad()
     def eval(self):
@@ -780,6 +863,9 @@ class PettingzooRunner(Runner):
 
             # Unmasked ground truth from the previous step, used to compute true prediction error.
             ground_truth_obs_prev = None
+            # Previous-iter infos, used to source received_comms flags for the ex-env comms merge.
+            # None on the first iter of each episode → merge no-ops, matching the start-of-episode state.
+            prev_infos = None
 
             dones = False
             j = -1
@@ -801,6 +887,15 @@ class PettingzooRunner(Runner):
                 if use_prediction:
                     prediction_now = prediction[:, -1]
                     uncertainty_now = uncertainty[:, -1]
+                    # Apply ex-env comms merge before stripping the action prefix so the writeback into
+                    # prediction_prev (which has the full transition_dim) is shape-consistent.
+                    received_comms = (
+                        [info.get("received_comms", False) for info in prev_infos]
+                        if prev_infos is not None else []
+                    )
+                    prediction_now = self._apply_ex_env_comms_merge(
+                        prediction_now, uncertainty_now, received_comms, prediction_prev,
+                    )
                     if self.all_args.prediction_history_include_actions:
                         act_size = int(np.prod(get_shape_from_act_space(self.buffer.act_space)))
                         prediction_now = prediction_now[..., act_size:]
@@ -816,27 +911,31 @@ class PettingzooRunner(Runner):
                 else:
                     obs_policy = torch.from_numpy(obs.reshape(-1, *obs.shape[2:])).float()
 
-                if self.all_args.state_encoder and use_prediction:
+                replace_with_pred = use_prediction and self.all_args.prediction_during_training
+                append_uq = self.all_args.prediction_uq_injection_method == "append"
+                if self.all_args.state_encoder and replace_with_pred:
                     global_obs = prediction_now
-                    if self.all_args.prediction_uq_injection_method == "append":
+                    if append_uq:
                         global_obs = torch.cat([global_obs, uncertainty_now], dim=-1)
                 else:
                     if self.all_args.state_encoder and obs_global_fallback is not None:
                         global_obs = torch.from_numpy(
                             obs_global_fallback.reshape(rollout_threads * self.num_agents, *obs_global_fallback.shape[2:])
                         ).float()
-                        if self.all_args.prediction_uq_injection_method == "append":
-                            global_obs = torch.cat([global_obs, torch.zeros_like(global_obs)], dim=-1)
+                        if append_uq:
+                            uq_pad = uncertainty_now if use_prediction else torch.zeros_like(global_obs)
+                            global_obs = torch.cat([global_obs, uq_pad], dim=-1)
                     else:
                         global_obs = None
                     # For GNN envs (object-dtype obs), the prediction cannot replace the graph obs directly.
                     # The prediction (from observation_global) can only feed the state encoder.
-                    if use_prediction and obs.dtype != object:
+                    if replace_with_pred and obs.dtype != object:
                         obs_policy = prediction_now
-                        if self.all_args.prediction_uq_injection_method == "append":
+                        if append_uq:
                             obs_policy = torch.cat([obs_policy, uncertainty_now], dim=-1)
-                    elif obs.dtype != object and self.all_args.prediction_uq_injection_method == "append":
-                        obs_policy = torch.cat([obs_policy, torch.zeros_like(obs_policy)], dim=-1)
+                    elif obs.dtype != object and append_uq:
+                        uq_pad = uncertainty_now if use_prediction else torch.zeros_like(obs_policy)
+                        obs_policy = torch.cat([obs_policy, uq_pad], dim=-1)
 
 
                 actions, rnn_states = self.trainer.policy.act(
@@ -868,6 +967,8 @@ class PettingzooRunner(Runner):
                     ground_truth_obs_prev = obs.copy()
                 else:
                     ground_truth_obs_prev = None
+                # Cache infos so the next iter's merge can read received_comms from this env transition.
+                prev_infos = infos
                 if hasattr(self.policy, "predictors") and not self.all_args.prediction_disable:
                     obs, observation_global = self._apply_masks_and_update_trajectory(
                         trajectory,
@@ -976,6 +1077,9 @@ class PettingzooRunner(Runner):
 
             # Unmasked ground truth from the previous step, used to compute true prediction error.
             ground_truth_obs_prev = None
+            # Previous-iter infos, used to source received_comms flags for the ex-env comms merge.
+            # None on the first iter of each episode → merge no-ops, matching the start-of-episode state.
+            prev_infos = None
 
             dones = False
             reward_total = 0.0
@@ -997,6 +1101,15 @@ class PettingzooRunner(Runner):
                 if use_prediction:
                     prediction_now = prediction[:, -1]
                     uncertainty_now = uncertainty[:, -1]
+                    # Apply ex-env comms merge before stripping the action prefix so the writeback into
+                    # prediction_prev (which has the full transition_dim) is shape-consistent.
+                    received_comms = (
+                        [info.get("received_comms", False) for info in prev_infos]
+                        if prev_infos is not None else []
+                    )
+                    prediction_now = self._apply_ex_env_comms_merge(
+                        prediction_now, uncertainty_now, received_comms, prediction_prev,
+                    )
                     if self.all_args.prediction_history_include_actions:
                         act_size = int(np.prod(get_shape_from_act_space(self.buffer.act_space)))
                         prediction_now = prediction_now[..., act_size:]
@@ -1016,27 +1129,36 @@ class PettingzooRunner(Runner):
                 else:
                     obs_policy = torch.from_numpy(obs.reshape(-1, *obs.shape[2:])).float()
 
-                if self.all_args.state_encoder and use_prediction:
+                replace_with_pred = use_prediction and self.all_args.prediction_during_training
+                append_uq = self.all_args.prediction_uq_injection_method == "append"
+
+                uq_for_policy = uncertainty_now
+                if append_uq and self.all_args.eval_prediction_uq_noise > 0.0:
+                    uq_for_policy = uncertainty_now + torch.randn_like(uncertainty_now) * self.all_args.eval_prediction_uq_noise
+
+                if self.all_args.state_encoder and replace_with_pred:
                     global_obs = prediction_now
-                    if self.all_args.prediction_uq_injection_method == "append":
-                        global_obs = torch.cat([global_obs, uncertainty_now], dim=-1)
+                    if append_uq:
+                        global_obs = torch.cat([global_obs, uq_for_policy], dim=-1)
                 else:
                     if self.all_args.state_encoder and obs_global_fallback is not None:
                         global_obs = torch.from_numpy(
                             obs_global_fallback.reshape(rollout_threads * self.num_agents, *obs_global_fallback.shape[2:])
                         ).float()
-                        if self.all_args.prediction_uq_injection_method == "append":
-                            global_obs = torch.cat([global_obs, torch.zeros_like(global_obs)], dim=-1)
+                        if append_uq:
+                            uq_pad = uq_for_policy if use_prediction else torch.zeros_like(global_obs)
+                            global_obs = torch.cat([global_obs, uq_pad], dim=-1)
                     else:
                         global_obs = None
                     # For GNN envs (object-dtype obs), the prediction cannot replace the graph obs directly.
                     # The prediction (from observation_global) can only feed the state encoder.
-                    if use_prediction and obs.dtype != object:
+                    if replace_with_pred and obs.dtype != object:
                         obs_policy = prediction_now
-                        if self.all_args.prediction_uq_injection_method == "append":
-                            obs_policy = torch.cat([obs_policy, uncertainty_now], dim=-1)
-                    elif obs.dtype != object and self.all_args.prediction_uq_injection_method == "append":
-                        obs_policy = torch.cat([obs_policy, torch.zeros_like(obs_policy)], dim=-1)
+                        if append_uq:
+                            obs_policy = torch.cat([obs_policy, uq_for_policy], dim=-1)
+                    elif obs.dtype != object and append_uq:
+                        uq_pad = uq_for_policy if use_prediction else torch.zeros_like(obs_policy)
+                        obs_policy = torch.cat([obs_policy, uq_pad], dim=-1)
 
 
                 actions, rnn_states = self.trainer.policy.act(
@@ -1068,6 +1190,8 @@ class PettingzooRunner(Runner):
                     ground_truth_obs_prev = obs.copy()
                 else:
                     ground_truth_obs_prev = None
+                # Cache infos so the next iter's merge can read received_comms from this env transition.
+                prev_infos = infos
                 if hasattr(self.policy, "predictors") and not self.all_args.prediction_disable:
                     obs, observation_global = self._apply_masks_and_update_trajectory(
                         trajectory,

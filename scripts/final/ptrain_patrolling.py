@@ -1,32 +1,47 @@
+from copy import copy
 import multiprocessing
 import importlib
 import os
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-cuda_idx = [2, 3, 4, 7]
-# cuda_idx = [1, 1, 2, 3, 4, 6, 7]
-# cuda_idx = [5, 6, 7]
-scripts = {
-    # "train_patrolling": {
-    #     "algorithm_name": "rmappo",
-    # },
-    # "train_patrolling": {
-    #     "observation_mask": False,
-    # },
-    "train_patrolling": {},
-    "train_patrolling_pred": {},
-    # "train_patrolling_pred_uq": {},
-    "train_patrolling_comms_pred": {},
-    "train_patrolling_comms_pred_uq": {},
-}
+cuda_idx = [1, 6, 1, 2, 4, 5, 7]
+scripts = [
+    {
+        "script": "train_patrolling",
+        "overrides": {
+            "algorithm_name": "rmappo",
+        }
+    },
+    {
+        "script": "train_patrolling",
+        "overrides": {
+            "observation_mask": False,
+        }
+    },
+    {
+        "script": "train_patrolling"
+    },
+    {
+        "script": "train_patrolling_pred"
+    },
+    {
+        "script": "train_patrolling_pred_uq",
+        "overrides": {
+            "ex_env_communication_mode": "merge_minimum_uq",
+        }
+    },
+    {
+        "script": "train_patrolling_comms_pred"
+    },
+    {
+        "script": "train_patrolling_comms_pred_uq",
+        "overrides": {
+            "ex_env_communication_mode": "merge_minimum_uq",
+        }
+    },
+]
 
-# cuda_idx = [6, 7]
-# scripts = [
-#     "train_patrolling",
-#     # "train_patrolling_pred",
-#     # "train_patrolling_comms_pred_uq",
-# ]
 
 # Replace args function.
 def argreplace(args, arg_name, arg_value):
@@ -55,14 +70,17 @@ def argreplace(args, arg_name, arg_value):
 
 threads = []
 for i, script in enumerate(scripts):
-    module = importlib.import_module(f"{script}")
-    args = module.args
+    module = importlib.import_module(f"{script['script']}")
+    args = copy(module.args)
     args = argreplace(args, "cuda_idx", str(cuda_idx[i]))
     # args = argreplace(args, "state_encoder_output_dim", f"128")
     args = argreplace(args, "observation_mask", True)
     args = argreplace(args, "observe_method_global", "adjacency")
     args = argreplace(args, "observation_radius_random_min", "0.0")
     args = argreplace(args, "observation_radius_random_max", "300.0")
+
+    # args = argreplace(args, "ex_env_communication_mode", "merge_minimum_uq")
+
     args = argreplace(args, "n_rollout_threads", "66")
     args = argreplace(args, "num_env_steps", "500000")
     args = argreplace(args, "num_mini_batch", "30")
@@ -86,7 +104,7 @@ for i, script in enumerate(scripts):
 
     args = argreplace(args, "diffusion_model_type", "gnn")
     args = argreplace(args, "diffusion_sample_steps", "5")
-    args = argreplace(args, "diffusion_autoregression_steps", "1")
+    args = argreplace(args, "diffusion_autoregression_steps", "7")
     args = argreplace(args, "gnn_diffusion_depth", "2")
     args = argreplace(args, "gnn_diffusion_d_model", "32")
     args = argreplace(args, "gnn_diffusion_temporal_depth", "1")
@@ -104,7 +122,7 @@ for i, script in enumerate(scripts):
 
     # args = argreplace(args, "use_wandb", False)
 
-    overrides = scripts[script]
+    overrides = script.get("overrides", {})
     for key in overrides:
         args = argreplace(args, key, overrides[key])
 

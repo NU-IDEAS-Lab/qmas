@@ -411,6 +411,20 @@ def get_config():
     parser.add_argument("--prediction_uq_injection_method", type=str, default="none",
                         choices=["none", "append"],
                         help="Method to inject uncertainty estimates into the policy input")
+    parser.add_argument("--eval_prediction_uq_noise", type=float, default=0.0,
+                        help="Std of Gaussian noise added to uncertainty estimates before policy injection "
+                             "during evaluation. Used to ablate the importance of UQ to decision-making.")
+
+    # External (runner-side) communication parameters.
+    parser.add_argument("--ex_env_communication_mode", type=str, default="none",
+                        choices=["none", "merge_minimum_uq"],
+                        help="How communications between agents are handled outside the environment. "
+                             "'none': no external comms merge. "
+                             "'merge_minimum_uq': for elements indicated by the env's comms_mask, "
+                             "replace each agent's observation with the observation of the agent "
+                             "(including itself) that has the lowest uncertainty estimate for that "
+                             "element. The env must emit `comms_mask` / `comms_mask_global` in info "
+                             "for this to take effect.")
 
     # One-module variant parameters.
     parser.add_argument("--prediction_loss_coef", type=float, default=1.0,

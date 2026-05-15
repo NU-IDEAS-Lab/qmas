@@ -586,6 +586,8 @@ class parallel_env(ParallelEnv):
             obs, obs_mask = self.observe(agent)
             observation[agent] = obs
             info[agent]["visibility_mask"] = obs_mask
+            # No comms have happened yet on reset.
+            info[agent]["received_comms"] = False
 
         return observation, info
 
@@ -605,6 +607,7 @@ class parallel_env(ParallelEnv):
             og, vmg = self._populateStateSpace(self.observe_method_global, agent, radius=None, allow_done_agents=False)
             info[agent]["observation_global"] = og
             info[agent]["visibility_mask_global"] = vmg
+            info[agent]["received_comms"] = False
 
         _, state_visibility_mask = self._state()
         info["state_visibility_mask"] = state_visibility_mask
@@ -831,7 +834,6 @@ class parallel_env(ParallelEnv):
         ''' Returns the observation for the given agent.'''
 
         return self._populateStateSpace(self.observe_method, agent, radius, allow_done_agents, senders=senders, force_idleness_visible=force_idleness_visible)
-
 
     def available_actions(self, agent):
         ''' Returns the dictionary of available actions for all agents.
@@ -1313,6 +1315,9 @@ class parallel_env(ParallelEnv):
             og, vmg = self._populateStateSpace(self.observe_method_global, agent, radius=None, allow_done_agents=False, senders=senders)
             info_dict[agent]["observation_global"] = og
             info_dict[agent]["visibility_mask_global"] = vmg
+
+            # Communication received flag.
+            info_dict[agent]["received_comms"] = agent in comms_requests
 
         # Add the state fixed mask. (Nothing is fixed.)
         _, state_visibility_mask = self._state()
