@@ -917,17 +917,24 @@ class PettingzooRunner(Runner):
 
                 replace_with_pred = use_prediction and self.all_args.prediction_during_training
                 append_uq = self.all_args.prediction_uq_injection_method == "append"
+
+                uq_for_policy = uncertainty_now
+                if append_uq and self.all_args.eval_prediction_uq_multiplier != 1.0:
+                    uq_for_policy = uq_for_policy * self.all_args.eval_prediction_uq_multiplier
+                if append_uq and self.all_args.eval_prediction_uq_noise > 0.0:
+                    uq_for_policy = uq_for_policy + torch.randn_like(uq_for_policy) * self.all_args.eval_prediction_uq_noise
+
                 if self.all_args.state_encoder and replace_with_pred:
                     global_obs = prediction_now
                     if append_uq:
-                        global_obs = torch.cat([global_obs, uncertainty_now], dim=-1)
+                        global_obs = torch.cat([global_obs, uq_for_policy], dim=-1)
                 else:
                     if self.all_args.state_encoder and obs_global_fallback is not None:
                         global_obs = torch.from_numpy(
                             obs_global_fallback.reshape(rollout_threads * self.num_agents, *obs_global_fallback.shape[2:])
                         ).float()
                         if append_uq:
-                            uq_pad = uncertainty_now if use_prediction else torch.zeros_like(global_obs)
+                            uq_pad = uq_for_policy if use_prediction else torch.zeros_like(global_obs)
                             global_obs = torch.cat([global_obs, uq_pad], dim=-1)
                     else:
                         global_obs = None
@@ -936,9 +943,9 @@ class PettingzooRunner(Runner):
                     if replace_with_pred and obs.dtype != object:
                         obs_policy = prediction_now
                         if append_uq:
-                            obs_policy = torch.cat([obs_policy, uncertainty_now], dim=-1)
+                            obs_policy = torch.cat([obs_policy, uq_for_policy], dim=-1)
                     elif obs.dtype != object and append_uq:
-                        uq_pad = uncertainty_now if use_prediction else torch.zeros_like(obs_policy)
+                        uq_pad = uq_for_policy if use_prediction else torch.zeros_like(obs_policy)
                         obs_policy = torch.cat([obs_policy, uq_pad], dim=-1)
 
 
