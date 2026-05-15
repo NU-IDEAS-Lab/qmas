@@ -417,6 +417,8 @@ def get_config():
     parser.add_argument("--eval_prediction_uq_multiplier", type=float, default=1.0,
                         help="Scalar multiplied into uncertainty estimates before policy injection during "
                              "evaluation. Set to 0 to zero out UQ and ablate its effect on decision-making.")
+    parser.add_argument("--eval_prediction", action=argparse.BooleanOptionalAction, default=False,
+                        help="Whether to run prediction during evaluation, even if it will not be used.")
 
     # External (runner-side) communication parameters.
     parser.add_argument("--ex_env_communication_mode", type=str, default="none",

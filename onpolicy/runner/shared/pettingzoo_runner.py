@@ -685,7 +685,11 @@ class PettingzooRunner(Runner):
             hasattr(self.policy, "predictors")
             and trajectory_buffer.ready()
             and not self.all_args.prediction_disable
-            and (self.all_args.prediction_during_training or self.all_args.prediction_uq_injection_method != "none")
+            and (
+                self.all_args.prediction_during_training
+                or self.all_args.prediction_uq_injection_method != "none"
+                or self.all_args.eval_prediction
+            )
         )
         if not use_prediction:
             return None, None, prediction_prev, None, False
