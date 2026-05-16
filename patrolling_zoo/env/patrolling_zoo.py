@@ -61,11 +61,17 @@ def add_args(parser):
     parser.add_argument("--agent_speed", type=float, default=10.0,
                         help="the speed of each agent")
     parser.add_argument("--action_method", type=str, default="full",
-                        choices=["full", "neighbors", "neighbors_with_comm_boolean", "velocity"],
+                        choices=["full", "neighbors", "neighbors_with_comm_boolean",
+                                 "neighbors_with_comm_uq_threshold", "velocity"],
                         help="the action method to use. 'neighbors_with_comm_boolean' extends "
                              "'neighbors' with a binary communication-request action: agents "
                              "may request a broadcast from all other agents, who respond by "
-                             "sharing their local observations. 'velocity' issues 2D velocity "
+                             "sharing their local observations. "
+                             "'neighbors_with_comm_uq_threshold' replaces the binary comm action "
+                             "with a continuous 'comm_threshold' field; inside step, the env "
+                             "broadcasts iff a Bernoulli draw from sigmoid((u - threshold) / T) "
+                             "fires, where u is a scalar UQ summary set by the runner via "
+                             "set_predictor_uncertainty(). 'velocity' issues 2D velocity "
                              "commands (vx, vy), clipped to agent_speed in magnitude; nodes "
                              "are visited when the agent enters action_velocity_acceptance_radius.")
     parser.add_argument("--observe_method", type=str, default="adjacency", 
@@ -205,11 +211,19 @@ class parallel_env(ParallelEnv):
                  graph_random_size_x = 500.0,
                  graph_random_size_y = 500.0,
                  graph_file = os.path.join(os.path.dirname(patrolling_zoo.graphs.__file__), "cumberland.graph"),
+                 comm_uq_threshold_temperature: float = 1.0,
                 ):
         """
         Initialize the patrolling environment.
         """
         super().__init__()
+
+        # Temperature for the in-step UQ-threshold gate (only used when
+        # action_method == "neighbors_with_comm_uq_threshold").
+        self.comm_uq_threshold_temperature = comm_uq_threshold_temperature
+        # Latest per-agent UQ scalar pushed by the runner via set_predictor_uncertainty().
+        # Shape: (num_agents,) float. None until the runner sets it (the gate then doesn't fire).
+        self._predictor_uncertainty = None
 
         # Configuration.
         self.requireExplicitVisit = require_explicit_visit
@@ -321,6 +335,24 @@ class parallel_env(ParallelEnv):
                 )
             })
 
+        elif action_method == "neighbors_with_comm_uq_threshold":
+            # Movement + a continuous per-agent gating threshold. There is no boolean
+            # communication slot; the broadcast decision is made inside step() by
+            # comparing the agent's UQ summary against this threshold.
+            maxDegree = self.action_neighbors_max_degree
+            return spaces.Dict({
+                "movement": spaces.Box(
+                    low = 0,
+                    high = maxDegree - 1,
+                    dtype = np.int32
+                ),
+                "comm_threshold": spaces.Box(
+                    low = np.array([-np.inf], dtype=np.float32),
+                    high = np.array([np.inf], dtype=np.float32),
+                    dtype = np.float32
+                )
+            })
+
         elif action_method == "velocity":
             # 2D velocity command (vx, vy). Per-component bounds are ±agent_speed;
             # combined magnitude is clipped to agent_speed at step time.
@@ -410,7 +442,7 @@ class parallel_env(ParallelEnv):
             }) # type: ignore
         
         if observe_method in ["pyg"]:
-            if self.action_method in ["neighbors", "neighbors_with_comm_boolean"]:
+            if self.action_method in ["neighbors", "neighbors_with_comm_boolean", "neighbors_with_comm_uq_threshold"]:
                 edge_feat_dim = 2  # weight, neighborIndex
                 node_feat_dim = 2  # nodeType, degree
                 node_type_idx = 0
@@ -489,7 +521,7 @@ class parallel_env(ParallelEnv):
                     action_neighbors_max_degree=self.action_neighbors_max_degree,
                 )
             else:
-                if self.action_method in ["neighbors", "neighbors_with_comm_boolean"]:
+                if self.action_method in ["neighbors", "neighbors_with_comm_boolean", "neighbors_with_comm_uq_threshold"]:
                     edge_space = spaces.Box(
                         # weight, neighborID
                         low = np.array([0.0, -1.0], dtype=np.float32),
@@ -763,10 +795,29 @@ class parallel_env(ParallelEnv):
         return self.action_spaces[agent]
 
 
+    def set_predictor_uncertainty(self, uncertainty):
+        ''' Cache the runner-provided per-agent UQ summary used by the in-env
+            UQ-threshold communication gate.
+
+            uncertainty: array-like of shape (num_agents,) holding a per-agent scalar
+            summary of the predictor's uncertainty for this step. Order matches
+            self.possible_agents. The next call to step() reads this when
+            action_method == "neighbors_with_comm_uq_threshold" and
+            ex_env_communication_mode == "uq_threshold_gate". '''
+        self._predictor_uncertainty = np.asarray(uncertainty, dtype=np.float32).reshape(-1)
+
+
     def available_actions_space(self, agent):
         ''' Generate a Space for the available actions, given the action space. '''
 
         action_space = self.action_space(agent)
+        # For the UQ-threshold action method, the continuous comm_threshold slot has no
+        # per-step availability mask. Drop it from the Dict so the flat mask only covers
+        # the movement slot — keeps ACTLayer's available_actions_idx bookkeeping consistent.
+        if self.action_method == "neighbors_with_comm_uq_threshold" and isinstance(action_space, spaces.Dict):
+            action_space = spaces.Dict({
+                k: v for k, v in action_space.spaces.items() if k != "comm_threshold"
+            })
         def get_available_action_space(action_space):
             if action_space.__class__.__name__ in ["Tuple", "Dict"]:
                 return spaces.Dict({k: get_available_action_space(v) for k, v in action_space.spaces.items()})
@@ -1035,7 +1086,7 @@ class parallel_env(ParallelEnv):
                 g.edges[edge]["weight"] = self._minMaxNormalize(weights[edge], minimum=minWeight, maximum=maxWeight)
 
             # Determine desired attributes for nodes and edges based on the action method.
-            if self.action_method in ["neighbors", "neighbors_with_comm_boolean"]:
+            if self.action_method in ["neighbors", "neighbors_with_comm_boolean", "neighbors_with_comm_uq_threshold"]:
                 edge_attrs = ["weight", "neighborIndex"]
                 node_attrs = ["nodeType", "idlenessTime", "degree"]
             else:
@@ -1239,7 +1290,7 @@ class parallel_env(ParallelEnv):
                     # Graph-based action modes: discrete actions indicate node to move towards.
                     if self.action_method in ["full", "neighbors"]:
                         action_movement = int(action)
-                    elif self.action_method == "neighbors_with_comm_boolean":
+                    elif self.action_method in ("neighbors_with_comm_boolean", "neighbors_with_comm_uq_threshold"):
                         action_movement = int(action["movement"])
 
                     # Store this as the agent's last movement action.
@@ -1287,6 +1338,31 @@ class parallel_env(ParallelEnv):
                 elif self.action_method == "neighbors_with_comm_boolean":
                     action_movement = int(action["movement"])
                     action_communication = bool(action["communication"])
+                    if action_communication:
+                        senders = set(other for other in self.agents if other is not agent)
+                        if senders:
+                            comms_requests[agent] = senders
+                            info_dict["communication/requests_made"] += 1
+                        reward_dict[agent] += -1.0 * self.reward_comms_penalty_weight
+
+                elif self.action_method == "neighbors_with_comm_uq_threshold":
+                    # Threshold-gated comm: broadcast iff a Bernoulli draw from
+                    # sigmoid((u - threshold) / T) fires. The gate is implicit in this
+                    # action_method; the runner is expected to push the per-agent UQ via
+                    # set_predictor_uncertainty() before each step. If UQ has not been
+                    # pushed yet (e.g. warmup) the gate is treated as not-firing.
+                    threshold = float(np.asarray(action["comm_threshold"]).reshape(-1)[0])
+                    agent_idx = self.possible_agents.index(agent)
+                    if (self._predictor_uncertainty is not None
+                            and agent_idx < len(self._predictor_uncertainty)):
+                        u = float(self._predictor_uncertainty[agent_idx])
+                        T = max(self.comm_uq_threshold_temperature, 1e-6)
+                        p = 1.0 / (1.0 + np.exp(-(u - threshold) / T))
+                        action_communication = bool(np.random.random() < p)
+                    else:
+                        action_communication = False
+                    info_dict[agent]["comm_threshold"] = threshold
+                    info_dict[agent]["comm_gate_fired"] = float(action_communication)
                     if action_communication:
                         senders = set(other for other in self.agents if other is not agent)
                         if senders:
@@ -1398,7 +1474,7 @@ class parallel_env(ParallelEnv):
             dstNode = action
         
         # Interpret the action using the "neighbors" method.
-        elif self.action_method in ["neighbors", "neighbors_with_comm_boolean"]:
+        elif self.action_method in ["neighbors", "neighbors_with_comm_boolean", "neighbors_with_comm_uq_threshold"]:
             if agent.edge == None:
                 if action >= self.pg.graph.out_degree(agent.lastNode):
                     raise ValueError(f"Invalid action {action} for agent {agent.name}. Node {agent.lastNode} has only {self.pg.graph.out_degree(agent.lastNode)} neighbors.")
@@ -1577,8 +1653,23 @@ class parallel_env(ParallelEnv):
                     "communication": np.array([1.0, 1.0], dtype=np.float32)
                 }
                 actionMap["movement"][agent.currentAction] = 1.0
-            
+
             # Flatten the action map.
+            flat = spaces.flatten(self.available_actions_space(agent), actionMap)
+            return flat
+
+        elif self.action_method == "neighbors_with_comm_uq_threshold":
+            # Only the movement slot is masked; comm_threshold is a continuous output
+            # without per-step availability (see available_actions_space override).
+            num_moves = self.action_space(agent)["movement"].high - self.action_space(agent)["movement"].low + 1
+            actionMap = {
+                "movement": np.zeros(num_moves, dtype=np.float32),
+            }
+            if agent.edge == None:
+                numNeighbors = self.pg.graph.out_degree(agent.lastNode)
+                actionMap["movement"][:numNeighbors] = 1.0
+            else:
+                actionMap["movement"][agent.currentAction] = 1.0
             flat = spaces.flatten(self.available_actions_space(agent), actionMap)
             return flat
 
