@@ -5,7 +5,7 @@ import os
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-cuda_idx = [0, 1, 2, 3, 4, 5, 6, 7]
+cuda_idx = [1, 2, 3, 4, 5, 6, 7]
 scripts = [
     {
         "script": "train_patrolling_comms_pred_uq",
@@ -28,13 +28,13 @@ scripts = [
             "experiment_name": "patrolling_comms_pred_uq_commsPenalty0.2",
         }
     },
-    {
-        "script": "train_patrolling_comms_pred_uq",
-        "overrides": {
-            "reward_comms_penalty_weight": "0.3",
-            "experiment_name": "patrolling_comms_pred_uq_commsPenalty0.3",
-        }
-    },
+    # {
+    #     "script": "train_patrolling_comms_pred_uq",
+    #     "overrides": {
+    #         "reward_comms_penalty_weight": "0.3",
+    #         "experiment_name": "patrolling_comms_pred_uq_commsPenalty0.3",
+    #     }
+    # },
     {
         "script": "train_patrolling_comms_pred_uq",
         "overrides": {
@@ -105,7 +105,7 @@ for i, script in enumerate(scripts):
     args = argreplace(args, "ex_env_communication_mode", "merge_minimum_uq")
 
     args = argreplace(args, "n_rollout_threads", "66")
-    args = argreplace(args, "num_env_steps", "500000")
+    args = argreplace(args, "num_env_steps", "1000000")
     args = argreplace(args, "num_mini_batch", "30")
     # args = argreplace(args, "beta", "0.5")
     # args = argreplace(args, "alpha", "1.0")
