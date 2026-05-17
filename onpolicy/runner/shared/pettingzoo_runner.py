@@ -747,7 +747,7 @@ class PettingzooRunner(Runner):
         uncertainty vector returned by the predictor (shape (n_threads * n_agents, D))
         or None when no prediction is available — in that case zeros are pushed so the
         env's gate is in a defined state."""
-        if self.all_args.action_method != "neighbors_with_comm_uq_threshold":
+        if "action_method" not in self.all_args or self.all_args.action_method != "neighbors_with_comm_uq_threshold":
             return
         if uncertainty_now is None:
             u_per_agent = np.zeros((n_threads, self.num_agents), dtype=np.float32)
