@@ -5,7 +5,7 @@ import os
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-cuda_idx = [1, 6, 1, 2, 4, 5, 7]
+cuda_idx = [0, 1, 2, 3, 4, 5, 6, 7]
 scripts = [
     {
         "script": "train_patrolling",
@@ -38,6 +38,17 @@ scripts = [
         "script": "train_patrolling_comms_pred_uq",
         "overrides": {
             "ex_env_communication_mode": "merge_minimum_uq",
+        }
+    },
+    {
+        # UQ-threshold-gated comms: actor emits a continuous comm_threshold, env
+        # broadcasts iff Bernoulli(sigmoid((u - threshold)/T)) fires. Paired with
+        # merge_minimum_uq on the receive side.
+        "script": "train_patrolling_comms_pred_uq",
+        "overrides": {
+            "action_method": "neighbors_with_comm_uq_threshold",
+            "ex_env_communication_mode": "merge_minimum_uq",
+            "comm_uq_threshold_temperature": "1.0",
         }
     },
 ]

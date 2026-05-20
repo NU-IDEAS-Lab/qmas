@@ -104,6 +104,12 @@ class PettingzooEnv(object):
 
         return ret_obs, ret_share_obs, ret_available_actions, infos
 
+    def set_predictor_uncertainty(self, uncertainty):
+        """Forward a per-agent UQ summary to the underlying env. No-op if the underlying
+        env doesn't support it (the gate just won't fire)."""
+        if hasattr(self.env, "set_predictor_uncertainty"):
+            self.env.set_predictor_uncertainty(uncertainty)
+
     def step(self, action):
 
         ready = False

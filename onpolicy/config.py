@@ -430,6 +430,10 @@ def get_config():
                              "(including itself) that has the lowest uncertainty estimate for that "
                              "element. The env must emit `comms_mask` / `comms_mask_global` in info "
                              "for this to take effect.")
+    parser.add_argument("--comm_uq_threshold_temperature", type=float, default=1.0,
+                        help="Temperature T scaling the Bernoulli logits in the UQ-threshold "
+                             "comm gate used by action_method='neighbors_with_comm_uq_threshold'. "
+                             "Smaller is sharper, approaching a deterministic comparison u > threshold.")
 
     # One-module variant parameters.
     parser.add_argument("--prediction_loss_coef", type=float, default=1.0,

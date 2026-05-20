@@ -386,6 +386,9 @@ class PettingzooRunner(Runner):
                     obs[..., obs_dim:] = uncertainty_now
                     update_obs = True
 
+        # Push the per-agent UQ summary to the env so its in-step comm gate can fire.
+        self._push_uq_to_env(self.envs, uncertainty_now, self.n_rollout_threads)
+
         # Call the policy.
         values, action, action_log_prob, rnn_states, rnn_states_critic = self.trainer.policy.get_actions(
             share_obs,
@@ -737,6 +740,22 @@ class PettingzooRunner(Runner):
 
         return pred, uncertainty, prediction_prev, prediction_error, True
 
+    def _push_uq_to_env(self, env_wrapper, uncertainty_now, n_threads):
+        """Push a per-thread per-agent scalar UQ summary to the env wrapper. No-op unless
+        action_method == "neighbors_with_comm_uq_threshold", which is the only action_method
+        whose env.step reads predictor uncertainty. `uncertainty_now` is the per-agent
+        uncertainty vector returned by the predictor (shape (n_threads * n_agents, D))
+        or None when no prediction is available — in that case zeros are pushed so the
+        env's gate is in a defined state."""
+        if "action_method" not in self.all_args or self.all_args.action_method != "neighbors_with_comm_uq_threshold":
+            return
+        if uncertainty_now is None:
+            u_per_agent = np.zeros((n_threads, self.num_agents), dtype=np.float32)
+        else:
+            uq = uncertainty_now.detach().cpu().float() if isinstance(uncertainty_now, torch.Tensor) else torch.as_tensor(uncertainty_now, dtype=torch.float32)
+            u_per_agent = uq.mean(dim=-1).numpy().reshape(n_threads, self.num_agents)
+        env_wrapper.set_predictor_uncertainty(u_per_agent)
+
     def _apply_ex_env_comms_merge(self, pred_now, uncertainty_now, received_comms_per_thread, prediction_prev):
         """Apply the configured ex-environment comms merge to ``pred_now`` and persist into autoregression.
 
@@ -923,6 +942,11 @@ class PettingzooRunner(Runner):
                     uq_for_policy = uq_for_policy * self.all_args.eval_prediction_uq_multiplier
                 if append_uq and self.all_args.eval_prediction_uq_noise > 0.0:
                     uq_for_policy = uq_for_policy + torch.randn_like(uq_for_policy) * self.all_args.eval_prediction_uq_noise
+
+                # Push UQ to the env so the in-step comm gate can fire. Uses the perturbed
+                # uq_for_policy (after multiplier/noise) so eval-time ablations of UQ
+                # correctly drive the gate as well as the state-encoder input.
+                self._push_uq_to_env(env, uq_for_policy if use_prediction else None, rollout_threads)
 
                 if self.all_args.state_encoder and replace_with_pred:
                     global_obs = prediction_now
@@ -1148,6 +1172,11 @@ class PettingzooRunner(Runner):
                     uq_for_policy = uq_for_policy * self.all_args.eval_prediction_uq_multiplier
                 if append_uq and self.all_args.eval_prediction_uq_noise > 0.0:
                     uq_for_policy = uq_for_policy + torch.randn_like(uq_for_policy) * self.all_args.eval_prediction_uq_noise
+
+                # Push UQ to the env so the in-step comm gate can fire. Uses the perturbed
+                # uq_for_policy (after multiplier/noise) so eval-time ablations of UQ
+                # correctly drive the gate as well as the state-encoder input.
+                self._push_uq_to_env(env, uq_for_policy if use_prediction else None, rollout_threads)
 
                 if self.all_args.state_encoder and replace_with_pred:
                     global_obs = prediction_now
