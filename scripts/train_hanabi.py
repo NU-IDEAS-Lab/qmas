@@ -5,7 +5,7 @@ os.environ["WANDB__SERVICE_WAIT"] = "300"
 args = [
     "--experiment_name", "hanabi-obsSeer-noObsMasking-rwdInternal-512x2",
     "--project_name", "qmas",
-    "--env_class", "isru_zoo.env.Hanabi_pred.parallel_env",
+    "--env_class", "hanabi_zoo.env.Hanabi_pred.parallel_env",
     "--user_name", "ideas-mas",
 
     "--hanabi_observation_type", "seer",
