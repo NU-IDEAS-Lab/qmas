@@ -53,6 +53,13 @@ def add_args(parser):
     parser.add_argument("--graph_random_size_y", type=float,
                         default=500.0,
                         help="The y-axis size of the world for random graph generation.")
+    parser.add_argument("--graph_target_diameter", type=float, default=0.0,
+                        help="If > 0, after the graph is built all node positions and "
+                             "edge weights are uniformly scaled so the longest "
+                             "shortest-path distance (graph diameter) equals this value. "
+                             "Use this to stabilize results across random graph draws and "
+                             "across observation-radius sweeps, by giving observation_radius "
+                             "and agent_speed a consistent absolute meaning. 0 disables.")
     parser.add_argument("--reward_method_terminal", type=str,
                         default="average", 
                         help="the method to use for terminal reward.")
@@ -211,6 +218,7 @@ class parallel_env(ParallelEnv):
                  graph_random_size_x = 500.0,
                  graph_random_size_y = 500.0,
                  graph_file = os.path.join(os.path.dirname(patrolling_zoo.graphs.__file__), "cumberland.graph"),
+                 graph_target_diameter: float = 0.0,
                  comm_uq_threshold_temperature: float = 1.0,
                 ):
         """
@@ -260,10 +268,11 @@ class parallel_env(ParallelEnv):
         self.reward_comms_penalty_weight = reward_comms_penalty_weight
 
         # Create patrol graph.
+        self.graph_target_diameter = graph_target_diameter
         if graph_random:
-            self.pg = PatrolGraph(numNodes=graph_random_nodes, radius=graph_random_radius, sizeX=graph_random_size_x, sizeY=graph_random_size_y)
+            self.pg = PatrolGraph(numNodes=graph_random_nodes, radius=graph_random_radius, sizeX=graph_random_size_x, sizeY=graph_random_size_y, target_diameter=graph_target_diameter)
         else:
-            self.pg = PatrolGraph(graph_file)
+            self.pg = PatrolGraph(graph_file, target_diameter=graph_target_diameter)
 
         # Layout metadata for dense GNN observations; populated by _buildStateSpace when gnn_use_dense_obs=True.
         self._gnn_dense_layout = None

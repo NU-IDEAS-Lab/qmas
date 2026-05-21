@@ -112,6 +112,8 @@ for i, script in enumerate(scripts):
     args = argreplace(args, "observation_radius_random_min", "0.0")
     args = argreplace(args, "observation_radius_random_max", "300.0")
 
+    args = argreplace(args, "graph_target_diameter", "1000.0")
+
     # args = argreplace(args, "ex_env_communication_mode", "merge_minimum_uq")
 
     args = argreplace(args, "n_rollout_threads", "66")

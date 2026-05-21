@@ -13,8 +13,12 @@ class NODE_TYPE(IntEnum):
 
 class PatrolGraph():
     
-    def __init__(self, filepath = None, numNodes = 40, radius = 75.0, sizeX = 500.0, sizeY = 500.0):
+    def __init__(self, filepath = None, numNodes = 40, radius = 75.0, sizeX = 500.0, sizeY = 500.0, target_diameter = 0.0):
         self.graph = nx.DiGraph()
+        # If > 0, after the graph is built all node positions and edge weights are scaled
+        # so the longest shortest-path distance equals target_diameter. Gives observation_radius
+        # and agent_speed a stable meaning across random graph draws.
+        self.target_diameter = target_diameter
         if filepath is None:
             self.generateRandomGraph(numNodes, radius=radius, sizeX=sizeX, sizeY=sizeY)
         else:
@@ -70,8 +74,12 @@ class PatrolGraph():
         self.longestPathLength = 0.0
         all_pairs = nx.all_pairs_dijkstra_path_length(self.graph, weight="weight")
         for i in all_pairs:
-            if i[1][j] > self.longestPathLength:
-                self.longestPathLength = i[1][j]
+            for j in i[1]:
+                if i[1][j] > self.longestPathLength:
+                    self.longestPathLength = i[1][j]
+
+        # Optionally rescale positions and edge weights to a fixed diameter.
+        self._scaleToTargetDiameter(self.target_diameter)
 
         # Store out-degree and neighbor indices on each node.
         for node in self.graph.nodes:
@@ -124,6 +132,9 @@ class PatrolGraph():
                 if i[1][j] > self.longestPathLength:
                     self.longestPathLength = i[1][j]
 
+        # Optionally rescale positions and edge weights to a fixed diameter.
+        self._scaleToTargetDiameter(self.target_diameter)
+
         # Store out-degree and neighbor indices on each node.
         for node in self.graph.nodes:
             self.graph.nodes[node]["degree"] = self.graph.out_degree(node)
@@ -131,6 +142,24 @@ class PatrolGraph():
                 self.graph.edges[(node, neighbor)]["neighborIndex"] = idx
 
         # print(f"Finished generating random graph with {numNodes} nodes and degree {self.graph.degree()}.")
+
+
+    def _scaleToTargetDiameter(self, target_diameter):
+        ''' Uniformly scales node positions and edge weights so the longest shortest-path
+            distance (graph "diameter") equals target_diameter. Topology is preserved.
+            No-op if target_diameter <= 0 or the current diameter is 0. '''
+
+        if target_diameter is None or target_diameter <= 0.0:
+            return
+        if self.longestPathLength <= 0.0:
+            return
+        scale = float(target_diameter) / float(self.longestPathLength)
+        for node in self.graph.nodes:
+            pos = self.graph.nodes[node]["pos"]
+            self.graph.nodes[node]["pos"] = (pos[0] * scale, pos[1] * scale)
+        for edge in self.graph.edges:
+            self.graph.edges[edge]["weight"] = self.graph.edges[edge]["weight"] * scale
+        self.longestPathLength = float(target_diameter)
 
 
     def reset(self, seed=None, randomizeIds=False, regenerateGraph=False):
