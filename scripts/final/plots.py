@@ -131,6 +131,7 @@ def plot(plots, timesteps=None):
             showlegend=show_legend,
             autosize=True,
             height=600,
+            width=800,
             margin=dict(l=60, r=20, t=60, b=120),
             legend=dict(
                 orientation='h',

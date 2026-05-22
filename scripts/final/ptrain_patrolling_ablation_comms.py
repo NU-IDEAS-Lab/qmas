@@ -5,50 +5,62 @@ import os
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-cuda_idx = [0, 1, 2, 3, 4, 5, 6, 7]
+cuda_idx = [1, 2, 3, 4, 5, 6, 7]
 scripts = [
     {
-        "script": "train_patrolling",
+        "script": "train_patrolling_comms_pred_uq",
         "overrides": {
-            "algorithm_name": "rmappo",
+            "reward_comms_penalty_weight": "0.0",
+            "experiment_name": "patrolling_comms_pred_uq_commsPenalty0.0",
         }
-    },
-    {
-        "script": "train_patrolling",
-        "overrides": {
-            "observation_mask": False,
-        }
-    },
-    {
-        "script": "train_patrolling"
-    },
-    {
-        "script": "train_patrolling_pred"
-    },
-    {
-        "script": "train_patrolling_pred_uq",
-        "overrides": {
-            "ex_env_communication_mode": "merge_minimum_uq",
-        }
-    },
-    {
-        "script": "train_patrolling_comms_pred"
     },
     {
         "script": "train_patrolling_comms_pred_uq",
         "overrides": {
-            "ex_env_communication_mode": "merge_minimum_uq",
+            "reward_comms_penalty_weight": "0.1",
+            "experiment_name": "patrolling_comms_pred_uq_commsPenalty0.1",
         }
     },
     {
-        # UQ-threshold-gated comms: actor emits a continuous comm_threshold, env
-        # broadcasts iff Bernoulli(sigmoid((u - threshold)/T)) fires. Paired with
-        # merge_minimum_uq on the receive side.
         "script": "train_patrolling_comms_pred_uq",
         "overrides": {
-            "action_method": "neighbors_with_comm_uq_threshold",
-            "ex_env_communication_mode": "merge_minimum_uq",
-            "comm_uq_threshold_temperature": "1.0",
+            "reward_comms_penalty_weight": "0.2",
+            "experiment_name": "patrolling_comms_pred_uq_commsPenalty0.2",
+        }
+    },
+    # {
+    #     "script": "train_patrolling_comms_pred_uq",
+    #     "overrides": {
+    #         "reward_comms_penalty_weight": "0.3",
+    #         "experiment_name": "patrolling_comms_pred_uq_commsPenalty0.3",
+    #     }
+    # },
+    {
+        "script": "train_patrolling_comms_pred_uq",
+        "overrides": {
+            "reward_comms_penalty_weight": "0.4",
+            "experiment_name": "patrolling_comms_pred_uq_commsPenalty0.4",
+        }
+    },
+    {
+        "script": "train_patrolling_comms_pred_uq",
+        "overrides": {
+            "reward_comms_penalty_weight": "0.5",
+            "experiment_name": "patrolling_comms_pred_uq_commsPenalty0.5",
+        }
+    },
+    {
+        "script": "train_patrolling_comms_pred_uq",
+        "overrides": {
+            "reward_comms_penalty_weight": "1.0",
+            "experiment_name": "patrolling_comms_pred_uq_commsPenalty1.0",
+        }
+    },
+    {
+        "script": "train_patrolling_comms_pred_uq",
+        "overrides": {
+            "reward_comms_penalty_weight": "10.0",
+            "experiment_name": "patrolling_comms_pred_uq_commsPenalty10.0",
         }
     },
 ]
@@ -90,10 +102,10 @@ for i, script in enumerate(scripts):
     args = argreplace(args, "observation_radius_random_min", "0.0")
     args = argreplace(args, "observation_radius_random_max", "300.0")
 
-    # args = argreplace(args, "ex_env_communication_mode", "merge_minimum_uq")
+    args = argreplace(args, "ex_env_communication_mode", "merge_minimum_uq")
 
     args = argreplace(args, "n_rollout_threads", "66")
-    args = argreplace(args, "num_env_steps", "500000")
+    args = argreplace(args, "num_env_steps", "1000000")
     args = argreplace(args, "num_mini_batch", "30")
     # args = argreplace(args, "beta", "0.5")
     # args = argreplace(args, "alpha", "1.0")

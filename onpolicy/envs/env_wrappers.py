@@ -343,6 +343,11 @@ def shareworker(remote, parent_remote, env_fn_wrapper):
             elif cmd == 'render_vulnerability':
                 fr = env.render_vulnerability(data)
                 remote.send((fr))
+            elif cmd == 'set_predictor_uncertainty':
+                # Fire-and-forget: no reply. Underlying env may be a no-op if it doesn't
+                # support it (PettingzooEnv.set_predictor_uncertainty handles that case).
+                if hasattr(env, 'set_predictor_uncertainty'):
+                    env.set_predictor_uncertainty(data)
             else:
                 raise NotImplementedError
     except KeyboardInterrupt:
@@ -395,6 +400,12 @@ class ShareSubprocVecEnv(ShareVecEnv):
         for remote in self.remotes:
             remote.send(('reset_task', None))
         return np.stack([remote.recv() for remote in self.remotes])
+
+    def set_predictor_uncertainty(self, uncertainty):
+        """Push a per-thread per-agent UQ summary to the underlying envs. `uncertainty`
+        has shape (n_threads, n_agents). Fire-and-forget; no reply needed."""
+        for remote, u in zip(self.remotes, uncertainty):
+            remote.send(('set_predictor_uncertainty', u))
 
     def close(self):
         if self.closed:
@@ -752,10 +763,17 @@ class ShareDummyVecEnv(ShareVecEnv):
             return np.array(obs), np.array(share_obs), np.array(available_actions), infos
         return np.array(obs), np.array(share_obs), np.array(available_actions)
 
+    def set_predictor_uncertainty(self, uncertainty):
+        """Push a per-thread per-agent UQ summary to each underlying env.
+        `uncertainty` has shape (n_threads, n_agents)."""
+        for env, u in zip(self.envs, uncertainty):
+            if hasattr(env, "set_predictor_uncertainty"):
+                env.set_predictor_uncertainty(u)
+
     def close(self):
         for env in self.envs:
             env.close()
-    
+
     def render(self, mode="human"):
         if mode == "rgb_array":
             return np.array([env.render(mode=mode) for env in self.envs])
