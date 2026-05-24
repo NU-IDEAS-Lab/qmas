@@ -668,12 +668,17 @@ class parallel_env(ParallelEnv):
         nodeColors = [self._minMaxNormalize(idleness[i], a=0.0, b=100, minimum=0.0, maximum=self.step_count) for i in self.pg.graph.nodes]
 
         # Unflatten prediction once if available (reused for both vertex state and agent positions).
+        # Guard against shape mismatches that occur when the predictor was trained on dense GNN
+        # observations (e.g. gnn_use_dense_obs=True with disable_observation_global=True), whose
+        # flat dimension differs from the adjacency-format state_space used here for rendering.
         pred_unflattened = None
         if prediction_now is not None and isinstance(self.state_space, spaces.Dict):
             _pred_agent0 = prediction_now[0]
             if hasattr(_pred_agent0, 'numpy'):
                 _pred_agent0 = _pred_agent0.numpy()
-            pred_unflattened = spaces.unflatten(self.state_space, _pred_agent0.flatten())
+            _pred_flat = _pred_agent0.flatten()
+            if _pred_flat.size == spaces.flatdim(self.state_space):
+                pred_unflattened = spaces.unflatten(self.state_space, _pred_flat)
 
         # Extract predicted vertex idleness if available.
         pred_vertex_state = None
