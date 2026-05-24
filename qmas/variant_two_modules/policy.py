@@ -106,6 +106,20 @@ class QmasPolicy(R_MAPPOPolicy):
             torch.save(predictor.state_dict(), os.path.join(directory, f"predictor{i}.pt"))
 
 
+    # Predictor tensors whose shape is a deterministic function of the current
+    # obs space (T x D_flat) rather than learned content. On restore we keep
+    # the freshly-constructed values and ignore whatever the checkpoint stored,
+    # so a model trained with one num_agents can be evaluated with another.
+    # Learned weights (lin_in_X, lin_out_X, etc.) are F-sized and load normally.
+    _LAYOUT_TIED_PREDICTOR_KEYS = (
+        "diffuser.fix_mask",
+        "diffuser.loss_weight",
+        "gnn_edge_fix_template",
+        "obs_running_mean",
+        "obs_running_var",
+        "obs_running_count",
+    )
+
     def restore(self, directory):
         ''' Restore the policy. '''
 
@@ -114,8 +128,17 @@ class QmasPolicy(R_MAPPOPolicy):
         for i, predictor in enumerate(self.predictors):
             predictor_state_dict = torch.load(os.path.join(directory, f"predictor{i}.pt"), map_location=self.device)
 
-            # This is hacky - reset the fix_mask here.
-            if 'diffuser.fix_mask' in predictor_state_dict:
-                predictor_state_dict['diffuser.fix_mask'] = predictor.diffuser.fix_mask
+            current_state = predictor.state_dict()
+            for key in self._LAYOUT_TIED_PREDICTOR_KEYS:
+                if key in predictor_state_dict and key in current_state:
+                    predictor_state_dict[key] = current_state[key]
+            # diffuser.fix_mask is popped out of _parameters at construction
+            # so it doesn't appear in current_state; old checkpoints may still
+            # carry it. Pull from the live attribute when that happens.
+            if (
+                "diffuser.fix_mask" in predictor_state_dict
+                and "diffuser.fix_mask" not in current_state
+            ):
+                predictor_state_dict["diffuser.fix_mask"] = predictor.diffuser.fix_mask
 
             predictor.load_state_dict(predictor_state_dict)
