@@ -160,6 +160,6 @@ class R_MAPPOPolicy:
         actor_state_dict = torch.load(os.path.join(directory, 'actor.pt'), map_location=self.device)
         self.actor.load_state_dict(actor_state_dict)
 
-        if not self.args.use_render:
+        if not self.args.use_render and not self.args.use_eval:
             critic_state_dict = torch.load(os.path.join(directory, 'critic.pt'), map_location=self.device)
             self.critic.load_state_dict(critic_state_dict)
