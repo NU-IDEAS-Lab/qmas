@@ -24,6 +24,10 @@ def fit_ols_trendline(xs, ys):
     correlation coefficient (ranges -1 to +1).
     """
     xs, ys = np.array(xs, dtype=float), np.array(ys, dtype=float)
+    if xs.max() == xs.min() or ys.max() == ys.min():
+        x_smooth = np.linspace(xs.min(), xs.max(), 200)
+        y_smooth = np.full_like(x_smooth, ys.mean())
+        return x_smooth, y_smooth, float('nan')
     coeffs = np.polyfit(xs, ys, 1)
     x_smooth = np.linspace(xs.min(), xs.max(), 200)
     y_smooth = np.polyval(coeffs, x_smooth)
@@ -152,6 +156,9 @@ def plot(plots, timesteps=None):
                 xanchor='center',
                 x=0.5
             ),
+            font=dict(
+                weight="bold"
+            )
         )
         
         fig.show()
