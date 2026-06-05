@@ -17,6 +17,22 @@ def _hex_to_rgba(color, alpha=0.2):
     r, g, b = int(color[0:2], 16), int(color[2:4], 16), int(color[4:6], 16)
     return f'rgba({r},{g},{b},{alpha})'
 
+def fit_ols_trendline(xs, ys):
+    """
+    Fit an OLS linear trendline y = a*x + b.
+    Returns (x_smooth, y_smooth, r_corr) where r_corr is the signed Pearson
+    correlation coefficient (ranges -1 to +1).
+    """
+    xs, ys = np.array(xs, dtype=float), np.array(ys, dtype=float)
+    if xs.max() == xs.min() or ys.max() == ys.min():
+        x_smooth = np.linspace(xs.min(), xs.max(), 200)
+        y_smooth = np.full_like(x_smooth, ys.mean())
+        return x_smooth, y_smooth, float('nan')
+    coeffs = np.polyfit(xs, ys, 1)
+    x_smooth = np.linspace(xs.min(), xs.max(), 200)
+    y_smooth = np.polyval(coeffs, x_smooth)
+    r_corr = float(np.corrcoef(xs, ys)[0, 1])
+    return x_smooth, y_smooth, r_corr
 
 def plot(plots, timesteps=None):
     for plot in plots:
@@ -140,6 +156,9 @@ def plot(plots, timesteps=None):
                 xanchor='center',
                 x=0.5
             ),
+            font=dict(
+                weight="bold"
+            )
         )
         
         fig.show()

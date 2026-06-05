@@ -53,6 +53,13 @@ def add_args(parser):
     parser.add_argument("--graph_random_size_y", type=float,
                         default=500.0,
                         help="The y-axis size of the world for random graph generation.")
+    parser.add_argument("--graph_target_diameter", type=float, default=0.0,
+                        help="If > 0, after the graph is built all node positions and "
+                             "edge weights are uniformly scaled so the longest "
+                             "shortest-path distance (graph diameter) equals this value. "
+                             "Use this to stabilize results across random graph draws and "
+                             "across observation-radius sweeps, by giving observation_radius "
+                             "and agent_speed a consistent absolute meaning. 0 disables.")
     parser.add_argument("--reward_method_terminal", type=str,
                         default="average", 
                         help="the method to use for terminal reward.")
@@ -211,6 +218,7 @@ class parallel_env(ParallelEnv):
                  graph_random_size_x = 500.0,
                  graph_random_size_y = 500.0,
                  graph_file = os.path.join(os.path.dirname(patrolling_zoo.graphs.__file__), "cumberland.graph"),
+                 graph_target_diameter: float = 0.0,
                  comm_uq_threshold_temperature: float = 1.0,
                 ):
         """
@@ -260,10 +268,11 @@ class parallel_env(ParallelEnv):
         self.reward_comms_penalty_weight = reward_comms_penalty_weight
 
         # Create patrol graph.
+        self.graph_target_diameter = graph_target_diameter
         if graph_random:
-            self.pg = PatrolGraph(numNodes=graph_random_nodes, radius=graph_random_radius, sizeX=graph_random_size_x, sizeY=graph_random_size_y)
+            self.pg = PatrolGraph(numNodes=graph_random_nodes, radius=graph_random_radius, sizeX=graph_random_size_x, sizeY=graph_random_size_y, target_diameter=graph_target_diameter)
         else:
-            self.pg = PatrolGraph(graph_file)
+            self.pg = PatrolGraph(graph_file, target_diameter=graph_target_diameter)
 
         # Layout metadata for dense GNN observations; populated by _buildStateSpace when gnn_use_dense_obs=True.
         self._gnn_dense_layout = None
@@ -668,12 +677,17 @@ class parallel_env(ParallelEnv):
         nodeColors = [self._minMaxNormalize(idleness[i], a=0.0, b=100, minimum=0.0, maximum=self.step_count) for i in self.pg.graph.nodes]
 
         # Unflatten prediction once if available (reused for both vertex state and agent positions).
+        # Guard against shape mismatches that occur when the predictor was trained on dense GNN
+        # observations (e.g. gnn_use_dense_obs=True with disable_observation_global=True), whose
+        # flat dimension differs from the adjacency-format state_space used here for rendering.
         pred_unflattened = None
         if prediction_now is not None and isinstance(self.state_space, spaces.Dict):
             _pred_agent0 = prediction_now[0]
             if hasattr(_pred_agent0, 'numpy'):
                 _pred_agent0 = _pred_agent0.numpy()
-            pred_unflattened = spaces.unflatten(self.state_space, _pred_agent0.flatten())
+            _pred_flat = _pred_agent0.flatten()
+            if _pred_flat.size == spaces.flatdim(self.state_space):
+                pred_unflattened = spaces.unflatten(self.state_space, _pred_flat)
 
         # Extract predicted vertex idleness if available.
         pred_vertex_state = None
