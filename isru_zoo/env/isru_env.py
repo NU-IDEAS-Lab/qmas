@@ -225,6 +225,7 @@ class parallel_env(ParallelEnv):
             observation_mode_global: str = "coords",
             movement_mode: str = "moore",
             render_mode: str = "human",
+            gnn_use_dense_obs: bool = False,
         ):
         """
         Initialize the environment.
@@ -250,6 +251,8 @@ class parallel_env(ParallelEnv):
         self.communication_mode = communication_mode
         self.observation_mode_global = observation_mode_global
         self.movement_mode = movement_mode
+        self.gnn_use_dense_obs = gnn_use_dense_obs
+        self._gnn_dense_layout = None
 
         # Set up entities.
         self.possible_agents = \
@@ -2404,6 +2407,57 @@ class parallel_env_graph_obs(parallel_env_map_obs):
     def observation_space(self, agent):
         ''' Returns the observation space for the given agent. '''
 
+        if self.gnn_use_dense_obs:
+            node_feat_dim = int(max(self.NODE_TYPE)) + 1 + 4  # one-hot role + posX, posY, velX, velY
+            edge_feat_dim = 1  # distance
+            max_total_nodes = (
+                len(self.possible_agents)
+                + sum(r.quantity_max for r in self.possible_resources)
+                + len(self.possible_depots)
+            )
+            # Ego-star topology: exactly one edge per non-ego node.
+            max_edges = max_total_nodes - 1
+
+            self._gnn_dense_layout = dict(
+                max_total_nodes=max_total_nodes,
+                node_feat_dim=node_feat_dim,
+                edge_feat_dim=edge_feat_dim,
+                max_edges=max_edges,
+            )
+
+            return spaces.Dict({
+                "node_features": spaces.Box(
+                    low=-np.inf, high=np.inf,
+                    shape=(max_total_nodes, node_feat_dim),
+                    dtype=np.float32,
+                ),
+                "edge_index": spaces.Box(
+                    low=0.0, high=float(max_total_nodes - 1),
+                    shape=(2, max_edges),
+                    dtype=np.float32,
+                ),
+                "edge_attr": spaces.Box(
+                    low=-np.inf, high=np.inf,
+                    shape=(max_edges, edge_feat_dim),
+                    dtype=np.float32,
+                ),
+                "agent_idx": spaces.Box(
+                    low=0.0, high=float(max_total_nodes - 1),
+                    shape=(1,),
+                    dtype=np.float32,
+                ),
+                "num_nodes": spaces.Box(
+                    low=1.0, high=float(max_total_nodes),
+                    shape=(1,),
+                    dtype=np.float32,
+                ),
+                "num_edges": spaces.Box(
+                    low=0.0, high=float(max_edges),
+                    shape=(1,),
+                    dtype=np.float32,
+                ),
+            })
+
         obs_space = spaces.Dict({
             "role": spaces.Box(low=0, high=int(max(self.NODE_TYPE)), dtype=np.int32),
             "graph": spaces.Graph(
@@ -2427,21 +2481,123 @@ class parallel_env_graph_obs(parallel_env_map_obs):
         return obs_space
 
 
-    def observe(self, agent, senders=set()):
+    def observe(self, agent, senders=set(), _observation_radius=None, _global_state=False):
         ''' Fills in the state/observation space for the given agent. '''
+
+        obs_radius = agent.observation_radius if _observation_radius is None else _observation_radius
+
+        def relative_position(pos):
+            return pos.astype(np.float32) - agent.position.astype(np.float32)
+
+        def normalize(vec):
+            return vec / (np.linalg.norm(vec) + 1e-6)
+
+        if self.gnn_use_dense_obs:
+            layout = self._gnn_dense_layout
+            max_total_nodes = layout["max_total_nodes"]
+            node_feat_dim = layout["node_feat_dim"]
+            edge_feat_dim = layout["edge_feat_dim"]
+            max_edges = layout["max_edges"]
+
+            nf = np.zeros((max_total_nodes, node_feat_dim), dtype=np.float32)
+            nv = np.zeros_like(nf)
+            ei = np.zeros((2, max_edges), dtype=np.float32)
+            ea = np.zeros((max_edges, edge_feat_dim), dtype=np.float32)
+
+            node_count = 0
+            edge_count = 0
+
+            def _add_node(node_type, pos, vel):
+                nonlocal node_count
+                role_mask = np.zeros(int(max(self.NODE_TYPE) + 1), dtype=np.float32)
+                role_mask[node_type] = 1.0
+                nf[node_count] = np.concatenate([role_mask, pos, vel])
+                nv[node_count] = 1.0
+                idx = node_count
+                node_count += 1
+                return idx
+
+            def _add_edge(src, dst, dist):
+                nonlocal edge_count
+                ei[0, edge_count] = src
+                ei[1, edge_count] = dst
+                ea[edge_count, 0] = dist
+                edge_count += 1
+
+            # Ego node is always index 0.
+            node_ego = _add_node(
+                agent.role,
+                np.array([0.0, 0.0], dtype=np.float32),
+                normalize(agent.velocity),
+            )
+
+            # Other agents.
+            for other_agent in self.possible_agents:
+                if other_agent != agent:
+                    pos = relative_position(other_agent.position)
+                    dist = np.linalg.norm(pos)
+                    if dist <= obs_radius:
+                        node = _add_node(
+                            other_agent.role,
+                            normalize(pos),
+                            normalize(other_agent.velocity),
+                        )
+                        _add_edge(node, node_ego, dist)
+
+            # Nearby resources.
+            for r in self.possible_resources:
+                resource_positions = np.argwhere(self.map_resources[r] > 0).astype(np.float32)
+                for rpos in resource_positions:
+                    pos = relative_position(rpos)
+                    dist = np.linalg.norm(pos)
+                    if dist <= obs_radius:
+                        node = _add_node(
+                            self.NODE_TYPE.RESOURCE,
+                            normalize(pos),
+                            np.zeros(2, dtype=np.float32),
+                        )
+                        _add_edge(node, node_ego, dist)
+
+            # Depots (always included regardless of radius).
+            depot_positions = np.argwhere(self.map_depots > 0).astype(np.float32)
+            for pos in depot_positions:
+                pos_r = relative_position(pos)
+                dist = np.linalg.norm(pos_r)
+                node = _add_node(
+                    self.NODE_TYPE.DEPOT,
+                    normalize(pos_r),
+                    np.zeros(2, dtype=np.float32),
+                )
+                _add_edge(node, node_ego, dist)
+
+            assert node_count <= max_total_nodes, \
+                f"node_count={node_count} exceeds max_total_nodes={max_total_nodes}"
+            assert edge_count <= max_edges, \
+                f"edge_count={edge_count} exceeds max_edges={max_edges}"
+
+            obs = {
+                "node_features": nf,
+                "edge_index": ei,
+                "edge_attr": ea,
+                "agent_idx": np.array([0.0], dtype=np.float32),
+                "num_nodes": np.array([node_count], dtype=np.float32),
+                "num_edges": np.array([edge_count], dtype=np.float32),
+            }
+
+            obs_mask = {
+                "node_features": nv,
+                "edge_index": np.ones((2, max_edges), dtype=np.float32),
+                "edge_attr": np.ones((max_edges, edge_feat_dim), dtype=np.float32),
+                "agent_idx": np.ones((1,), dtype=np.float32),
+                "num_nodes": np.ones((1,), dtype=np.float32),
+                "num_edges": np.ones((1,), dtype=np.float32),
+            }
+
+            return obs, obs_mask
 
         node_features = []  # Node features
         edge_index = [[], []]  # Edge connections
         edge_features = []  # Edge features
-
-        def relative_position(pos):
-            return pos.astype(np.float32) - agent.position.astype(np.float32)
-        
-        def relative_velocity(vel):
-            return vel.astype(np.float32) - agent.velocity.astype(np.float32)
-
-        def normalize(vec):
-            return vec / (np.linalg.norm(vec) + 1e-6)
 
         def add_node(node_type, pos, vel):
             role_mask = np.zeros(int(max(self.NODE_TYPE) + 1), dtype=np.float32)
@@ -2472,9 +2628,8 @@ class parallel_env_graph_obs(parallel_env_map_obs):
             if other_agent != agent:
                 pos = relative_position(other_agent.position)
                 dist = np.linalg.norm(pos)
-                if dist <= agent.observation_radius:
+                if dist <= obs_radius:
                     pos = normalize(pos)
-                    # dist = np.linalg.norm(pos)
                     node = add_node(
                         other_agent.role,
                         pos,
@@ -2488,9 +2643,8 @@ class parallel_env_graph_obs(parallel_env_map_obs):
             for pos in resource_positions:
                 pos = relative_position(pos)
                 dist = np.linalg.norm(pos)
-                if dist <= agent.observation_radius:
+                if dist <= obs_radius:
                     pos = normalize(pos)
-                    # dist = np.linalg.norm(pos)
                     node = add_node(
                         self.NODE_TYPE.RESOURCE,
                         pos,
@@ -2510,7 +2664,7 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                 np.array([0.0, 0.0], dtype=np.float32)
             )
             add_edge(node, node_ego, dist)
-    
+
         # Convert to tensors.
         node_features = torch.tensor(node_features, dtype=torch.float32)
         edge_index = torch.tensor(edge_index, dtype=torch.long)
@@ -2534,7 +2688,7 @@ class parallel_env_graph_obs(parallel_env_map_obs):
 
         # Set up the fixed mask.
         fixed_mask = np.array([True, True], dtype=bool)  # role and graph are always visible
-        
+
         return obs, fixed_mask
 
 
@@ -2543,6 +2697,10 @@ class parallel_env_graph_obs(parallel_env_map_obs):
     @functools.cache
     def state_space(self):
         ''' Returns the global state space. '''
+
+        if self.gnn_use_dense_obs:
+            # Global state has the same shape as the per-agent dense obs.
+            return self.observation_space(self.possible_agents[0])
 
         if self.observation_mode_global == "map":
             return parallel_env_map_obs.observation_space(self, self.possible_agents[0])
@@ -2554,10 +2712,19 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                 shape=(int(np.prod(obs_space.shape)),),
                 dtype=np.float32,
             )
-       
+
 
     def _state(self):
         ''' Returns the global state and mask of the environment.'''
+
+        if self.gnn_use_dense_obs:
+            # Build a full-visibility dense graph obs from the first agent's perspective
+            # (radius=inf so all entities are included).
+            return self.observe(
+                self.possible_agents[0],
+                _observation_radius=np.inf,
+                _global_state=True,
+            )
 
         if self.observation_mode_global == "map":
             return parallel_env_map_obs._observe(self, self.possible_agents[0], global_state=True)
@@ -2568,6 +2735,10 @@ class parallel_env_graph_obs(parallel_env_map_obs):
 
     def get_observation_and_comms_situated(self, agent, senders=set()):
         ''' Returns a globally situated observation for the given agent. '''
+
+        if self.gnn_use_dense_obs:
+            # Return the dense obs in full-visibility mode so its shape matches state_space.
+            return self.observe(agent, _observation_radius=np.inf)
 
         if self.observation_mode_global == "map":
             return parallel_env_map_obs.observe(self, agent, senders=senders)
