@@ -43,6 +43,9 @@ def add_args(parser):
                         help="The radius within which agents can observe each other and resources.")
     parser.add_argument("--available_actions_mask", action="store_true",
                         help="Whether to return an available actions mask for each agent.")
+    if not any("--gnn_use_dense_obs" in action.option_strings for action in parser._actions):
+        parser.add_argument("--gnn_use_dense_obs", action=argparse.BooleanOptionalAction, default=False,
+                            help="Whether graph observations should use fixed-shape dense tensors instead of PyG Data objects.")
     parser.add_argument("--hauler_capacity", type=float, default=10.0,
                         help="The maximum amount of resources a hauler can carry.")
     parser.add_argument("--hauler_pickup_threshold", type=float, default=1.5,
@@ -75,6 +78,13 @@ def validate_args(parsed_args):
         parsed_args.num_haulers + \
         parsed_args.num_prospectors + \
         parsed_args.num_superbots
+
+    if getattr(parsed_args, "gnn_use_dense_obs", False) and getattr(parsed_args, "gnn_neighbor_scoring", False):
+        raise ValueError(
+            "ISRU dense graph observations keep neighbors_mask only as decoder-compatible "
+            "padding; ISRU actions are movement controls, not graph-neighbor actions. "
+            "Remove --gnn_neighbor_scoring for this environment."
+        )
 
 
 def flatten_coord_state(obs, mask):
@@ -218,6 +228,7 @@ class parallel_env(ParallelEnv):
             world_no_reset: bool = False,
             observation_radius: int = 10,
             available_actions_mask: bool = False,
+            gnn_use_dense_obs: bool = False,
             hauler_capacity: float = 10.0,
             hauler_pickup_threshold: float = 1.5,
             noisy_memory: bool = False,
@@ -243,6 +254,8 @@ class parallel_env(ParallelEnv):
         self.render_mode = render_mode
         self.mask_observations = False
         self.mask_available_actions = available_actions_mask
+        self.gnn_use_dense_obs = gnn_use_dense_obs
+        self._gnn_dense_layout = None
         self.default_observation_radius = observation_radius
         self.default_hauler_capacity = hauler_capacity
         self.hauler_pickup_threshold = hauler_pickup_threshold
@@ -2400,9 +2413,247 @@ class parallel_env_graph_obs(parallel_env_map_obs):
         DEPOT = auto()
 
 
+    def _ensure_gnn_dense_layout(self):
+        """Build and cache fixed dense-graph layout metadata."""
+
+        if self._gnn_dense_layout is None:
+            max_total_nodes = (
+                len(self.possible_agents)
+                + sum(r.quantity_max for r in self.possible_resources)
+                + len(self.possible_depots)
+            )
+            node_feat_dim = int(max(self.NODE_TYPE)) + 1 + 4
+            edge_feat_dim = 1
+            max_edges = max_total_nodes - 1
+
+            self._gnn_dense_layout = dict(
+                max_total_nodes=max_total_nodes,
+                node_feat_dim=node_feat_dim,
+                edge_feat_dim=edge_feat_dim,
+                max_edges=max_edges,
+                node_type_idx=0,
+                # ISRU movement actions are not graph-neighbor actions. Keep a
+                # one-slot dummy neighbors_mask so shared dense-GNN decoders see
+                # the same key layout as patrolling_zoo.
+                action_neighbors_max_degree=1,
+            )
+
+        return self._gnn_dense_layout
+
+
+    def _gnn_dense_observation_space(self):
+        """Return the fixed-shape dense graph observation space."""
+
+        layout = self._ensure_gnn_dense_layout()
+        max_total_nodes = layout["max_total_nodes"]
+        node_feat_dim = layout["node_feat_dim"]
+        max_edges = layout["max_edges"]
+        edge_feat_dim = layout["edge_feat_dim"]
+        n_actions = layout["action_neighbors_max_degree"]
+
+        return spaces.Dict({
+            "node_features": spaces.Box(
+                low=-np.inf,
+                high=np.inf,
+                shape=(max_total_nodes, node_feat_dim),
+                dtype=np.float32,
+            ),
+            "edge_index": spaces.Box(
+                low=0.0,
+                high=max_total_nodes - 1,
+                shape=(2, max_edges),
+                dtype=np.float32,
+            ),
+            "edge_attr": spaces.Box(
+                low=-np.inf,
+                high=np.inf,
+                shape=(max_edges, edge_feat_dim),
+                dtype=np.float32,
+            ),
+            "agent_idx": spaces.Box(
+                low=0.0,
+                high=max_total_nodes - 1,
+                shape=(1,),
+                dtype=np.float32,
+            ),
+            "neighbors_mask": spaces.Box(
+                low=-1.0,
+                high=float(max_total_nodes - 1),
+                shape=(n_actions,),
+                dtype=np.float32,
+            ),
+            "num_nodes": spaces.Box(
+                low=1.0,
+                high=max_total_nodes,
+                shape=(1,),
+                dtype=np.float32,
+            ),
+            "num_edges": spaces.Box(
+                low=0.0,
+                high=max_edges,
+                shape=(1,),
+                dtype=np.float32,
+            ),
+        })
+
+
+    def _position_visible_to_graph_observer(self, position, agent, senders=set()):
+        """Return whether a world position is visible to the graph observer."""
+
+        observers = (agent, *senders)
+        position = np.asarray(position, dtype=np.float32)
+        return any(
+            np.linalg.norm(observer.position.astype(np.float32) - position) <= observer.observation_radius
+            for observer in observers
+        )
+
+
+    def _iter_graph_resource_positions(self, resource):
+        """Yield resource locations in a deterministic row-major order."""
+
+        positions = np.argwhere(self.map_resources[resource] > 0).astype(np.float32)
+        if positions.shape[0] > 0:
+            sort_idx = np.lexsort((positions[:, 1], positions[:, 0]))
+            positions = positions[sort_idx]
+        for pos in positions:
+            yield pos
+
+
+    def _build_dense_graph_observation(self, agent, senders=set(), include_all_nodes=False, full_visibility=False):
+        """Build a padded dense graph observation for a given ego agent."""
+
+        layout = self._ensure_gnn_dense_layout()
+        max_total_nodes = layout["max_total_nodes"]
+        node_feat_dim = layout["node_feat_dim"]
+        edge_feat_dim = layout["edge_feat_dim"]
+        max_edges = layout["max_edges"]
+
+        node_features = np.zeros((max_total_nodes, node_feat_dim), dtype=np.float32)
+        edge_index = np.zeros((2, max_edges), dtype=np.float32)
+        edge_attr = np.zeros((max_edges, edge_feat_dim), dtype=np.float32)
+        node_vis = np.zeros_like(node_features, dtype=np.float32)
+
+        node_count = 0
+        edge_count = 0
+
+        def relative_position(pos):
+            return np.asarray(pos, dtype=np.float32) - agent.position.astype(np.float32)
+
+        def normalize(vec):
+            return vec / (np.linalg.norm(vec) + 1e-6)
+
+        def add_node(node_type, pos, vel, visible=True):
+            nonlocal node_count
+            if node_count >= max_total_nodes:
+                raise AssertionError(
+                    f"Dense graph has more nodes than max_total_nodes={max_total_nodes}."
+                )
+            role_mask = np.zeros(int(max(self.NODE_TYPE)) + 1, dtype=np.float32)
+            role_mask[int(node_type)] = 1.0
+            node_features[node_count] = np.array([
+                *role_mask,
+                float(pos[0]),
+                float(pos[1]),
+                float(vel[0]),
+                float(vel[1]),
+            ], dtype=np.float32)
+            node_vis[node_count, :] = 1.0 if visible else 0.0
+            node_count += 1
+            return node_count - 1
+
+        def add_edge(node_from, node_to, distance):
+            nonlocal edge_count
+            if edge_count >= max_edges:
+                raise AssertionError(
+                    f"Dense graph has more edges than max_edges={max_edges}."
+                )
+            edge_index[0, edge_count] = float(node_from)
+            edge_index[1, edge_count] = float(node_to)
+            edge_attr[edge_count, 0] = float(distance)
+            edge_count += 1
+
+        node_ego = add_node(
+            agent.role,
+            np.array([0.0, 0.0], dtype=np.float32),
+            normalize(agent.velocity),
+            visible=True,
+        )
+
+        for other_agent in self.possible_agents:
+            if other_agent == agent:
+                continue
+            visible = self._position_visible_to_graph_observer(other_agent.position, agent, senders)
+            if include_all_nodes or visible:
+                rel_pos = relative_position(other_agent.position)
+                dist = np.linalg.norm(rel_pos)
+                node = add_node(
+                    other_agent.role,
+                    normalize(rel_pos),
+                    normalize(other_agent.velocity),
+                    visible=(full_visibility or visible),
+                )
+                add_edge(node, node_ego, dist)
+
+        for resource in self.possible_resources:
+            for pos_abs in self._iter_graph_resource_positions(resource):
+                visible = self._position_visible_to_graph_observer(pos_abs, agent, senders)
+                if include_all_nodes or visible:
+                    rel_pos = relative_position(pos_abs)
+                    dist = np.linalg.norm(rel_pos)
+                    node = add_node(
+                        self.NODE_TYPE.RESOURCE,
+                        normalize(rel_pos),
+                        np.array([0.0, 0.0], dtype=np.float32),
+                        visible=(full_visibility or visible),
+                    )
+                    add_edge(node, node_ego, dist)
+
+        for depot in self.possible_depots:
+            rel_pos = relative_position(depot.position)
+            dist = np.linalg.norm(rel_pos)
+            node = add_node(
+                self.NODE_TYPE.DEPOT,
+                normalize(rel_pos),
+                np.array([0.0, 0.0], dtype=np.float32),
+                visible=True,
+            )
+            add_edge(node, node_ego, dist)
+
+        node_vis[node_count:, :] = 1.0
+
+        obs = {
+            "node_features": node_features,
+            "edge_index": edge_index,
+            "edge_attr": edge_attr,
+            "agent_idx": np.array([0.0], dtype=np.float32),
+            "neighbors_mask": np.full(
+                (layout["action_neighbors_max_degree"],),
+                -1.0,
+                dtype=np.float32,
+            ),
+            "num_nodes": np.array([float(node_count)], dtype=np.float32),
+            "num_edges": np.array([float(edge_count)], dtype=np.float32),
+        }
+
+        fixed_mask = {
+            "node_features": node_vis,
+            "edge_index": np.ones((2, max_edges), dtype=np.float32),
+            "edge_attr": np.ones((max_edges, edge_feat_dim), dtype=np.float32),
+            "agent_idx": np.ones((1,), dtype=np.float32),
+            "neighbors_mask": np.ones((layout["action_neighbors_max_degree"],), dtype=np.float32),
+            "num_nodes": np.ones((1,), dtype=np.float32),
+            "num_edges": np.ones((1,), dtype=np.float32),
+        }
+
+        return obs, fixed_mask
+
+
     @functools.cache
     def observation_space(self, agent):
         ''' Returns the observation space for the given agent. '''
+
+        if self.gnn_use_dense_obs:
+            return self._gnn_dense_observation_space()
 
         obs_space = spaces.Dict({
             "role": spaces.Box(low=0, high=int(max(self.NODE_TYPE)), dtype=np.int32),
@@ -2429,6 +2680,9 @@ class parallel_env_graph_obs(parallel_env_map_obs):
 
     def observe(self, agent, senders=set()):
         ''' Fills in the state/observation space for the given agent. '''
+
+        if self.gnn_use_dense_obs:
+            return self._build_dense_graph_observation(agent, senders=senders)
 
         node_features = []  # Node features
         edge_index = [[], []]  # Edge connections
@@ -2544,6 +2798,8 @@ class parallel_env_graph_obs(parallel_env_map_obs):
     def state_space(self):
         ''' Returns the global state space. '''
 
+        if self.gnn_use_dense_obs:
+            return self._gnn_dense_observation_space()
         if self.observation_mode_global == "map":
             return parallel_env_map_obs.observation_space(self, self.possible_agents[0])
         if self.observation_mode_global == "coords":
@@ -2559,6 +2815,12 @@ class parallel_env_graph_obs(parallel_env_map_obs):
     def _state(self):
         ''' Returns the global state and mask of the environment.'''
 
+        if self.gnn_use_dense_obs:
+            return self._build_dense_graph_observation(
+                self.possible_agents[0],
+                include_all_nodes=True,
+                full_visibility=True,
+            )
         if self.observation_mode_global == "map":
             return parallel_env_map_obs._observe(self, self.possible_agents[0], global_state=True)
         if self.observation_mode_global == "coords":
@@ -2569,6 +2831,13 @@ class parallel_env_graph_obs(parallel_env_map_obs):
     def get_observation_and_comms_situated(self, agent, senders=set()):
         ''' Returns a globally situated observation for the given agent. '''
 
+        if self.gnn_use_dense_obs:
+            return self._build_dense_graph_observation(
+                agent,
+                senders=senders,
+                include_all_nodes=True,
+                full_visibility=False,
+            )
         if self.observation_mode_global == "map":
             return parallel_env_map_obs.observe(self, agent, senders=senders)
         if self.observation_mode_global == "coords":
