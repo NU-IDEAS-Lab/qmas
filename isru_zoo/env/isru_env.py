@@ -2499,23 +2499,19 @@ class parallel_env_graph_obs(parallel_env_map_obs):
             edge_feat_dim = layout["edge_feat_dim"]
             max_edges = layout["max_edges"]
 
+            # Static-slot layout: ALL entities occupy fixed positions regardless of
+            # visibility.  nv[slot] = 1.0 iff the entity is visible per map-obs rules.
             nf = np.zeros((max_total_nodes, node_feat_dim), dtype=np.float32)
-            nv = np.zeros_like(nf)
+            nv = np.zeros((max_total_nodes, node_feat_dim), dtype=np.float32)
             ei = np.zeros((2, max_edges), dtype=np.float32)
             ea = np.zeros((max_edges, edge_feat_dim), dtype=np.float32)
-
-            node_count = 0
             edge_count = 0
 
-            def _add_node(node_type, pos, vel):
-                nonlocal node_count
-                role_mask = np.zeros(int(max(self.NODE_TYPE) + 1), dtype=np.float32)
-                role_mask[node_type] = 1.0
-                nf[node_count] = np.concatenate([role_mask, pos, vel])
-                nv[node_count] = 1.0
-                idx = node_count
-                node_count += 1
-                return idx
+            def _write_node(slot, node_type, pos, vel):
+                """Populate node features for the given slot (does NOT touch nv)."""
+                role = np.zeros(int(max(self.NODE_TYPE) + 1), dtype=np.float32)
+                role[node_type] = 1.0
+                nf[slot] = np.concatenate([role, pos, vel])
 
             def _add_edge(src, dst, dist):
                 nonlocal edge_count
@@ -2524,54 +2520,84 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                 ea[edge_count, 0] = dist
                 edge_count += 1
 
-            # Ego node is always index 0.
-            node_ego = _add_node(
-                agent.role,
-                np.array([0.0, 0.0], dtype=np.float32),
-                normalize(agent.velocity),
-            )
+            # --- Compute grid-level circular visibility area (matches map obs) ---
+            if obs_radius == np.inf or _global_state:
+                visible_area = np.ones(self.world_dims, dtype=bool)
+            else:
+                visible_area = self._get_observation_radius_mask(
+                    agent.grid_position, obs_radius
+                )
 
-            # Other agents.
+            # Update agent memory exactly as parallel_env_map_obs._observe does,
+            # but only for real per-agent calls (not global-state queries).
+            if not _global_state:
+                agent.mask_observed |= visible_area
+                if agent.capabilities[CAP.PROSPECT]:
+                    agent.mask_resources_observed |= visible_area
+
+            # --- Slot 0: ego (always visible) ---
+            _write_node(0, agent.role, np.array([0.0, 0.0]), normalize(agent.velocity))
+            nv[0] = 1.0
+
+            # --- Slots 1..N_agents-1: other agents ---
+            # Features are always written with actual state (mirrors patrolling-zoo).
+            # nv reflects whether the agent is within the observation radius.
+            slot = 1
             for other_agent in self.possible_agents:
-                if other_agent != agent:
-                    pos = relative_position(other_agent.position)
-                    dist = np.linalg.norm(pos)
-                    if dist <= obs_radius:
-                        node = _add_node(
-                            other_agent.role,
-                            normalize(pos),
-                            normalize(other_agent.velocity),
-                        )
-                        _add_edge(node, node_ego, dist)
+                if other_agent == agent:
+                    continue
+                pos = relative_position(other_agent.position)
+                dist = np.linalg.norm(pos)
+                _write_node(slot, other_agent.role, normalize(pos),
+                            normalize(other_agent.velocity))
+                if dist <= obs_radius:
+                    nv[slot] = 1.0
+                    _add_edge(slot, 0, dist)
+                slot += 1
 
-            # Nearby resources.
+            # --- Resource slots (quantity_max slots per resource type) ---
+            # Features are written for every existing resource, visible or not.
+            # nv mirrors the map-obs prospector rule.
             for r in self.possible_resources:
                 resource_positions = np.argwhere(self.map_resources[r] > 0).astype(np.float32)
-                for rpos in resource_positions:
-                    pos = relative_position(rpos)
-                    dist = np.linalg.norm(pos)
-                    if dist <= obs_radius:
-                        node = _add_node(
-                            self.NODE_TYPE.RESOURCE,
-                            normalize(pos),
-                            np.zeros(2, dtype=np.float32),
-                        )
-                        _add_edge(node, node_ego, dist)
 
-            # Depots (always included regardless of radius).
+                for i in range(r.quantity_max):
+                    if i < resource_positions.shape[0]:
+                        rpos = resource_positions[i]
+                        rpos_int = rpos.astype(np.int32)
+                        pos = relative_position(rpos)
+                        dist = np.linalg.norm(pos)
+                        # Always write features with actual state.
+                        _write_node(slot, self.NODE_TYPE.RESOURCE,
+                                    normalize(pos), np.zeros(2, dtype=np.float32))
+                        # nv: mirror map-obs prospector rule.
+                        # Global-state queries are omniscient (bypass prospector rule).
+                        in_visible = visible_area[rpos_int[0], rpos_int[1]]
+                        if _global_state or agent.capabilities[CAP.PROSPECT]:
+                            resource_visible = in_visible
+                        else:
+                            resource_visible = (
+                                in_visible
+                                and agent.mask_resources_observed[rpos_int[0], rpos_int[1]]
+                            )
+                        if resource_visible:
+                            nv[slot] = 1.0
+                            _add_edge(slot, 0, dist)
+                    slot += 1
+
+            # --- Depot slots (always visible, no radius check) ---
             depot_positions = np.argwhere(self.map_depots > 0).astype(np.float32)
-            for pos in depot_positions:
-                pos_r = relative_position(pos)
+            for dpos in depot_positions:
+                pos_r = relative_position(dpos)
                 dist = np.linalg.norm(pos_r)
-                node = _add_node(
-                    self.NODE_TYPE.DEPOT,
-                    normalize(pos_r),
-                    np.zeros(2, dtype=np.float32),
-                )
-                _add_edge(node, node_ego, dist)
+                _write_node(slot, self.NODE_TYPE.DEPOT,
+                            normalize(pos_r), np.zeros(2, dtype=np.float32))
+                nv[slot] = 1.0
+                _add_edge(slot, 0, dist)
+                slot += 1
 
-            assert node_count <= max_total_nodes, \
-                f"node_count={node_count} exceeds max_total_nodes={max_total_nodes}"
+            assert slot == max_total_nodes, \
+                f"slot={slot} != max_total_nodes={max_total_nodes}"
             assert edge_count <= max_edges, \
                 f"edge_count={edge_count} exceeds max_edges={max_edges}"
 
@@ -2580,8 +2606,9 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                 "edge_index": ei,
                 "edge_attr": ea,
                 "agent_idx": np.array([0.0], dtype=np.float32),
-                "num_nodes": np.array([node_count], dtype=np.float32),
-                "num_edges": np.array([edge_count], dtype=np.float32),
+                # All max_total_nodes slots are present (padding stripped by visibility mask).
+                "num_nodes": np.array([float(max_total_nodes)], dtype=np.float32),
+                "num_edges": np.array([float(edge_count)], dtype=np.float32),
             }
 
             obs_mask = {
@@ -2737,8 +2764,8 @@ class parallel_env_graph_obs(parallel_env_map_obs):
         ''' Returns a globally situated observation for the given agent. '''
 
         if self.gnn_use_dense_obs:
-            # Return the dense obs in full-visibility mode so its shape matches state_space.
-            return self.observe(agent, _observation_radius=np.inf)
+            # Full-visibility dense obs; _global_state=True skips memory side-effects.
+            return self.observe(agent, _observation_radius=np.inf, _global_state=True)
 
         if self.observation_mode_global == "map":
             return parallel_env_map_obs.observe(self, agent, senders=senders)
