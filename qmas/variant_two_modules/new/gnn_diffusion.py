@@ -161,6 +161,9 @@ class GnnDiffusion1d(BaseNNDiffusion):
                 norm_first=True,
             )
             self.temporal_mixer = nn.TransformerEncoder(tlayer, num_layers=temporal_depth)
+            # Disable the nested-tensor fast path: it calls Flash Attention
+            # directly in C++, bypassing any sdpa_kernel context manager.
+            self.temporal_mixer.enable_nested_tensor = False
         else:
             self.temporal_pos = None
             self.temporal_mixer = None
@@ -298,7 +301,7 @@ class GnnDiffusion1d(BaseNNDiffusion):
             # Flash Attention raises cudaErrorInvalidConfiguration when two CUDA
             # devices are active simultaneously (e.g. cuda_idx != cuda_idx_predictor).
             # Disable it and use math/efficient attention for this small sequence.
-            with sdpa_kernel([SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH]):
+            with sdpa_kernel([SDPBackend.MATH]):
                 tmp = self.temporal_mixer(tmp, src_key_padding_mask=kpm)
             hidden = tmp.reshape(B, N, T, d_model).permute(0, 2, 1, 3).contiguous()
             # Re-zero padded slots so they do not contaminate the output.
