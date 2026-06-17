@@ -2534,6 +2534,9 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                 agent.mask_observed |= visible_area
                 if agent.capabilities[CAP.PROSPECT]:
                     agent.mask_resources_observed |= visible_area
+                for sender in senders:
+                    agent.mask_observed |= sender.mask_observed
+                    agent.mask_resources_observed |= sender.mask_resources_observed
 
             # --- Slot 0: ego (always visible) ---
             _write_node(0, agent.role, np.array([0.0, 0.0]), normalize(agent.velocity))
