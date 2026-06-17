@@ -19,7 +19,6 @@ from typing import Dict, Optional, Tuple
 
 import torch
 import torch.nn as nn
-from torch.nn.attention import SDPBackend, sdpa_kernel
 
 # Make the vendored SparseDiff package importable. The submodule lives at
 # ``third_party/SparseDiff/sparse_diffusion`` from the repo root.
@@ -298,11 +297,7 @@ class GnnDiffusion1d(BaseNNDiffusion):
             # in attention softmax; force at least one valid position.
             all_pad = kpm.all(dim=1, keepdim=True)
             kpm = kpm & ~all_pad
-            # Flash Attention raises cudaErrorInvalidConfiguration when two CUDA
-            # devices are active simultaneously (e.g. cuda_idx != cuda_idx_predictor).
-            # Disable it and use math/efficient attention for this small sequence.
-            with sdpa_kernel([SDPBackend.MATH]):
-                tmp = self.temporal_mixer(tmp, src_key_padding_mask=kpm)
+            tmp = self.temporal_mixer(tmp, src_key_padding_mask=kpm)
             hidden = tmp.reshape(B, N, T, d_model).permute(0, 2, 1, 3).contiguous()
             # Re-zero padded slots so they do not contaminate the output.
             hidden = hidden * node_mask.unsqueeze(-1).to(hidden.dtype)
