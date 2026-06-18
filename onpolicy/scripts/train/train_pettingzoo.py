@@ -235,6 +235,8 @@ def main(args):
     torch.set_float32_matmul_precision('high')
     torch._dynamo.config.compiled_autograd = True
     torch.backends.cudnn.benchmark = True
+    # This disables the fast path for nn.TransformerEncoder and nn.functional.MultiheadAttention, which crash on ideas2.
+    torch.backends.mha.set_fastpath_enabled(False)
 
     # cuda
     if all_args.cuda and torch.cuda.is_available():

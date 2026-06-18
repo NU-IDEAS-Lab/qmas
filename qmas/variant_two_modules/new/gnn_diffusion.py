@@ -19,6 +19,7 @@ from typing import Dict, Optional, Tuple
 
 import torch
 import torch.nn as nn
+from torch.nn.attention import SDPBackend, sdpa_kernel
 
 # Make the vendored SparseDiff package importable. The submodule lives at
 # ``third_party/SparseDiff/sparse_diffusion`` from the repo root.
@@ -159,7 +160,10 @@ class GnnDiffusion1d(BaseNNDiffusion):
                 batch_first=True,
                 norm_first=True,
             )
-            self.temporal_mixer = nn.TransformerEncoder(tlayer, num_layers=temporal_depth)
+            self.temporal_mixer = nn.TransformerEncoder(tlayer, num_layers=temporal_depth, enable_nested_tensor=False)
+            # Disable the nested-tensor fast path: it calls Flash Attention
+            # directly in C++, bypassing any sdpa_kernel context manager.
+            self.temporal_mixer.enable_nested_tensor = False
         else:
             self.temporal_pos = None
             self.temporal_mixer = None
@@ -294,7 +298,12 @@ class GnnDiffusion1d(BaseNNDiffusion):
             # in attention softmax; force at least one valid position.
             all_pad = kpm.all(dim=1, keepdim=True)
             kpm = kpm & ~all_pad
-            tmp = self.temporal_mixer(tmp, src_key_padding_mask=kpm)
+            # Force the math SDPA backend: head_dim=8 is unsupported by
+            # Flash Attention 3 on H100. set_fastpath_enabled(False) disables
+            # the TransformerEncoder sparsity fast path so this context
+            # manager takes effect; without it the sparsity path bypasses it.
+            with sdpa_kernel([SDPBackend.MATH]):
+                tmp = self.temporal_mixer(tmp, src_key_padding_mask=kpm)
             hidden = tmp.reshape(B, N, T, d_model).permute(0, 2, 1, 3).contiguous()
             # Re-zero padded slots so they do not contaminate the output.
             hidden = hidden * node_mask.unsqueeze(-1).to(hidden.dtype)
