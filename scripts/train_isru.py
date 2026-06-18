@@ -32,8 +32,6 @@ args = [
     "--communication_mode", "full",
     "--movement_mode", "velocity",
 
-    # "--share_reward",
-
     "--num_env_steps", "15000000",
     "--episode_length", "200",
     "--max_cycles", "200",
@@ -53,7 +51,7 @@ args = [
 
 	"--use_gnn_policy",
     # "--use_gnn_mlp_policy",
-    "--gnn_dropout_rate", "0.5",
+    # "--gnn_dropout_rate", "0.5",
 
     "--diffusion_model_type", "gnn",
     "--diffusion_sample_steps", "5",
@@ -71,9 +69,9 @@ args = [
     "--disable_observation_global",
     "--gnn_use_dense_obs",
 
-    # "--seed", "2",
+    "--seed", "0",
 
-    "--n_rollout_threads", "75",
+    "--n_rollout_threads", "300",
     "--threaded_training",
     "--n_training_threads", "16",
     "--cuda",
