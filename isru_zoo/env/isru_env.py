@@ -1025,7 +1025,7 @@ class parallel_env(ParallelEnv):
         REWARD_NO_EXPLORATION = -1.0
         REWARD_COMMUNICATION = -5.0
         REWARD_NO_COMMUNICATION = 5.0
-        REWARD_EXTRACTOR_ON_RESOURCE = 20.0
+        REWARD_EXTRACTOR_ON_RESOURCE = 1.0
         REWARD_DEPOSIT = 0.0
         REWARD_EXTRACT = 100000.0
         REWARD_CLOSEST_RESOURCE = 0.2
@@ -1053,12 +1053,17 @@ class parallel_env(ParallelEnv):
         stack_value = {a: True for a in self.possible_agents}
 
         # Pre-movement calculations.
+        deposited_prev = sum(depot.stock for depot in self.possible_depots)
+        cargo_prev = {}
+        visible_resource_cells_prev = {}
         uncertainty_sum_prev = {}
         visible_cells_prev = {}
         nearest_resource_dist_prev = {}
         for agent in self.agents:
             # Visible cells.
             visible_cells_prev[agent] = self._get_visible_cell_count(agent)
+            cargo_prev[agent] = sum(agent.cargo.values())
+            visible_resource_cells_prev[agent] = self._get_visible_cell_count(agent, use_resource_mask=True)
 
             # Uncertainty sum.
             uncertainty_sum_prev[agent] = agent.uncertainty.sum()
@@ -1191,7 +1196,7 @@ class parallel_env(ParallelEnv):
                             if self.map_resources[r][px, py] > 0:
                                 # Extractor is sitting on a resource tile.
                                 info_dict["extractors/num_in_place"] += 1
-                                # reward_dict[agent] += REWARD_EXTRACTOR_ON_RESOURCE / agent.steps_stationary #TODO: this gets smaller the longer the agent sits
+                                reward_dict[agent] += REWARD_EXTRACTOR_ON_RESOURCE
 
         # Calculate the percentage of resources deposited.
         total_resources = sum(r.quantity for r in self.possible_resources)
@@ -1259,16 +1264,16 @@ class parallel_env(ParallelEnv):
                 # reward_dict[agent] += REWARD_NO_EXPLORATION
                 # stack_value[agent] = False
             
-            # Provide intrinsic reward.
+            # Provide intrinsic reward (delta-based: reward the change this step caused).
             total_cells = np.prod(self.world_dims)
             visible_resource_cells = self._get_visible_cell_count(agent, use_resource_mask=True)
-            resources_held = sum(sum(agent.cargo.values()) for agent in self.agents)
+            resources_held_agent = sum(agent.cargo.values())
             resources_deposited = sum(depot.stock for depot in self.possible_depots)
-            r_exploration = visible_resource_cells / total_cells
-            r_cargo = resources_held / total_resources
-            r_deposited = resources_deposited / total_resources
+            r_exploration = (visible_resource_cells - visible_resource_cells_prev.get(agent, 0)) / total_cells
+            r_cargo = max(0.0, resources_held_agent - cargo_prev.get(agent, 0.0)) / total_resources
+            r_deposited = (resources_deposited - deposited_prev) / total_resources
 
-            r_intrinsic = 100.0 * r_deposited + 1.0 * r_cargo + 1.0 * r_exploration
+            r_intrinsic = 100.0 * r_deposited + 10.0 * r_cargo + 1.0 * r_exploration
             reward_dict[agent] += r_intrinsic
 
             # Provide uncertainty reduction reward.
