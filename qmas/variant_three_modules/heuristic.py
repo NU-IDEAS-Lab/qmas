@@ -42,7 +42,10 @@ def _get_movement_action_heuristic_pemo(observation):
 
         # Determine role based on agent layers.
         stacked = False
-        if observation[pemo.MAP_LAYERS.AGENTS_EXTRACTOR, agent_pos[0], agent_pos[1]] >= 2.0:
+        if observation[pemo.MAP_LAYERS.AGENTS_PROSPECTOR_EXTRACTOR, agent_pos[0], agent_pos[1]] >= 2.0:
+            capabilities = {CAP.EXTRACT: True, CAP.CARRY: False, CAP.PROSPECT: True}
+            stacked = observation[pemo.MAP_LAYERS.AGENTS_PROSPECTOR_EXTRACTOR, agent_pos[0], agent_pos[1]] > 2.0
+        elif observation[pemo.MAP_LAYERS.AGENTS_EXTRACTOR, agent_pos[0], agent_pos[1]] >= 2.0:
             capabilities = {CAP.EXTRACT: True, CAP.CARRY: False, CAP.PROSPECT: False}
             stacked = observation[pemo.MAP_LAYERS.AGENTS_EXTRACTOR, agent_pos[0], agent_pos[1]] > 2.0
         elif observation[pemo.MAP_LAYERS.AGENTS_HAULER, agent_pos[0], agent_pos[1]] >= 2.0:
@@ -61,7 +64,7 @@ def _get_movement_action_heuristic_pemo(observation):
 
         # Only consider resources that are not occupied by extractors.
         resources = observation[pemo.MAP_LAYERS.RESOURCES_EXTANT]
-        extractors = observation[pemo.MAP_LAYERS.AGENTS_EXTRACTOR]
+        extractors = observation[pemo.MAP_LAYERS.AGENTS_EXTRACTOR] + observation[pemo.MAP_LAYERS.AGENTS_PROSPECTOR_EXTRACTOR]
 
         # Don't mask the agent's own position, since it might be on a resource.
         rel_pos_x = observation[pemo.MAP_LAYERS.RELATIVE_POS_X]
@@ -93,7 +96,7 @@ def _get_movement_action_heuristic_pemo(observation):
 
     def obs_nearest_extractor_on_resource(pos):
         ''' Returns the direction to the nearest extractor that is on a resource in the observation. '''
-        layer_extractors = observation[pemo.MAP_LAYERS.AGENTS_EXTRACTOR]
+        layer_extractors = observation[pemo.MAP_LAYERS.AGENTS_EXTRACTOR] + observation[pemo.MAP_LAYERS.AGENTS_PROSPECTOR_EXTRACTOR]
         layer_resources = observation[pemo.MAP_LAYERS.RESOURCES_EXTANT]
         mask = (layer_extractors > 0.5) & (layer_resources > 0.5)
         positions = torch.argwhere(mask).float()

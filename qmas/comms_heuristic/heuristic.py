@@ -35,7 +35,10 @@ def _get_action_heuristic_pemo(args, action_space, observation):
         agent_pos = agent_pos[0]
 
         stacked = False
-        if observation[pemo.MAP_LAYERS.AGENTS_EXTRACTOR, agent_pos[0], agent_pos[1]] >= 2.0:
+        if observation[pemo.MAP_LAYERS.AGENTS_PROSPECTOR_EXTRACTOR, agent_pos[0], agent_pos[1]] >= 2.0:
+            capabilities = {CAP.EXTRACT: True, CAP.CARRY: False, CAP.PROSPECT: True}
+            stacked = observation[pemo.MAP_LAYERS.AGENTS_PROSPECTOR_EXTRACTOR, agent_pos[0], agent_pos[1]] > 2.0
+        elif observation[pemo.MAP_LAYERS.AGENTS_EXTRACTOR, agent_pos[0], agent_pos[1]] >= 2.0:
             capabilities = {CAP.EXTRACT: True, CAP.CARRY: False, CAP.PROSPECT: False}
             stacked = observation[pemo.MAP_LAYERS.AGENTS_EXTRACTOR, agent_pos[0], agent_pos[1]] > 2.0
         elif observation[pemo.MAP_LAYERS.AGENTS_HAULER, agent_pos[0], agent_pos[1]] >= 2.0:
@@ -51,7 +54,7 @@ def _get_action_heuristic_pemo(args, action_space, observation):
 
     def obs_nearest_resource(pos):
         resources = observation[pemo.MAP_LAYERS.RESOURCES_EXTANT]
-        extractors = observation[pemo.MAP_LAYERS.AGENTS_EXTRACTOR]
+        extractors = observation[pemo.MAP_LAYERS.AGENTS_EXTRACTOR] + observation[pemo.MAP_LAYERS.AGENTS_PROSPECTOR_EXTRACTOR]
         rel_x = observation[pemo.MAP_LAYERS.RELATIVE_POS_X]
         rel_y = observation[pemo.MAP_LAYERS.RELATIVE_POS_Y]
 
@@ -74,7 +77,7 @@ def _get_action_heuristic_pemo(args, action_space, observation):
         return positions[torch.argmin(dists)] - pos
 
     def obs_nearest_extractor_on_resource(pos):
-        layer_e = observation[pemo.MAP_LAYERS.AGENTS_EXTRACTOR]
+        layer_e = observation[pemo.MAP_LAYERS.AGENTS_EXTRACTOR] + observation[pemo.MAP_LAYERS.AGENTS_PROSPECTOR_EXTRACTOR]
         layer_r = observation[pemo.MAP_LAYERS.RESOURCES_EXTANT]
         mask = (layer_e > 0.5) & (layer_r > 0.5)
         positions = torch.argwhere(mask).float()

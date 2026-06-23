@@ -11,7 +11,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from copy import copy
 
-from isru_zoo.env.entity import ENTITY_TYPE, AGENT_ROLE, CAP, Agent, Depot, Extractor, Hauler, Prospector, SuperBot
+from isru_zoo.env.entity import ENTITY_TYPE, AGENT_ROLE, CAP, Agent, Depot, Extractor, Hauler, Prospector, ProspectorExtractor, SuperBot
 from isru_zoo.env.resource import TestResource1, TestResource2
 
 
@@ -20,11 +20,11 @@ def add_args(parser):
     
     import argparse
     parser.add_argument("--num_extractors", type=int, default=2,
-                        help="The number of extractor vehicles to place in the world.")
+                        help="The number of combined prospector-extractor vehicles to place in the world (legacy extractor count).")
     parser.add_argument("--num_haulers", type=int, default=2,
                         help="The number of hauler vehicles to place in the world.")
     parser.add_argument("--num_prospectors", type=int, default=1,
-                        help="The number of prospector vehicles to place in the world.")
+                        help="The number of combined prospector-extractor vehicles to place in the world (legacy prospector count).")
     parser.add_argument("--num_superbots", type=int, default=0,
                         help="The number of superbot vehicles to place in the world.")
     parser.add_argument("--num_obstacles", type=int, default=0,
@@ -46,7 +46,7 @@ def add_args(parser):
     parser.add_argument("--hauler_capacity", type=float, default=10.0,
                         help="The maximum amount of resources a hauler can carry.")
     parser.add_argument("--hauler_pickup_threshold", type=float, default=1.5,
-                        help="Max Euclidean distance (in grid units) a Hauler must be within of any Extractor to pick up resources.")
+                        help="Max Euclidean distance (in grid units) a Hauler must be within of any extraction-capable agent to pick up resources.")
     parser.add_argument("--noisy_memory", action="store_true",
                         help="Whether to allow the agent to see areas which are explored but not currently visible, with added noise.")
     parser.add_argument("--movement_mode", type=str, default="moore",
@@ -253,7 +253,7 @@ class parallel_env(ParallelEnv):
 
         # Set up entities.
         self.possible_agents = \
-            [Extractor(
+            [ProspectorExtractor(
                 world_dims=self.world_dims,
                 position=self.get_random_position(),
                 observation_radius=self.default_observation_radius
@@ -264,7 +264,7 @@ class parallel_env(ParallelEnv):
                 carry_capacity=self.default_hauler_capacity,
                 observation_radius=self.default_observation_radius
             ) for _ in range(num_haulers)] + \
-            [Prospector(
+            [ProspectorExtractor(
                 world_dims=self.world_dims,
                 position=self.get_random_position(),
                 observation_radius=self.default_observation_radius
@@ -315,7 +315,7 @@ class parallel_env(ParallelEnv):
         for a in self.agents:
             if a.capabilities[CAP.EXTRACT]:
                 ex_pos_int = a.grid_position
-                # Extractor must be standing on a cell that actually has this resource
+                # Extraction-capable agent must be standing on a cell that actually has this resource
                 if self.map_resources[resource][ex_pos_int[0], ex_pos_int[1]] > 0:
                     d = np.linalg.norm(pos - a.position)
                     if d <= self.hauler_pickup_threshold:
@@ -527,7 +527,7 @@ class parallel_env(ParallelEnv):
             pos = agent.grid_position
             if agent.capabilities[CAP.CARRY]:
                 plt.scatter(pos[0], pos[1], label=f"Hauler {self.possible_agents.index(agent)}", marker="^", s=100, alpha=0.5, color="red", edgecolor="black")
-            elif agent.capabilities[CAP.EXTRACT]:
+            elif agent.capabilities[CAP.EXTRACT] and not agent.capabilities[CAP.CARRY]:
                 plt.scatter(pos[0], pos[1], label=f"Extractor {self.possible_agents.index(agent)}", marker="o", s=100, alpha=0.5, color="yellow", edgecolor="black")
             elif agent.capabilities[CAP.PROSPECT]:
                 plt.scatter(pos[0], pos[1], label=f"Prospector {self.possible_agents.index(agent)}", marker="*", s=100, alpha=0.5, color="green", edgecolor="black")
@@ -1142,9 +1142,9 @@ class parallel_env(ParallelEnv):
                         val = val * capacity
 
                         if val > 0:
-                            # PICKUP: Require an Extractor to be standing on a tile that contains
+                            # PICKUP: Require an extraction-capable agent to be standing on a tile that contains
                             # this resource type, and the Hauler must be within pickup threshold
-                            # of that Extractor. 
+                            # of that extraction-capable agent.
                             r = self.idx_to_res[idx]
                             extractor, ex_pos_int = self._find_extractor_over_resource(agent.position, r)
                             if extractor is None:
@@ -1179,14 +1179,14 @@ class parallel_env(ParallelEnv):
                                 # reward_dict[agent] += REWARD_DEPOSIT
 
                 if agent.capabilities[CAP.EXTRACT]:
-                    # Provide reward for Extractors that are sitting on a resource tile.
+                    # Provide reward for extraction-capable agents that are sitting on a resource tile.
                     px, py = agent.grid_position
                     # Skip locations with depots.
                     if self.map_depots[px, py] == 0 :
                         # Check for resources at the extractor's position.
                         for r in self.possible_resources:
                             if self.map_resources[r][px, py] > 0:
-                                # Extractor is sitting on a resource tile.
+                                # Extraction-capable agent is sitting on a resource tile.
                                 info_dict["extractors/num_in_place"] += 1
                                 # reward_dict[agent] += REWARD_EXTRACTOR_ON_RESOURCE / agent.steps_stationary #TODO: this gets smaller the longer the agent sits
 
@@ -1453,12 +1453,17 @@ class parallel_env_simple_obs(parallel_env):
         rows = []
 
         # Agent coordinates (fixed number).
-        visibility_layer = parallel_env_map_obs.MAP_LAYERS.AGENTS_PROSPECTOR
+        visibility_layers = [
+            parallel_env_map_obs.MAP_LAYERS.AGENTS_PROSPECTOR,
+            parallel_env_map_obs.MAP_LAYERS.AGENTS_EXTRACTOR,
+            parallel_env_map_obs.MAP_LAYERS.AGENTS_PROSPECTOR_EXTRACTOR,
+            parallel_env_map_obs.MAP_LAYERS.AGENTS_HAULER,
+        ]
         resource_type = float(len(AGENT_ROLE))
         depot_type = float(len(AGENT_ROLE) + 1)
         for a in self.possible_agents:
             pos = a.grid_position
-            is_visible = bool(map_mask[visibility_layer, pos[0], pos[1]])
+            is_visible = any(bool(map_mask[layer, pos[0], pos[1]]) for layer in visibility_layers)
             rel_pos = relative_position(a.position) if is_visible else unknown_position()
             rows.append([
                 float(a.role.value),
@@ -1588,6 +1593,7 @@ class parallel_env_map_obs(parallel_env):
         OBSTACLES = 0
         AGENTS_PROSPECTOR = auto()
         AGENTS_EXTRACTOR = auto()
+        AGENTS_PROSPECTOR_EXTRACTOR = auto()
         AGENTS_HAULER = auto()
         RELATIVE_POS_X = auto()
         RELATIVE_POS_Y = auto()
@@ -1702,6 +1708,7 @@ class parallel_env_map_obs(parallel_env):
         layers[self.MAP_LAYERS.OBSTACLES] = self.map_obstacles
         layers[self.MAP_LAYERS.AGENTS_PROSPECTOR] = map_agents[:, :, AGENT_ROLE.PROSPECTOR.value]
         layers[self.MAP_LAYERS.AGENTS_EXTRACTOR] = map_agents[:, :, AGENT_ROLE.EXTRACTOR.value]
+        layers[self.MAP_LAYERS.AGENTS_PROSPECTOR_EXTRACTOR] = map_agents[:, :, AGENT_ROLE.PROSPECTOR_EXTRACTOR.value]
         layers[self.MAP_LAYERS.AGENTS_HAULER] = map_agents[:, :, AGENT_ROLE.HAULER.value]
         layers[self.MAP_LAYERS.RELATIVE_POS_X] = map_rel_pos_x
         layers[self.MAP_LAYERS.RELATIVE_POS_Y] = map_rel_pos_y
@@ -1916,6 +1923,7 @@ class parallel_env_map_obs_comms_only(parallel_env_map_obs):
         layers[self.MAP_LAYERS.OBSTACLES] = self.map_obstacles
         layers[self.MAP_LAYERS.AGENTS_PROSPECTOR] = map_agents[:, :, AGENT_ROLE.PROSPECTOR.value]
         layers[self.MAP_LAYERS.AGENTS_EXTRACTOR] = map_agents[:, :, AGENT_ROLE.EXTRACTOR.value]
+        layers[self.MAP_LAYERS.AGENTS_PROSPECTOR_EXTRACTOR] = map_agents[:, :, AGENT_ROLE.PROSPECTOR_EXTRACTOR.value]
         layers[self.MAP_LAYERS.AGENTS_HAULER] = map_agents[:, :, AGENT_ROLE.HAULER.value]
         layers[self.MAP_LAYERS.RELATIVE_POS_X] = map_rel_pos_x
         layers[self.MAP_LAYERS.RELATIVE_POS_Y] = map_rel_pos_y
@@ -2089,7 +2097,7 @@ class parallel_env_flat_map_obs(parallel_env):
         target_pos = None
         
         # Different targeting logic based on agent role
-        if agent.role == AGENT_ROLE.PROSPECTOR:
+        if agent.capabilities[CAP.PROSPECT] and not agent.capabilities[CAP.EXTRACT]:
             # Find the nearest unexplored area (boundary between explored and unexplored)
             # Get the boundary of explored area
             explored = agent.mask_observed
@@ -2108,7 +2116,7 @@ class parallel_env_flat_map_obs(parallel_env):
                 # If no boundary (everything explored), pick a random position
                 target_pos = np.random.uniform(0, self.world_dims).astype(np.float32)
                 
-        elif agent.role == AGENT_ROLE.EXTRACTOR:
+        elif agent.capabilities[CAP.EXTRACT] and not agent.capabilities[CAP.CARRY]:
             # Find the nearest known resource
             resource_mask = np.zeros_like(agent.mask_observed, dtype=bool)
             for r in self.possible_resources:
@@ -2123,17 +2131,29 @@ class parallel_env_flat_map_obs(parallel_env):
                 nearest_idx = np.argmin(distances)
                 target_pos = resource_points[nearest_idx].astype(np.float32)
             else:
-                # If no known resources, follow a prospector
-                for other_agent in self.agents:
-                    if other_agent.role == AGENT_ROLE.PROSPECTOR:
-                        target_pos = other_agent.position
-                        break
+                if agent.capabilities[CAP.PROSPECT]:
+                    from scipy import ndimage
+                    explored = agent.mask_observed
+                    dilated = ndimage.binary_dilation(explored)
+                    boundary = dilated & ~explored
+                    if np.any(boundary):
+                        boundary_points = np.argwhere(boundary)
+                        distances = np.linalg.norm(boundary_points - agent.grid_position, axis=1)
+                        nearest_idx = np.argmin(distances)
+                        target_pos = boundary_points[nearest_idx].astype(np.float32)
+
+                # If no known resources, follow an agent that can prospect.
+                if target_pos is None:
+                    for other_agent in self.agents:
+                        if other_agent is not agent and other_agent.capabilities[CAP.PROSPECT]:
+                            target_pos = other_agent.position
+                            break
                 
-                # If no prospector, pick a random position
+                # If no prospector is available, pick a random position.
                 if target_pos is None:
                     target_pos = np.random.uniform(0, self.world_dims).astype(np.float32)
                     
-        elif agent.role == AGENT_ROLE.HAULER:
+        elif agent.capabilities[CAP.CARRY]:
             # Find the nearest extractor that's on a resource
             nearest_extractor = None
             min_distance = float('inf')
@@ -2240,8 +2260,9 @@ class parallel_env_partial_obs(parallel_env_map_obs):
         RESOURCE = 0b100
         AGENT_PROSPECTOR = 0b1000
         AGENT_EXTRACTOR = 0b10000
-        AGENT_HAULER = 0b100000
-        DEPOT = 0b1000000
+        AGENT_PROSPECTOR_EXTRACTOR = 0b100000
+        AGENT_HAULER = 0b1000000
+        DEPOT = 0b10000000
 
 
     @functools.cache
@@ -2276,6 +2297,7 @@ class parallel_env_partial_obs(parallel_env_map_obs):
                     map[0, pos[0], pos[1]] |= {
                         AGENT_ROLE.PROSPECTOR: self.MAP_MASKS.AGENT_PROSPECTOR,
                         AGENT_ROLE.EXTRACTOR: self.MAP_MASKS.AGENT_EXTRACTOR,
+                        AGENT_ROLE.PROSPECTOR_EXTRACTOR: self.MAP_MASKS.AGENT_PROSPECTOR_EXTRACTOR,
                         AGENT_ROLE.HAULER: self.MAP_MASKS.AGENT_HAULER
                     }[a.role]
         

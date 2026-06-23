@@ -1,18 +1,20 @@
-from onpolicy.scripts.train.train_pettingzoo import main
-
 import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
+os.environ["WANDB_MODE"] = "online"
+os.environ["WANDB_X_DISABLE_VIEWER"] = "true"
+
+from onpolicy.scripts.train.train_pettingzoo import main
 
 args = [
-    "--experiment_name", "isru-gnnGcbf-1superBot-e200-r5-h5-20x20",
+    "--experiment_name", "isru-gnnGcbf-1prospectorExtractor-1hauler-e200-r5-h5-20x20",
     "--project_name", "qmas",
     "--env_class", "isru_zoo.isru_v0.parallel_env_graph_obs",
     "--user_name", "ideas-mas",
 
-	"--num_extractors", "0",
-    "--num_haulers", "0",
+	"--num_extractors", "1",
+    "--num_haulers", "1",
     "--num_prospectors", "0",
-    "--num_superbots", "1",
+    "--num_superbots", "0",
 
     "--hauler_capacity", "5",
 
@@ -59,7 +61,7 @@ args = [
     "--n_rollout_threads", "100",
     "--threaded_training",
     "--cuda",
-    "--cuda_idx", "2",
+    "--cuda_idx", "5",
 
     "--save_interval", "200000",
     # "--save_checkpoints",

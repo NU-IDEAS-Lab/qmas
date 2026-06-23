@@ -11,7 +11,7 @@ class AGENT_ROLE(IntEnum):
     PROSPECTOR = 0
     EXTRACTOR = 1
     HAULER = 2
-    # PROSPECTOREXTRACTOR = 3
+    PROSPECTOR_EXTRACTOR = 3
 
 
 class CAP(IntEnum):
@@ -162,19 +162,18 @@ class Extractor(Agent):
         })
 
 
-# class ProspectorExtractor(Agent):
-#     """ProspectorExtractor: observe and extract resources.
-#     """
+class ProspectorExtractor(Agent):
+    """ProspectorExtractor: observes and extracts resources."""
 
-#     role = AGENT_ROLE.PROSPECTOREXTRACTOR
+    role = AGENT_ROLE.PROSPECTOR_EXTRACTOR
     
-#     def __init__(self, *args, **kwargs):
-#         super().__init__(*args, **kwargs)
-#         self.capabilities.update({
-#             CAP.PROSPECT: True,
-#             CAP.EXTRACT: True,
-#             CAP.CARRY: False,
-#         })
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.capabilities.update({
+            CAP.PROSPECT: True,
+            CAP.EXTRACT: True,
+            CAP.CARRY: False,
+        })
 
 
 class Hauler(Agent):

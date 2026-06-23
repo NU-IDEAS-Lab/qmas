@@ -65,8 +65,8 @@ class PettingzooRunner(Runner):
     def _flush_pred_diagnostics(self, train_infos):
         """Merge predictor diagnostic counters into train_infos and reset them.
 
-        Values describe the log window since the last call. Empty/zero windows
-        report NaN for ratios/MAEs so the chart shows a gap rather than a misleading 0.
+        Values describe the log window since the last call. Empty quality windows
+        report None for MAEs so scalar loggers skip them instead of warning on NaN.
         """
         calls = self._pred_collect_calls
         fires = self._pred_fires
@@ -79,6 +79,7 @@ class PettingzooRunner(Runner):
         train_infos["pred_fire_ratio"] = (fires / calls) if calls > 0 else float("nan")
         train_infos["pred_writeback_checks"] = wb_checks
         train_infos["pred_writeback_failures"] = wb_fails
+        train_infos["pred_quality_count"] = q_count
 
         if q_count > 0:
             masked_mae = self._pred_quality_abs_err_sum / q_count
@@ -88,10 +89,10 @@ class PettingzooRunner(Runner):
             train_infos["pred_masked_norm_err"] = masked_mae / max(target_mag, 1e-9)
             train_infos["pred_visible_mae"] = self._pred_quality_visible_err_sum / q_count
         else:
-            train_infos["pred_masked_mae"] = float("nan")
-            train_infos["pred_masked_target_mag"] = float("nan")
-            train_infos["pred_masked_norm_err"] = float("nan")
-            train_infos["pred_visible_mae"] = float("nan")
+            train_infos["pred_masked_mae"] = None
+            train_infos["pred_masked_target_mag"] = None
+            train_infos["pred_masked_norm_err"] = None
+            train_infos["pred_visible_mae"] = None
 
         self._reset_pred_diagnostics()
 
@@ -157,15 +158,21 @@ class PettingzooRunner(Runner):
                 # Predictor diagnostics (firing count, buffer writeback verification,
                 # prediction quality at masked vs visible positions) — reset per window.
                 self._flush_pred_diagnostics(train_infos)
+                if train_infos["pred_quality_count"] > 0:
+                    quality_msg = (
+                        f"masked_mae={train_infos['pred_masked_mae']:.4g} "
+                        f"(target_mag={train_infos['pred_masked_target_mag']:.4g}, "
+                        f"norm_err={train_infos['pred_masked_norm_err']:.3f}), "
+                        f"visible_mae={train_infos['pred_visible_mae']:.4g}"
+                    )
+                else:
+                    quality_msg = "masked_mae=n/a (target_mag=n/a, norm_err=n/a), visible_mae=n/a"
                 print(
                     f"[DIAG] episode={episode} "
                     f"pred_fires={train_infos['pred_fires']}/{train_infos['pred_collect_calls']} "
                     f"(ratio={train_infos['pred_fire_ratio']:.4f}), "
                     f"writeback_failures={train_infos['pred_writeback_failures']}/{train_infos['pred_writeback_checks']}, "
-                    f"masked_mae={train_infos['pred_masked_mae']:.4g} "
-                    f"(target_mag={train_infos['pred_masked_target_mag']:.4g}, "
-                    f"norm_err={train_infos['pred_masked_norm_err']:.3f}), "
-                    f"visible_mae={train_infos['pred_visible_mae']:.4g}"
+                    f"{quality_msg}"
                 )
                 self.log_train(train_infos, total_num_steps)
                 self.log_env(self.env_infos, total_num_steps)

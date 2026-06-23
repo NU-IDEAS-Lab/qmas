@@ -227,6 +227,14 @@ class Runner(object):
         :param total_num_steps: (int) total number of training env steps.
         """
         for k, v in train_infos.items():
+            if v is None:
+                continue
+            if isinstance(v, torch.Tensor):
+                if v.numel() != 1:
+                    continue
+                v = v.item()
+            if isinstance(v, (float, int, np.number)) and not np.isfinite(v):
+                continue
             if self.use_wandb:
                 wandb.log({k: v}, step=total_num_steps)
             else:
