@@ -11,7 +11,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from copy import copy
 
-from isru_zoo.env.entity import ENTITY_TYPE, AGENT_ROLE, CAP, Agent, Depot, Extractor, Hauler, Prospector, SuperBot
+from isru_zoo.env.entity import ENTITY_TYPE, AGENT_ROLE, CAP, Depot, Extractor, Hauler, Prospector, ProspectorExtractor, SuperBot
 from isru_zoo.env.resource import TestResource1, TestResource2
 
 
@@ -25,6 +25,8 @@ def add_args(parser):
                         help="The number of hauler vehicles to place in the world.")
     parser.add_argument("--num_prospectors", type=int, default=1,
                         help="The number of prospector vehicles to place in the world.")
+    parser.add_argument("--num_prospector_extractors", type=int, default=0,
+                        help="The number of prospector-extractor vehicles to place in the world.")
     parser.add_argument("--num_superbots", type=int, default=0,
                         help="The number of superbot vehicles to place in the world.")
     parser.add_argument("--num_obstacles", type=int, default=0,
@@ -74,6 +76,7 @@ def validate_args(parsed_args):
         parsed_args.num_extractors + \
         parsed_args.num_haulers + \
         parsed_args.num_prospectors + \
+        parsed_args.num_prospector_extractors + \
         parsed_args.num_superbots
 
 
@@ -207,6 +210,7 @@ class parallel_env(ParallelEnv):
             num_extractors: int = 2,
             num_haulers: int = 2,
             num_prospectors: int = 1,
+            num_prospector_extractors: int = 0,
             num_superbots: int = 0,
             max_cycles: int = -1,
             episode_max: int = 1000,
@@ -272,6 +276,11 @@ class parallel_env(ParallelEnv):
                 position=self.get_random_position(),
                 observation_radius=self.default_observation_radius
             ) for _ in range(num_prospectors)] + \
+            [ProspectorExtractor(
+                world_dims=self.world_dims,
+                position=self.get_random_position(),
+                observation_radius=self.default_observation_radius
+            ) for _ in range(num_prospector_extractors)] + \
             [SuperBot(
                 world_dims=self.world_dims,
                 position=self.get_random_position(),
@@ -1641,16 +1650,20 @@ class parallel_env_map_obs(parallel_env):
 
         layers = [None for _ in range(self.map_shape[0])]
 
-        # Set up the agent maps.
-        map_agents = np.zeros((*self.world_dims, len(AGENT_ROLE) + 1), dtype=np.int32)
-        for i, a in enumerate(self.possible_agents):
+        # Set up the agent maps (capability-based: agents may appear in multiple layers).
+        map_agents_prospector = np.zeros(self.world_dims, dtype=np.int32)
+        map_agents_extractor = np.zeros(self.world_dims, dtype=np.int32)
+        map_agents_hauler = np.zeros(self.world_dims, dtype=np.int32)
+        for a in self.possible_agents:
             pos = a.grid_position
-            # map_agents[pos[0], pos[1], a.role.value] = 1
-            if a == agent:
-                map_agents[pos[0], pos[1], a.role.value] += 2  # Ego agent
-            else:
-                map_agents[pos[0], pos[1], a.role.value] += 1
-        
+            val = 2 if a == agent else 1
+            if a.capabilities[CAP.PROSPECT]:
+                map_agents_prospector[pos[0], pos[1]] += val
+            if a.capabilities[CAP.EXTRACT]:
+                map_agents_extractor[pos[0], pos[1]] += val
+            if a.capabilities[CAP.CARRY]:
+                map_agents_hauler[pos[0], pos[1]] += val
+
         # Set up the resource, cargo, and deposited resource maps.
         map_resources_extant = np.zeros(self.world_dims, dtype=np.float32)
         map_resources_deposited = np.zeros(self.world_dims, dtype=np.float32)
@@ -1670,7 +1683,7 @@ class parallel_env_map_obs(parallel_env):
         # Temporarily use a single boolean map for depots.
         map_depots = self.map_depots > 0
         assert len(self.possible_resources) == 1, "Currently only supports one resource type."
-        
+
         # Set up relative position maps. They should be 0 at the agent position and increase by 1 for each cell away.
         map_rel_pos_x = np.zeros(self.world_dims, dtype=np.float32)
         map_rel_pos_x[:, :] = np.arange(self.world_dims[0], dtype=np.float32)[:, None] - agent.position[0]
@@ -1692,7 +1705,7 @@ class parallel_env_map_obs(parallel_env):
             else:
                 # Resources can only be observed for the first time by a prospector.
                 fixed_mask[self.MAP_LAYERS.RESOURCES_EXTANT, ~agent.mask_resources_observed] = False
-            
+
             # Update the agent's observed area mask.
             agent.mask_observed[visible] = True
 
@@ -1708,9 +1721,9 @@ class parallel_env_map_obs(parallel_env):
 
         # Load most map layers.
         layers[self.MAP_LAYERS.OBSTACLES] = self.map_obstacles
-        layers[self.MAP_LAYERS.AGENTS_PROSPECTOR] = map_agents[:, :, AGENT_ROLE.PROSPECTOR.value]
-        layers[self.MAP_LAYERS.AGENTS_EXTRACTOR] = map_agents[:, :, AGENT_ROLE.EXTRACTOR.value]
-        layers[self.MAP_LAYERS.AGENTS_HAULER] = map_agents[:, :, AGENT_ROLE.HAULER.value]
+        layers[self.MAP_LAYERS.AGENTS_PROSPECTOR] = map_agents_prospector
+        layers[self.MAP_LAYERS.AGENTS_EXTRACTOR] = map_agents_extractor
+        layers[self.MAP_LAYERS.AGENTS_HAULER] = map_agents_hauler
         layers[self.MAP_LAYERS.RELATIVE_POS_X] = map_rel_pos_x
         layers[self.MAP_LAYERS.RELATIVE_POS_Y] = map_rel_pos_y
         layers[self.MAP_LAYERS.DEPOTS] = map_depots
@@ -2096,53 +2109,20 @@ class parallel_env_flat_map_obs(parallel_env):
         agent_pos = agent.position
         target_pos = None
         
-        # Different targeting logic based on agent role
-        if agent.role == AGENT_ROLE.PROSPECTOR:
-            # Find the nearest unexplored area (boundary between explored and unexplored)
-            # Get the boundary of explored area
-            explored = agent.mask_observed
-            # Find the boundary by dilating the explored area and finding the difference
+        def _prospector_target():
             from scipy import ndimage
+            explored = agent.mask_observed
             dilated = ndimage.binary_dilation(explored)
             boundary = dilated & ~explored
-            
-            # Find the nearest boundary point
             if np.any(boundary):
                 boundary_points = np.argwhere(boundary)
                 distances = np.linalg.norm(boundary_points - agent.grid_position, axis=1)
-                nearest_idx = np.argmin(distances)
-                target_pos = boundary_points[nearest_idx].astype(np.float32)
-            else:
-                # If no boundary (everything explored), pick a random position
-                target_pos = np.random.uniform(0, self.world_dims).astype(np.float32)
-                
-        elif agent.role == AGENT_ROLE.EXTRACTOR:
-            # Find the nearest known resource
-            resource_mask = np.zeros_like(agent.mask_observed, dtype=bool)
-            for r in self.possible_resources:
-                resource_mask |= self.map_resources[r] > 0
-            
-            # Only consider resources that have been discovered
-            known_resources = resource_mask & agent.mask_resources_observed
-            
-            if np.any(known_resources):
-                resource_points = np.argwhere(known_resources)
-                distances = np.linalg.norm(resource_points - agent.grid_position, axis=1)
-                nearest_idx = np.argmin(distances)
-                target_pos = resource_points[nearest_idx].astype(np.float32)
-            else:
-                # If no known resources, follow a prospector
-                for other_agent in self.agents:
-                    if other_agent.role == AGENT_ROLE.PROSPECTOR:
-                        target_pos = other_agent.position
-                        break
-                
-                # If no prospector, pick a random position
-                if target_pos is None:
-                    target_pos = np.random.uniform(0, self.world_dims).astype(np.float32)
-                    
-        elif agent.role == AGENT_ROLE.HAULER:
-            # Find the nearest extractor that's on a resource
+                return boundary_points[np.argmin(distances)].astype(np.float32)
+            return np.random.uniform(0, self.world_dims).astype(np.float32)
+
+        # Different targeting logic based on agent capabilities
+        if agent.capabilities[CAP.CARRY]:
+            # Hauler: find the nearest extractor on a resource, or go to depot
             nearest_extractor = None
             min_distance = float('inf')
             
@@ -2192,7 +2172,34 @@ class parallel_env_flat_map_obs(parallel_env):
                 # If no suitable target found, pick a random position
                 if target_pos is None:
                     target_pos = np.random.uniform(0, self.world_dims).astype(np.float32)
-        
+
+        elif agent.capabilities[CAP.EXTRACT]:
+            # Extractor (or ProspectorExtractor): move toward nearest known resource.
+            resource_mask = np.zeros_like(agent.mask_observed, dtype=bool)
+            for r in self.possible_resources:
+                resource_mask |= self.map_resources[r] > 0
+            known_resources = resource_mask & agent.mask_resources_observed
+
+            if np.any(known_resources):
+                resource_points = np.argwhere(known_resources)
+                distances = np.linalg.norm(resource_points - agent.grid_position, axis=1)
+                target_pos = resource_points[np.argmin(distances)].astype(np.float32)
+            elif agent.capabilities[CAP.PROSPECT]:
+                # ProspectorExtractor with no known resources: explore.
+                target_pos = _prospector_target()
+            else:
+                # Pure extractor with no known resources: follow a prospecting agent.
+                for other_agent in self.agents:
+                    if other_agent.capabilities[CAP.PROSPECT]:
+                        target_pos = other_agent.position
+                        break
+                if target_pos is None:
+                    target_pos = np.random.uniform(0, self.world_dims).astype(np.float32)
+
+        elif agent.capabilities[CAP.PROSPECT]:
+            # Pure prospector: move toward the nearest unexplored boundary.
+            target_pos = _prospector_target()
+
         # Calculate relative position to target
         if target_pos is not None:
             return target_pos - agent_pos
@@ -2276,16 +2283,17 @@ class parallel_env_partial_obs(parallel_env_map_obs):
         map_diameter = 2 * agent.observation_radius + 1
         map = np.zeros((1, map_diameter, map_diameter), dtype=np.int32)
 
-        # Fill in agent data.
+        # Fill in agent data (capability-based: agents may set multiple bits).
         for a in self.possible_agents:
             if a != agent:
                 pos = a.grid_position - map_center + agent.observation_radius
                 if np.all(pos < map_diameter) and np.all(pos >= 0):
-                    map[0, pos[0], pos[1]] |= {
-                        AGENT_ROLE.PROSPECTOR: self.MAP_MASKS.AGENT_PROSPECTOR,
-                        AGENT_ROLE.EXTRACTOR: self.MAP_MASKS.AGENT_EXTRACTOR,
-                        AGENT_ROLE.HAULER: self.MAP_MASKS.AGENT_HAULER
-                    }[a.role]
+                    if a.capabilities[CAP.PROSPECT]:
+                        map[0, pos[0], pos[1]] |= self.MAP_MASKS.AGENT_PROSPECTOR
+                    if a.capabilities[CAP.EXTRACT]:
+                        map[0, pos[0], pos[1]] |= self.MAP_MASKS.AGENT_EXTRACTOR
+                    if a.capabilities[CAP.CARRY]:
+                        map[0, pos[0], pos[1]] |= self.MAP_MASKS.AGENT_HAULER
         
         # Calculate slice information.
         pos_x_min = max(0, map_center[0] - agent.observation_radius)
