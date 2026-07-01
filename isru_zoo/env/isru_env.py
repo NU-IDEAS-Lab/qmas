@@ -51,6 +51,9 @@ def add_args(parser):
                         help="Max Euclidean distance (in grid units) a Hauler must be within of any Extractor to pick up resources.")
     parser.add_argument("--noisy_memory", action="store_true",
                         help="Whether to allow the agent to see areas which are explored but not currently visible, with added noise.")
+    parser.add_argument("--gnn_num_frontier_nodes", type=int, default=4,
+                        help="Number of exploration frontier nodes to inject into the graph observation "
+                             "for prospecting agents (nearest unexplored regions). 0 disables frontier nodes.")
     parser.add_argument("--movement_mode", type=str, default="moore",
                         choices=["moore", "velocity"],
                         help="The movement mode for agents: 'moore' uses discrete Moore neighborhood movement, 'velocity' uses continuous velocity control.")
@@ -230,6 +233,7 @@ class parallel_env(ParallelEnv):
             movement_mode: str = "moore",
             render_mode: str = "human",
             gnn_use_dense_obs: bool = False,
+            gnn_num_frontier_nodes: int = 4,
         ):
         """
         Initialize the environment.
@@ -256,6 +260,7 @@ class parallel_env(ParallelEnv):
         self.observation_mode_global = observation_mode_global
         self.movement_mode = movement_mode
         self.gnn_use_dense_obs = gnn_use_dense_obs
+        self.gnn_num_frontier_nodes = gnn_num_frontier_nodes
         self._gnn_dense_layout = None
 
         # Set up entities.
@@ -2409,11 +2414,7 @@ class parallel_env_graph_obs(parallel_env_map_obs):
     class NODE_TYPE(IntEnum):
         RESOURCE = len(AGENT_ROLE)
         DEPOT = auto()
-
-
-    class COORD_ENTITY_TYPE(IntEnum):
-        RESOURCE = len(AGENT_ROLE)
-        DEPOT = auto()
+        FRONTIER = auto()
 
 
     @functools.cache
@@ -2421,12 +2422,14 @@ class parallel_env_graph_obs(parallel_env_map_obs):
         ''' Returns the observation space for the given agent. '''
 
         if self.gnn_use_dense_obs:
-            node_feat_dim = int(max(self.NODE_TYPE)) + 1 + 4  # one-hot role + posX, posY, velX, velY
+            # one-hot role + posX, posY, velX, velY + frontier region-size scalar
+            node_feat_dim = int(max(self.NODE_TYPE)) + 1 + 5
             edge_feat_dim = 1  # distance
             max_total_nodes = (
                 len(self.possible_agents)
                 + sum(r.quantity_max for r in self.possible_resources)
                 + len(self.possible_depots)
+                + self.gnn_num_frontier_nodes
             )
             # Ego-star topology: exactly one edge per non-ego node.
             max_edges = max_total_nodes - 1
@@ -2475,10 +2478,10 @@ class parallel_env_graph_obs(parallel_env_map_obs):
             "role": spaces.Box(low=0, high=int(max(self.NODE_TYPE)), dtype=np.int32),
             "graph": spaces.Graph(
                 node_space = spaces.Box(
-                    # max(NODE_TYPE), posX, posY, velX, velY
+                    # max(NODE_TYPE), posX, posY, velX, velY, frontier region-size scalar
                     low = -np.inf,
                     high = np.inf,
-                    shape = (int(max(self.NODE_TYPE)) + 1 + 4,),
+                    shape = (int(max(self.NODE_TYPE)) + 1 + 5,),
                     dtype=np.float32
                 ),
                 edge_space = spaces.Box(
@@ -2492,6 +2495,41 @@ class parallel_env_graph_obs(parallel_env_map_obs):
         })
 
         return obs_space
+
+
+    def _compute_frontier_targets(self, agent, k):
+        ''' Returns up to `k` exploration frontier targets for the agent.
+
+            A frontier is the boundary between explored and unexplored free space
+            (the same construction the map-obs heuristic uses at `_get_target`).
+            Connected frontier regions are ranked by size and the centroid of each
+            of the `k` largest regions is returned (snapped to a real frontier cell).
+
+            Returns:
+                list[tuple[np.ndarray, float]]: (grid_position, normalized_size)
+                pairs, ordered largest region first. Empty if nothing is unexplored.
+        '''
+        from scipy import ndimage
+
+        explored = agent.mask_observed
+        free = ~self.map_obstacles.astype(bool)  # never propose frontiers into walls
+        boundary = ndimage.binary_dilation(explored) & ~explored & free
+        if not boundary.any():
+            return []  # fully explored (e.g. global-state query)
+
+        labels, n = ndimage.label(boundary)
+        total_cells = float(np.prod(self.world_dims))
+        regions = []
+        for lbl in range(1, n + 1):
+            cells = np.argwhere(labels == lbl).astype(np.float32)
+            centroid = cells.mean(axis=0)
+            # Snap the centroid to the nearest real frontier cell so it never
+            # lands inside explored/obstacle space (e.g. for L-shaped regions).
+            rep = cells[np.argmin(np.linalg.norm(cells - centroid, axis=1))]
+            regions.append((rep, len(cells) / total_cells))
+
+        regions.sort(key=lambda r: -r[1])  # largest region first
+        return regions[:k]
 
 
     def observe(self, agent, senders=set(), _observation_radius=None, _global_state=False):
@@ -2520,11 +2558,15 @@ class parallel_env_graph_obs(parallel_env_map_obs):
             ea = np.zeros((max_edges, edge_feat_dim), dtype=np.float32)
             edge_count = 0
 
-            def _write_node(slot, node_type, pos, vel):
-                """Populate node features for the given slot (does NOT touch nv)."""
+            def _write_node(slot, node_type, pos, vel, extra=0.0):
+                """Populate node features for the given slot (does NOT touch nv).
+
+                `extra` is the trailing scalar feature (frontier region size,
+                normalized); it is 0 for all non-frontier node types.
+                """
                 role = np.zeros(int(max(self.NODE_TYPE) + 1), dtype=np.float32)
                 role[node_type] = 1.0
-                nf[slot] = np.concatenate([role, pos, vel])
+                nf[slot] = np.concatenate([role, pos, vel, [np.float32(extra)]])
 
             def _add_edge(src, dst, dist):
                 nonlocal edge_count
@@ -2612,8 +2654,30 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                 _add_edge(slot, 0, dist)
                 slot += 1
 
-            assert slot == max_total_nodes, \
-                f"slot={slot} != max_total_nodes={max_total_nodes}"
+            # --- Frontier slots (nearest unexplored regions) ---
+            # Reserved K slots, populated only for prospecting agents (exploration
+            # is their job). Skipped for omniscient global-state queries.
+            if (not _global_state and self.gnn_num_frontier_nodes > 0
+                    and agent.capabilities[CAP.PROSPECT]):
+                frontiers = self._compute_frontier_targets(
+                    agent, self.gnn_num_frontier_nodes
+                )
+                for rep, size_norm in frontiers:
+                    pos_r = relative_position(rep)
+                    dist = np.linalg.norm(pos_r)
+                    _write_node(slot, self.NODE_TYPE.FRONTIER,
+                                normalize(pos_r), np.zeros(2, dtype=np.float32),
+                                extra=size_norm)
+                    nv[slot] = 1.0
+                    _add_edge(slot, 0, dist)
+                    slot += 1
+
+            # Entity slots must fill exactly up to the reserved frontier block;
+            # unused frontier slots remain zero-padded (nv=0, no edge).
+            assert slot <= max_total_nodes, \
+                f"slot={slot} > max_total_nodes={max_total_nodes}"
+            assert slot >= max_total_nodes - self.gnn_num_frontier_nodes, \
+                f"slot={slot} left non-frontier slots unfilled"
             assert edge_count <= max_edges, \
                 f"edge_count={edge_count} exceeds max_edges={max_edges}"
 
@@ -2642,7 +2706,9 @@ class parallel_env_graph_obs(parallel_env_map_obs):
         edge_index = [[], []]  # Edge connections
         edge_features = []  # Edge features
 
-        def add_node(node_type, pos, vel):
+        def add_node(node_type, pos, vel, extra=0.0):
+            # `extra` is the trailing scalar feature (frontier region size,
+            # normalized); it is 0 for all non-frontier node types.
             role_mask = np.zeros(int(max(self.NODE_TYPE) + 1), dtype=np.float32)
             role_mask[node_type] = 1.0
             node_features.append([
@@ -2650,7 +2716,8 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                 pos[0],
                 pos[1],
                 vel[0],
-                vel[1]
+                vel[1],
+                extra
             ])
             return len(node_features) - 1  # Return index of the new node
 
@@ -2707,6 +2774,24 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                 np.array([0.0, 0.0], dtype=np.float32)
             )
             add_edge(node, node_ego, dist)
+
+        # Add exploration frontier nodes (nearest unexplored regions) for prospecting
+        # agents only. Skipped for omniscient global-state queries.
+        if (not _global_state and self.gnn_num_frontier_nodes > 0
+                and agent.capabilities[CAP.PROSPECT]):
+            for rep, size_norm in self._compute_frontier_targets(
+                agent, self.gnn_num_frontier_nodes
+            ):
+                pos = relative_position(rep)
+                dist = np.linalg.norm(pos)
+                pos = normalize(pos)
+                node = add_node(
+                    self.NODE_TYPE.FRONTIER,
+                    pos,
+                    np.array([0.0, 0.0], dtype=np.float32),
+                    extra=size_norm
+                )
+                add_edge(node, node_ego, dist)
 
         # Convert to tensors.
         node_features = torch.tensor(node_features, dtype=torch.float32)
