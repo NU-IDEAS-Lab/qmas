@@ -1280,14 +1280,23 @@ class parallel_env(ParallelEnv):
             
             # Provide intrinsic reward (delta-based: reward the change this step caused).
             total_cells = np.prod(self.world_dims)
-            visible_resource_cells = self._get_visible_cell_count(agent, use_resource_mask=True)
+            visible_cells = self._get_visible_cell_count(agent, use_resource_mask=False)
             resources_held_agent = sum(agent.cargo.values())
             resources_deposited = sum(depot.stock for depot in self.possible_depots)
-            r_exploration = (visible_resource_cells - visible_resource_cells_prev.get(agent, 0)) / total_cells
+            r_exploration = (visible_cells - visible_cells_prev.get(agent, 0)) / total_cells
             r_cargo = max(0.0, resources_held_agent - cargo_prev.get(agent, 0.0)) / total_resources
             r_deposited = (resources_deposited - deposited_prev) / total_resources
 
-            r_intrinsic = 100.0 * r_deposited + 10.0 * r_cargo + 1.0 * r_exploration
+            if agent.capabilities[CAP.PROSPECT]:
+                w_deposited = 0.0
+                w_cargo = 0.0
+                w_exploration = 1.0
+            else:
+                w_deposited = 100.0
+                w_cargo = 10.0
+                w_exploration = 0.0
+
+            r_intrinsic = w_deposited * r_deposited + w_cargo * r_cargo + w_exploration * r_exploration
             reward_dict[agent] += r_intrinsic
 
             # Provide uncertainty reduction reward.
@@ -2775,10 +2784,9 @@ class parallel_env_graph_obs(parallel_env_map_obs):
             )
             add_edge(node, node_ego, dist)
 
-        # Add exploration frontier nodes (nearest unexplored regions) for prospecting
-        # agents only. Skipped for omniscient global-state queries.
-        if (not _global_state and self.gnn_num_frontier_nodes > 0
-                and agent.capabilities[CAP.PROSPECT]):
+        # Add exploration frontier nodes (nearest unexplored regions). Skipped for
+        # omniscient global-state queries, which have nothing left to explore.
+        if not _global_state and self.gnn_num_frontier_nodes > 0:
             for rep, size_norm in self._compute_frontier_targets(
                 agent, self.gnn_num_frontier_nodes
             ):
