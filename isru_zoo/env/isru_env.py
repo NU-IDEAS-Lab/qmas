@@ -1280,10 +1280,11 @@ class parallel_env(ParallelEnv):
             
             # Provide intrinsic reward (delta-based: reward the change this step caused).
             total_cells = np.prod(self.world_dims)
-            visible_cells = self._get_visible_cell_count(agent, use_resource_mask=False)
+            visible_cells = self._get_visible_cell_count(agent, use_resource_mask=True)
+            visible_cells_prev_agent = visible_resource_cells_prev.get(agent, 0)
             resources_held_agent = sum(agent.cargo.values())
             resources_deposited = sum(depot.stock for depot in self.possible_depots)
-            r_exploration = (visible_cells - visible_cells_prev.get(agent, 0)) / total_cells
+            r_exploration = (visible_cells - visible_cells_prev_agent) / total_cells
             r_cargo = max(0.0, resources_held_agent - cargo_prev.get(agent, 0.0)) / total_resources
             r_deposited = (resources_deposited - deposited_prev) / total_resources
 
@@ -2520,7 +2521,7 @@ class parallel_env_graph_obs(parallel_env_map_obs):
         '''
         from scipy import ndimage
 
-        explored = agent.mask_observed
+        explored = agent.mask_resources_observed
         free = ~self.map_obstacles.astype(bool)  # never propose frontiers into walls
         boundary = ndimage.binary_dilation(explored) & ~explored & free
         if not boundary.any():
