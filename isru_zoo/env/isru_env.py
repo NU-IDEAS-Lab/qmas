@@ -381,6 +381,7 @@ class parallel_env(ParallelEnv):
         self.step_count = 0
         self.last_rewards = {agent: 0.0 for agent in self.possible_agents}
         self.dones = dict.fromkeys(self.agents, False)
+        self.done_rewarded = False
 
         info = {
             agent: {} for agent in self.agents
@@ -1039,12 +1040,12 @@ class parallel_env(ParallelEnv):
         REWARD_NO_EXPLORATION = -1.0
         REWARD_COMMUNICATION = -5.0
         REWARD_NO_COMMUNICATION = 5.0
-        REWARD_EXTRACTOR_ON_RESOURCE = 1.0
+        REWARD_EXTRACTOR_ON_RESOURCE = 0.05
         REWARD_DEPOSIT = 0.0
         REWARD_EXTRACT = 100000.0
         REWARD_CLOSEST_RESOURCE = 0.2
         REWARD_UNCERTAINTY_REDUCTION = 0.1
-        REWARD_DONE = 1000000.0
+        REWARD_DONE = 10000.0
 
         self.step_count += 1
 
@@ -1291,7 +1292,7 @@ class parallel_env(ParallelEnv):
             if agent.capabilities[CAP.PROSPECT]:
                 w_deposited = 0.0
                 w_cargo = 0.0
-                w_exploration = 1.0
+                w_exploration = 100.0
             else:
                 w_deposited = 100.0
                 w_cargo = 10.0
@@ -1307,8 +1308,11 @@ class parallel_env(ParallelEnv):
                     reward_dict[agent] += REWARD_UNCERTAINTY_REDUCTION * (uncertainty_sum_prev[agent] - uncertainty_sum)
             
             # Provide a completion reward.
-            if end_done:
+            if end_done and not self.done_rewarded:
                 reward_dict[agent] += REWARD_DONE / self.step_count
+
+        if end_done:
+            self.done_rewarded = True
 
         # Provide a state and state_visibility_mask in the info dict for convenience.
         state, state_visibility_mask = self._state()
