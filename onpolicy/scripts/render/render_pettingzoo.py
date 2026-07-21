@@ -121,7 +121,6 @@ def main(args):
     if all_args.share_policy:
         from onpolicy.runner.shared.pettingzoo_runner import PettingzooRunner as Runner
     else:
-        raise NotImplementedError("Pettingzoo wrapper does not yet support separate policies.")
         from onpolicy.runner.separated.pettingzoo_runner import PettingzooRunner as Runner
 
     runner = Runner(config)

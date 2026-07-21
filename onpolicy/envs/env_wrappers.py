@@ -46,11 +46,15 @@ class ShareVecEnv(ABC):
         'render.modes': ['human', 'rgb_array']
     }
 
-    def __init__(self, num_envs, observation_space, share_observation_space, action_space):
+    def __init__(self, num_envs, observation_space, share_observation_space, action_space,
+                 agent_group_ids=None):
         self.num_envs = num_envs
         self.observation_space = observation_space
         self.share_observation_space = share_observation_space
         self.action_space = action_space
+        # Maps each agent index to a policy group. None means the underlying env
+        # doesn't distinguish agent classes, i.e. a single shared policy.
+        self.agent_group_ids = agent_group_ids
 
     @abstractmethod
     def reset(self):
@@ -339,7 +343,8 @@ def shareworker(remote, parent_remote, env_fn_wrapper):
                 break
             elif cmd == 'get_spaces':
                 remote.send(
-                    (env.observation_space, env.share_observation_space, env.action_space))
+                    (env.observation_space, env.share_observation_space, env.action_space,
+                     getattr(env, 'agent_group_ids', None)))
             elif cmd == 'render_vulnerability':
                 fr = env.render_vulnerability(data)
                 remote.send((fr))
@@ -371,10 +376,11 @@ class ShareSubprocVecEnv(ShareVecEnv):
         for remote in self.work_remotes:
             remote.close()
         self.remotes[0].send(('get_spaces', None))
-        observation_space, share_observation_space, action_space = self.remotes[0].recv(
+        observation_space, share_observation_space, action_space, agent_group_ids = self.remotes[0].recv(
         )
         ShareVecEnv.__init__(self, len(env_fns), observation_space,
-                             share_observation_space, action_space)
+                             share_observation_space, action_space,
+                             agent_group_ids=agent_group_ids)
 
     def step_async(self, actions):
         for remote, action in zip(self.remotes, actions):
@@ -734,7 +740,8 @@ class ShareDummyVecEnv(ShareVecEnv):
         self.envs = [fn() for fn in env_fns]
         env = self.envs[0]
         ShareVecEnv.__init__(self, len(
-            env_fns), env.observation_space, env.share_observation_space, env.action_space)
+            env_fns), env.observation_space, env.share_observation_space, env.action_space,
+            agent_group_ids=getattr(env, 'agent_group_ids', None))
         self.actions = None
 
     def step_async(self, actions):

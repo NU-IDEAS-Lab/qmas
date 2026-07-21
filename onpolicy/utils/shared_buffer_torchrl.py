@@ -442,10 +442,15 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
             active_masks_batch = []
             old_action_log_probs_batch = []
             adv_targ = []
+            chunk_agent_ids = []
 
             for index in indices:
 
                 ind = index * data_chunk_length
+                # Every row of a chunk belongs to one (thread, agent) pair. `ind`
+                # indexes the (N, M, T) cast, so the flattened (thread, agent) pair
+                # is ind // episode_length and the agent is that modulo num_agents.
+                chunk_agent_ids.append((ind // episode_length) % num_agents)
                 # size [T+1 N M Dim]-->[T N M Dim]-->[N,M,T,Dim]-->[N*M*T,Dim]-->[L,Dim]
                 # share_obs has no agent dim (per-thread only), so map ind to per-thread range
                 so_ind = ind % episode_length
@@ -514,9 +519,14 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
             old_action_log_probs_batch = _flatten(L, N, old_action_log_probs_batch)
             adv_targ = _flatten(L, N, adv_targ)
 
+            # Chunks are stacked on axis 1 then flattened (L, N) -> (L * N), and every
+            # row within a chunk shares an agent, so tiling the per-chunk ids over L
+            # reproduces the flattened row order.
+            agent_ids_batch = np.tile(np.asarray(chunk_agent_ids, dtype=np.int64), L)
+
             yield share_obs_batch, obs_batch, global_obs_batch, rnn_states_batch, rnn_states_critic_batch, actions_batch,\
                   value_preds_batch, return_batch, masks_batch, active_masks_batch, old_action_log_probs_batch,\
-                  adv_targ, available_actions_batch
+                  adv_targ, available_actions_batch, agent_ids_batch
 
 
     def compatibility_transform_sample(self, sample, index_shape=(-1,), data_start_dim=3):
@@ -560,9 +570,22 @@ class SharedReplayBuffer(TensorDictReplayBuffer, SharedReplayBufferOld):
         else:
             available_actions_batch = sample["available_actions"].reshape(*index_shape, sample["available_actions"].shape[-1])
 
+        # Which agent each row belongs to, needed to route rows to per-agent-class
+        # policies. Leading dims are (sampled_steps, n_threads, num_agents), so after
+        # the reshape above the agent index is the fastest-varying of the three.
+        # Trajectory-shaped samples (index_shape=(batch, trajectory_size)) don't keep
+        # a per-agent row layout, so report None rather than a wrong mapping.
+        n_rows = int(np.prod(masks_batch.shape[:-1]))
+        if len(index_shape) == 1 and n_rows % self.num_agents == 0:
+            agent_ids_batch = np.tile(
+                np.arange(self.num_agents, dtype=np.int64), n_rows // self.num_agents
+            )
+        else:
+            agent_ids_batch = None
+
         return share_obs_batch, obs_batch, global_obs_batch, rnn_states_batch, rnn_states_critic_batch, actions_batch, \
         value_preds_batch, return_batch, masks_batch, active_masks_batch, old_action_log_probs_batch, \
-        adv_targ, available_actions_batch
+        adv_targ, available_actions_batch, agent_ids_batch
 
 
     def compatibility_get_policy_input(self, step):

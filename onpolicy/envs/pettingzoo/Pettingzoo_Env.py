@@ -40,6 +40,21 @@ class PettingzooEnv(object):
         # Set up action space.
         self.action_space = [self.env.action_space(a) for a in self.env.possible_agents]
 
+        # Map each agent to a policy group. Agents sharing a group share actor
+        # weights; environments that don't report agent classes get a single group,
+        # which reproduces the fully-shared-policy behaviour.
+        class_names = getattr(self.env, "agent_class_names", None)
+        if class_names is None:
+            self.agent_group_names = ["default"] * len(self.env.possible_agents)
+        else:
+            self.agent_group_names = list(class_names)
+        # Group ids follow first appearance in possible_agents order, which is fixed
+        # by env construction and therefore identical across ranks.
+        unique_names = list(dict.fromkeys(self.agent_group_names))
+        self.agent_group_ids = np.array(
+            [unique_names.index(n) for n in self.agent_group_names], dtype=np.int64
+        )
+
         # Determine whether observations should be flattened.
         ospace = self.env.observation_space(self.env.possible_agents[0])
         self.flatten_observations = type(ospace) == Dict

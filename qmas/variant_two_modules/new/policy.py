@@ -156,7 +156,7 @@ class QmasPolicy(Policy):
 
 
     def evaluate_actions(self, cent_obs, obs, rnn_states_actor, rnn_states_critic, action, masks,
-                         available_actions=None, active_masks=None, global_obs=None):
+                         available_actions=None, active_masks=None, global_obs=None, agent_ids=None):
         """
         Get action logprobs / entropy and value function predictions for actor update.
         :param cent_obs (np.ndarray): centralized input to the critic.
@@ -168,6 +168,9 @@ class QmasPolicy(Policy):
         :param available_actions: (np.ndarray) denotes which actions are available to agent
                                   (if None, all actions available)
         :param active_masks: (torch.Tensor) denotes whether an agent is active or dead.
+        :param agent_ids: (np.ndarray) which agent each row belongs to. Unused here —
+                          a single shared actor handles every agent — but accepted so
+                          the trainer can call shared and grouped policies alike.
 
         :return values: (torch.Tensor) value function predictions.
         :return action_log_probs: (torch.Tensor) log probabilities of the input actions.

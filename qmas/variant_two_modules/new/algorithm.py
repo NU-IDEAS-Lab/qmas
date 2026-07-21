@@ -385,7 +385,7 @@ class QmasAlgorithm(Algorithm):
         """
         share_obs_batch, obs_batch, global_obs_batch, rnn_states_batch, rnn_states_critic_batch, actions_batch, \
         value_preds_batch, return_batch, masks_batch, active_masks_batch, old_action_log_probs_batch, \
-        adv_targ, available_actions_batch = sample
+        adv_targ, available_actions_batch, agent_ids_batch = sample
 
         old_action_log_probs_batch = check(old_action_log_probs_batch).to(**self.tpdv)
         adv_targ = check(adv_targ).to(**self.tpdv)
@@ -400,10 +400,11 @@ class QmasAlgorithm(Algorithm):
                                                                               rnn_states_batch, 
                                                                               rnn_states_critic_batch, 
                                                                               actions_batch, 
-                                                                              masks_batch, 
+                                                                              masks_batch,
                                                                               available_actions_batch,
                                                                               active_masks_batch,
-                                                                              global_obs=global_obs_batch)
+                                                                              global_obs=global_obs_batch,
+                                                                              agent_ids=agent_ids_batch)
         
         # Reshape and repeat values for each agent.
         # The value function predictions are made once over the entire share_obs.

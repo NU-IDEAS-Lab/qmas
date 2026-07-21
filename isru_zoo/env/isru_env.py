@@ -736,6 +736,18 @@ class parallel_env(ParallelEnv):
 
 
     @property
+    def agent_class_names(self):
+        ''' Returns the class name of each agent, in possible_agents order.
+
+        Used to tie policy weights within an agent class. We key on the class
+        name rather than AGENT_ROLE because SuperBot reports itself as
+        AGENT_ROLE.PROSPECTOR, so the enum cannot separate the two.
+        '''
+
+        return [type(agent).__name__.lower() for agent in self.possible_agents]
+
+
+    @property
     @functools.cache
     def state_space(self):
         ''' Returns the state space of the environment. '''
