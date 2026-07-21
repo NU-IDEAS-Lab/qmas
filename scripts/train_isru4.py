@@ -45,6 +45,7 @@ args = [
     "--use_centralized_V",
     "--use_gae",
     "--share_policy",
+
     "--use_ReLU",
     "--hidden_size", "128",
     "--layer_N", "3",
@@ -75,8 +76,8 @@ args = [
     "--threaded_training",
     "--n_training_threads", "16",
     "--cuda",
-    "--cuda_idx", "6",
-    "--cuda_idx_predictor", "7",
+    "--cuda_idx", "5",
+    "--cuda_idx_predictor", "6",
 
     "--save_interval", "200000",
     # "--save_checkpoints",

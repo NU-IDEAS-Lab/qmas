@@ -1,10 +1,14 @@
 from onpolicy.scripts.train.train_pettingzoo import main
 
 import os
+import sys
+
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
+QUICK = "--quick" in sys.argv
+
 args = [
-    "--experiment_name", "isru-2e2h1p-e200-r10-h10-o20-20x20-noPrediction",
+    "--experiment_name", "isru-2e2h1p-e200-r10-h10-o20-20x20-separated",
     "--project_name", "qmas",
     "--env_class", "isru_zoo.isru_v0.parallel_env_graph_obs",
     "--user_name", "ideas-mas",
@@ -25,8 +29,8 @@ args = [
 
     # "--noisy_memory",
 
-    "--observation_radius", "999999",
-    # "--observation_mask",
+    "--observation_radius", "3",
+    "--observation_mask",
     # "--available_actions_mask",
 
     "--communication_mode", "full",
@@ -44,7 +48,9 @@ args = [
     "--gnn_hidden_size", "64",
     "--use_centralized_V",
     "--use_gae",
-    "--share_policy",
+
+    "--no-share_policy",
+
     "--use_ReLU",
     "--hidden_size", "128",
     "--layer_N", "3",
@@ -53,17 +59,17 @@ args = [
     # "--use_gnn_mlp_policy",
     # "--gnn_dropout_rate", "0.5",
 
-    # "--diffusion_model_type", "gnn",
-    # "--diffusion_sample_steps", "5",
-    # "--diffusion_autoregression_steps", "7",
-    # "--gnn_diffusion_depth", "2",
-    # "--gnn_diffusion_d_model", "32",
-    # "--gnn_diffusion_temporal_depth", "1",
-    # "--prediction_during_training",
-    # "--prediction_uq_method", "ensemble",
-    # "--prediction_uq_injection_method", "append",
-    "--prediction_disable",
-    # "--prediction_ensemble_size", "3",
+    "--diffusion_model_type", "gnn",
+    "--diffusion_sample_steps", "5",
+    "--diffusion_autoregression_steps", "7",
+    "--gnn_diffusion_depth", "2",
+    "--gnn_diffusion_d_model", "32",
+    "--gnn_diffusion_temporal_depth", "1",
+    "--prediction_during_training",
+    "--prediction_uq_method", "ensemble",
+    "--prediction_uq_injection_method", "append",
+    # "--prediction_disable",
+    "--prediction_ensemble_size", "3",
 
     # "--state_encoder",
     "--disable_observation_global",
@@ -75,8 +81,8 @@ args = [
     "--threaded_training",
     "--n_training_threads", "16",
     "--cuda",
-    "--cuda_idx", "4",
-    # "--cuda_idx_predictor", "7",
+    "--cuda_idx", "5",
+    "--cuda_idx_predictor", "7",
 
     "--save_interval", "200000",
     # "--save_checkpoints",
