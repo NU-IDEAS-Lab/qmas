@@ -40,19 +40,26 @@ def _get_movement_action_heuristic_pemo(observation):
             raise ValueError("Could not determine unique agent position from observation.")
         agent_pos = agent_pos[0]
 
-        # Determine role based on agent layers.
-        stacked = False
-        if observation[pemo.MAP_LAYERS.AGENTS_EXTRACTOR, agent_pos[0], agent_pos[1]] >= 2.0:
-            capabilities = {CAP.EXTRACT: True, CAP.CARRY: False, CAP.PROSPECT: False}
-            stacked = observation[pemo.MAP_LAYERS.AGENTS_EXTRACTOR, agent_pos[0], agent_pos[1]] > 2.0
-        elif observation[pemo.MAP_LAYERS.AGENTS_HAULER, agent_pos[0], agent_pos[1]] >= 2.0:
-            capabilities = {CAP.EXTRACT: False, CAP.CARRY: True, CAP.PROSPECT: False}
-            stacked = observation[pemo.MAP_LAYERS.AGENTS_HAULER, agent_pos[0], agent_pos[1]] > 2.0
-        elif observation[pemo.MAP_LAYERS.AGENTS_PROSPECTOR, agent_pos[0], agent_pos[1]] >= 2.0:
-            capabilities = {CAP.EXTRACT: False, CAP.CARRY: False, CAP.PROSPECT: True}
-            stacked = observation[pemo.MAP_LAYERS.AGENTS_PROSPECTOR, agent_pos[0], agent_pos[1]] > 2.0
-        else:
+        # Each capability layer holds +2 for the ego agent, +1 per other agent at the same cell.
+        # A value >= 2 means this ego agent has that capability; > 2 means another agent is stacked.
+        val_prospect = observation[pemo.MAP_LAYERS.AGENTS_PROSPECTOR, agent_pos[0], agent_pos[1]]
+        val_extract  = observation[pemo.MAP_LAYERS.AGENTS_EXTRACTOR,  agent_pos[0], agent_pos[1]]
+        val_carry    = observation[pemo.MAP_LAYERS.AGENTS_HAULER,      agent_pos[0], agent_pos[1]]
+
+        cap_prospect = bool(val_prospect >= 2.0)
+        cap_extract  = bool(val_extract  >= 2.0)
+        cap_carry    = bool(val_carry    >= 2.0)
+
+        if not (cap_prospect or cap_extract or cap_carry):
             raise ValueError("Could not determine agent capabilities from observation.")
+
+        capabilities = {CAP.PROSPECT: cap_prospect, CAP.EXTRACT: cap_extract, CAP.CARRY: cap_carry}
+
+        stacked = (
+            (cap_prospect and val_prospect > 2.0) or
+            (cap_extract  and val_extract  > 2.0) or
+            (cap_carry    and val_carry    > 2.0)
+        )
 
         return agent_pos, capabilities, stacked
 
@@ -133,9 +140,12 @@ def _get_movement_action_heuristic_pemo(observation):
     elif capabilities[CAP.EXTRACT]:
         # Find closest resource.
         direction = obs_nearest_resource(agent_pos)
-        
+        # ProspectorExtractor with no visible resource: explore.
+        if direction is None and capabilities[CAP.PROSPECT]:
+            direction = obs_nearest_unexplored(agent_pos)
+
     else:
-        # Prospector behavior: move toward nearest unexplored area.
+        # Pure prospector: move toward nearest unexplored area.
         direction = obs_nearest_unexplored(agent_pos)
     
     if direction is None:

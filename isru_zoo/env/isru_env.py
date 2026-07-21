@@ -11,7 +11,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from copy import copy
 
-from isru_zoo.env.entity import ENTITY_TYPE, AGENT_ROLE, CAP, Agent, Depot, Extractor, Hauler, Prospector, SuperBot
+from isru_zoo.env.entity import ENTITY_TYPE, AGENT_ROLE, CAP, Depot, Extractor, Hauler, Prospector, ProspectorExtractor, SuperBot
 from isru_zoo.env.resource import TestResource1, TestResource2
 
 
@@ -25,6 +25,8 @@ def add_args(parser):
                         help="The number of hauler vehicles to place in the world.")
     parser.add_argument("--num_prospectors", type=int, default=1,
                         help="The number of prospector vehicles to place in the world.")
+    parser.add_argument("--num_prospector_extractors", type=int, default=0,
+                        help="The number of prospector-extractor vehicles to place in the world.")
     parser.add_argument("--num_superbots", type=int, default=0,
                         help="The number of superbot vehicles to place in the world.")
     parser.add_argument("--num_obstacles", type=int, default=0,
@@ -49,6 +51,9 @@ def add_args(parser):
                         help="Max Euclidean distance (in grid units) a Hauler must be within of any Extractor to pick up resources.")
     parser.add_argument("--noisy_memory", action="store_true",
                         help="Whether to allow the agent to see areas which are explored but not currently visible, with added noise.")
+    parser.add_argument("--gnn_num_frontier_nodes", type=int, default=4,
+                        help="Number of exploration frontier nodes to inject into the graph observation "
+                             "for prospecting agents (nearest unexplored regions). 0 disables frontier nodes.")
     parser.add_argument("--movement_mode", type=str, default="moore",
                         choices=["moore", "velocity"],
                         help="The movement mode for agents: 'moore' uses discrete Moore neighborhood movement, 'velocity' uses continuous velocity control.")
@@ -74,6 +79,7 @@ def validate_args(parsed_args):
         parsed_args.num_extractors + \
         parsed_args.num_haulers + \
         parsed_args.num_prospectors + \
+        parsed_args.num_prospector_extractors + \
         parsed_args.num_superbots
 
 
@@ -207,6 +213,7 @@ class parallel_env(ParallelEnv):
             num_extractors: int = 2,
             num_haulers: int = 2,
             num_prospectors: int = 1,
+            num_prospector_extractors: int = 0,
             num_superbots: int = 0,
             max_cycles: int = -1,
             episode_max: int = 1000,
@@ -226,6 +233,7 @@ class parallel_env(ParallelEnv):
             movement_mode: str = "moore",
             render_mode: str = "human",
             gnn_use_dense_obs: bool = False,
+            gnn_num_frontier_nodes: int = 4,
         ):
         """
         Initialize the environment.
@@ -252,6 +260,7 @@ class parallel_env(ParallelEnv):
         self.observation_mode_global = observation_mode_global
         self.movement_mode = movement_mode
         self.gnn_use_dense_obs = gnn_use_dense_obs
+        self.gnn_num_frontier_nodes = gnn_num_frontier_nodes
         self._gnn_dense_layout = None
 
         # Set up entities.
@@ -272,6 +281,11 @@ class parallel_env(ParallelEnv):
                 position=self.get_random_position(),
                 observation_radius=self.default_observation_radius
             ) for _ in range(num_prospectors)] + \
+            [ProspectorExtractor(
+                world_dims=self.world_dims,
+                position=self.get_random_position(),
+                observation_radius=self.default_observation_radius
+            ) for _ in range(num_prospector_extractors)] + \
             [SuperBot(
                 world_dims=self.world_dims,
                 position=self.get_random_position(),
@@ -367,6 +381,7 @@ class parallel_env(ParallelEnv):
         self.step_count = 0
         self.last_rewards = {agent: 0.0 for agent in self.possible_agents}
         self.dones = dict.fromkeys(self.agents, False)
+        self.done_rewarded = False
 
         info = {
             agent: {} for agent in self.agents
@@ -1025,12 +1040,12 @@ class parallel_env(ParallelEnv):
         REWARD_NO_EXPLORATION = -1.0
         REWARD_COMMUNICATION = -5.0
         REWARD_NO_COMMUNICATION = 5.0
-        REWARD_EXTRACTOR_ON_RESOURCE = 20.0
+        REWARD_EXTRACTOR_ON_RESOURCE = 0.05
         REWARD_DEPOSIT = 0.0
         REWARD_EXTRACT = 100000.0
         REWARD_CLOSEST_RESOURCE = 0.2
         REWARD_UNCERTAINTY_REDUCTION = 0.1
-        REWARD_DONE = 1000000.0
+        REWARD_DONE = 10000.0
 
         self.step_count += 1
 
@@ -1053,12 +1068,17 @@ class parallel_env(ParallelEnv):
         stack_value = {a: True for a in self.possible_agents}
 
         # Pre-movement calculations.
+        deposited_prev = sum(depot.stock for depot in self.possible_depots)
+        cargo_prev = {}
+        visible_resource_cells_prev = {}
         uncertainty_sum_prev = {}
         visible_cells_prev = {}
         nearest_resource_dist_prev = {}
         for agent in self.agents:
             # Visible cells.
             visible_cells_prev[agent] = self._get_visible_cell_count(agent)
+            cargo_prev[agent] = sum(agent.cargo.values())
+            visible_resource_cells_prev[agent] = self._get_visible_cell_count(agent, use_resource_mask=True)
 
             # Uncertainty sum.
             uncertainty_sum_prev[agent] = agent.uncertainty.sum()
@@ -1191,7 +1211,7 @@ class parallel_env(ParallelEnv):
                             if self.map_resources[r][px, py] > 0:
                                 # Extractor is sitting on a resource tile.
                                 info_dict["extractors/num_in_place"] += 1
-                                # reward_dict[agent] += REWARD_EXTRACTOR_ON_RESOURCE / agent.steps_stationary #TODO: this gets smaller the longer the agent sits
+                                reward_dict[agent] += REWARD_EXTRACTOR_ON_RESOURCE
 
         # Calculate the percentage of resources deposited.
         total_resources = sum(r.quantity for r in self.possible_resources)
@@ -1259,16 +1279,26 @@ class parallel_env(ParallelEnv):
                 # reward_dict[agent] += REWARD_NO_EXPLORATION
                 # stack_value[agent] = False
             
-            # Provide intrinsic reward.
+            # Provide intrinsic reward (delta-based: reward the change this step caused).
             total_cells = np.prod(self.world_dims)
-            visible_resource_cells = self._get_visible_cell_count(agent, use_resource_mask=True)
-            resources_held = sum(sum(agent.cargo.values()) for agent in self.agents)
+            visible_cells = self._get_visible_cell_count(agent, use_resource_mask=True)
+            visible_cells_prev_agent = visible_resource_cells_prev.get(agent, 0)
+            resources_held_agent = sum(agent.cargo.values())
             resources_deposited = sum(depot.stock for depot in self.possible_depots)
-            r_exploration = visible_resource_cells / total_cells
-            r_cargo = resources_held / total_resources
-            r_deposited = resources_deposited / total_resources
+            r_exploration = (visible_cells - visible_cells_prev_agent) / total_cells
+            r_cargo = max(0.0, resources_held_agent - cargo_prev.get(agent, 0.0)) / total_resources
+            r_deposited = (resources_deposited - deposited_prev) / total_resources
 
-            r_intrinsic = 100.0 * r_deposited + 1.0 * r_cargo + 1.0 * r_exploration
+            if agent.capabilities[CAP.PROSPECT]:
+                w_deposited = 0.0
+                w_cargo = 0.0
+                w_exploration = 100.0
+            else:
+                w_deposited = 100.0
+                w_cargo = 10.0
+                w_exploration = 0.0
+
+            r_intrinsic = w_deposited * r_deposited + w_cargo * r_cargo + w_exploration * r_exploration
             reward_dict[agent] += r_intrinsic
 
             # Provide uncertainty reduction reward.
@@ -1278,8 +1308,11 @@ class parallel_env(ParallelEnv):
                     reward_dict[agent] += REWARD_UNCERTAINTY_REDUCTION * (uncertainty_sum_prev[agent] - uncertainty_sum)
             
             # Provide a completion reward.
-            if end_done:
+            if end_done and not self.done_rewarded:
                 reward_dict[agent] += REWARD_DONE / self.step_count
+
+        if end_done:
+            self.done_rewarded = True
 
         # Provide a state and state_visibility_mask in the info dict for convenience.
         state, state_visibility_mask = self._state()
@@ -1636,16 +1669,20 @@ class parallel_env_map_obs(parallel_env):
 
         layers = [None for _ in range(self.map_shape[0])]
 
-        # Set up the agent maps.
-        map_agents = np.zeros((*self.world_dims, len(AGENT_ROLE) + 1), dtype=np.int32)
-        for i, a in enumerate(self.possible_agents):
+        # Set up the agent maps (capability-based: agents may appear in multiple layers).
+        map_agents_prospector = np.zeros(self.world_dims, dtype=np.int32)
+        map_agents_extractor = np.zeros(self.world_dims, dtype=np.int32)
+        map_agents_hauler = np.zeros(self.world_dims, dtype=np.int32)
+        for a in self.possible_agents:
             pos = a.grid_position
-            # map_agents[pos[0], pos[1], a.role.value] = 1
-            if a == agent:
-                map_agents[pos[0], pos[1], a.role.value] += 2  # Ego agent
-            else:
-                map_agents[pos[0], pos[1], a.role.value] += 1
-        
+            val = 2 if a == agent else 1
+            if a.capabilities[CAP.PROSPECT]:
+                map_agents_prospector[pos[0], pos[1]] += val
+            if a.capabilities[CAP.EXTRACT]:
+                map_agents_extractor[pos[0], pos[1]] += val
+            if a.capabilities[CAP.CARRY]:
+                map_agents_hauler[pos[0], pos[1]] += val
+
         # Set up the resource, cargo, and deposited resource maps.
         map_resources_extant = np.zeros(self.world_dims, dtype=np.float32)
         map_resources_deposited = np.zeros(self.world_dims, dtype=np.float32)
@@ -1665,7 +1702,7 @@ class parallel_env_map_obs(parallel_env):
         # Temporarily use a single boolean map for depots.
         map_depots = self.map_depots > 0
         assert len(self.possible_resources) == 1, "Currently only supports one resource type."
-        
+
         # Set up relative position maps. They should be 0 at the agent position and increase by 1 for each cell away.
         map_rel_pos_x = np.zeros(self.world_dims, dtype=np.float32)
         map_rel_pos_x[:, :] = np.arange(self.world_dims[0], dtype=np.float32)[:, None] - agent.position[0]
@@ -1687,7 +1724,7 @@ class parallel_env_map_obs(parallel_env):
             else:
                 # Resources can only be observed for the first time by a prospector.
                 fixed_mask[self.MAP_LAYERS.RESOURCES_EXTANT, ~agent.mask_resources_observed] = False
-            
+
             # Update the agent's observed area mask.
             agent.mask_observed[visible] = True
 
@@ -1703,9 +1740,9 @@ class parallel_env_map_obs(parallel_env):
 
         # Load most map layers.
         layers[self.MAP_LAYERS.OBSTACLES] = self.map_obstacles
-        layers[self.MAP_LAYERS.AGENTS_PROSPECTOR] = map_agents[:, :, AGENT_ROLE.PROSPECTOR.value]
-        layers[self.MAP_LAYERS.AGENTS_EXTRACTOR] = map_agents[:, :, AGENT_ROLE.EXTRACTOR.value]
-        layers[self.MAP_LAYERS.AGENTS_HAULER] = map_agents[:, :, AGENT_ROLE.HAULER.value]
+        layers[self.MAP_LAYERS.AGENTS_PROSPECTOR] = map_agents_prospector
+        layers[self.MAP_LAYERS.AGENTS_EXTRACTOR] = map_agents_extractor
+        layers[self.MAP_LAYERS.AGENTS_HAULER] = map_agents_hauler
         layers[self.MAP_LAYERS.RELATIVE_POS_X] = map_rel_pos_x
         layers[self.MAP_LAYERS.RELATIVE_POS_Y] = map_rel_pos_y
         layers[self.MAP_LAYERS.DEPOTS] = map_depots
@@ -2091,53 +2128,20 @@ class parallel_env_flat_map_obs(parallel_env):
         agent_pos = agent.position
         target_pos = None
         
-        # Different targeting logic based on agent role
-        if agent.role == AGENT_ROLE.PROSPECTOR:
-            # Find the nearest unexplored area (boundary between explored and unexplored)
-            # Get the boundary of explored area
-            explored = agent.mask_observed
-            # Find the boundary by dilating the explored area and finding the difference
+        def _prospector_target():
             from scipy import ndimage
+            explored = agent.mask_observed
             dilated = ndimage.binary_dilation(explored)
             boundary = dilated & ~explored
-            
-            # Find the nearest boundary point
             if np.any(boundary):
                 boundary_points = np.argwhere(boundary)
                 distances = np.linalg.norm(boundary_points - agent.grid_position, axis=1)
-                nearest_idx = np.argmin(distances)
-                target_pos = boundary_points[nearest_idx].astype(np.float32)
-            else:
-                # If no boundary (everything explored), pick a random position
-                target_pos = np.random.uniform(0, self.world_dims).astype(np.float32)
-                
-        elif agent.role == AGENT_ROLE.EXTRACTOR:
-            # Find the nearest known resource
-            resource_mask = np.zeros_like(agent.mask_observed, dtype=bool)
-            for r in self.possible_resources:
-                resource_mask |= self.map_resources[r] > 0
-            
-            # Only consider resources that have been discovered
-            known_resources = resource_mask & agent.mask_resources_observed
-            
-            if np.any(known_resources):
-                resource_points = np.argwhere(known_resources)
-                distances = np.linalg.norm(resource_points - agent.grid_position, axis=1)
-                nearest_idx = np.argmin(distances)
-                target_pos = resource_points[nearest_idx].astype(np.float32)
-            else:
-                # If no known resources, follow a prospector
-                for other_agent in self.agents:
-                    if other_agent.role == AGENT_ROLE.PROSPECTOR:
-                        target_pos = other_agent.position
-                        break
-                
-                # If no prospector, pick a random position
-                if target_pos is None:
-                    target_pos = np.random.uniform(0, self.world_dims).astype(np.float32)
-                    
-        elif agent.role == AGENT_ROLE.HAULER:
-            # Find the nearest extractor that's on a resource
+                return boundary_points[np.argmin(distances)].astype(np.float32)
+            return np.random.uniform(0, self.world_dims).astype(np.float32)
+
+        # Different targeting logic based on agent capabilities
+        if agent.capabilities[CAP.CARRY]:
+            # Hauler: find the nearest extractor on a resource, or go to depot
             nearest_extractor = None
             min_distance = float('inf')
             
@@ -2187,7 +2191,34 @@ class parallel_env_flat_map_obs(parallel_env):
                 # If no suitable target found, pick a random position
                 if target_pos is None:
                     target_pos = np.random.uniform(0, self.world_dims).astype(np.float32)
-        
+
+        elif agent.capabilities[CAP.EXTRACT]:
+            # Extractor (or ProspectorExtractor): move toward nearest known resource.
+            resource_mask = np.zeros_like(agent.mask_observed, dtype=bool)
+            for r in self.possible_resources:
+                resource_mask |= self.map_resources[r] > 0
+            known_resources = resource_mask & agent.mask_resources_observed
+
+            if np.any(known_resources):
+                resource_points = np.argwhere(known_resources)
+                distances = np.linalg.norm(resource_points - agent.grid_position, axis=1)
+                target_pos = resource_points[np.argmin(distances)].astype(np.float32)
+            elif agent.capabilities[CAP.PROSPECT]:
+                # ProspectorExtractor with no known resources: explore.
+                target_pos = _prospector_target()
+            else:
+                # Pure extractor with no known resources: follow a prospecting agent.
+                for other_agent in self.agents:
+                    if other_agent.capabilities[CAP.PROSPECT]:
+                        target_pos = other_agent.position
+                        break
+                if target_pos is None:
+                    target_pos = np.random.uniform(0, self.world_dims).astype(np.float32)
+
+        elif agent.capabilities[CAP.PROSPECT]:
+            # Pure prospector: move toward the nearest unexplored boundary.
+            target_pos = _prospector_target()
+
         # Calculate relative position to target
         if target_pos is not None:
             return target_pos - agent_pos
@@ -2271,16 +2302,17 @@ class parallel_env_partial_obs(parallel_env_map_obs):
         map_diameter = 2 * agent.observation_radius + 1
         map = np.zeros((1, map_diameter, map_diameter), dtype=np.int32)
 
-        # Fill in agent data.
+        # Fill in agent data (capability-based: agents may set multiple bits).
         for a in self.possible_agents:
             if a != agent:
                 pos = a.grid_position - map_center + agent.observation_radius
                 if np.all(pos < map_diameter) and np.all(pos >= 0):
-                    map[0, pos[0], pos[1]] |= {
-                        AGENT_ROLE.PROSPECTOR: self.MAP_MASKS.AGENT_PROSPECTOR,
-                        AGENT_ROLE.EXTRACTOR: self.MAP_MASKS.AGENT_EXTRACTOR,
-                        AGENT_ROLE.HAULER: self.MAP_MASKS.AGENT_HAULER
-                    }[a.role]
+                    if a.capabilities[CAP.PROSPECT]:
+                        map[0, pos[0], pos[1]] |= self.MAP_MASKS.AGENT_PROSPECTOR
+                    if a.capabilities[CAP.EXTRACT]:
+                        map[0, pos[0], pos[1]] |= self.MAP_MASKS.AGENT_EXTRACTOR
+                    if a.capabilities[CAP.CARRY]:
+                        map[0, pos[0], pos[1]] |= self.MAP_MASKS.AGENT_HAULER
         
         # Calculate slice information.
         pos_x_min = max(0, map_center[0] - agent.observation_radius)
@@ -2396,11 +2428,7 @@ class parallel_env_graph_obs(parallel_env_map_obs):
     class NODE_TYPE(IntEnum):
         RESOURCE = len(AGENT_ROLE)
         DEPOT = auto()
-
-
-    class COORD_ENTITY_TYPE(IntEnum):
-        RESOURCE = len(AGENT_ROLE)
-        DEPOT = auto()
+        FRONTIER = auto()
 
 
     @functools.cache
@@ -2408,12 +2436,14 @@ class parallel_env_graph_obs(parallel_env_map_obs):
         ''' Returns the observation space for the given agent. '''
 
         if self.gnn_use_dense_obs:
-            node_feat_dim = int(max(self.NODE_TYPE)) + 1 + 4  # one-hot role + posX, posY, velX, velY
+            # one-hot role + posX, posY, velX, velY + frontier region-size scalar
+            node_feat_dim = int(max(self.NODE_TYPE)) + 1 + 5
             edge_feat_dim = 1  # distance
             max_total_nodes = (
                 len(self.possible_agents)
                 + sum(r.quantity_max for r in self.possible_resources)
                 + len(self.possible_depots)
+                + self.gnn_num_frontier_nodes
             )
             # Ego-star topology: exactly one edge per non-ego node.
             max_edges = max_total_nodes - 1
@@ -2462,10 +2492,10 @@ class parallel_env_graph_obs(parallel_env_map_obs):
             "role": spaces.Box(low=0, high=int(max(self.NODE_TYPE)), dtype=np.int32),
             "graph": spaces.Graph(
                 node_space = spaces.Box(
-                    # max(NODE_TYPE), posX, posY, velX, velY
+                    # max(NODE_TYPE), posX, posY, velX, velY, frontier region-size scalar
                     low = -np.inf,
                     high = np.inf,
-                    shape = (int(max(self.NODE_TYPE)) + 1 + 4,),
+                    shape = (int(max(self.NODE_TYPE)) + 1 + 5,),
                     dtype=np.float32
                 ),
                 edge_space = spaces.Box(
@@ -2479,6 +2509,41 @@ class parallel_env_graph_obs(parallel_env_map_obs):
         })
 
         return obs_space
+
+
+    def _compute_frontier_targets(self, agent, k):
+        ''' Returns up to `k` exploration frontier targets for the agent.
+
+            A frontier is the boundary between explored and unexplored free space
+            (the same construction the map-obs heuristic uses at `_get_target`).
+            Connected frontier regions are ranked by size and the centroid of each
+            of the `k` largest regions is returned (snapped to a real frontier cell).
+
+            Returns:
+                list[tuple[np.ndarray, float]]: (grid_position, normalized_size)
+                pairs, ordered largest region first. Empty if nothing is unexplored.
+        '''
+        from scipy import ndimage
+
+        explored = agent.mask_resources_observed
+        free = ~self.map_obstacles.astype(bool)  # never propose frontiers into walls
+        boundary = ndimage.binary_dilation(explored) & ~explored & free
+        if not boundary.any():
+            return []  # fully explored (e.g. global-state query)
+
+        labels, n = ndimage.label(boundary)
+        total_cells = float(np.prod(self.world_dims))
+        regions = []
+        for lbl in range(1, n + 1):
+            cells = np.argwhere(labels == lbl).astype(np.float32)
+            centroid = cells.mean(axis=0)
+            # Snap the centroid to the nearest real frontier cell so it never
+            # lands inside explored/obstacle space (e.g. for L-shaped regions).
+            rep = cells[np.argmin(np.linalg.norm(cells - centroid, axis=1))]
+            regions.append((rep, len(cells) / total_cells))
+
+        regions.sort(key=lambda r: -r[1])  # largest region first
+        return regions[:k]
 
 
     def observe(self, agent, senders=set(), _observation_radius=None, _global_state=False):
@@ -2507,11 +2572,15 @@ class parallel_env_graph_obs(parallel_env_map_obs):
             ea = np.zeros((max_edges, edge_feat_dim), dtype=np.float32)
             edge_count = 0
 
-            def _write_node(slot, node_type, pos, vel):
-                """Populate node features for the given slot (does NOT touch nv)."""
+            def _write_node(slot, node_type, pos, vel, extra=0.0):
+                """Populate node features for the given slot (does NOT touch nv).
+
+                `extra` is the trailing scalar feature (frontier region size,
+                normalized); it is 0 for all non-frontier node types.
+                """
                 role = np.zeros(int(max(self.NODE_TYPE) + 1), dtype=np.float32)
                 role[node_type] = 1.0
-                nf[slot] = np.concatenate([role, pos, vel])
+                nf[slot] = np.concatenate([role, pos, vel, [np.float32(extra)]])
 
             def _add_edge(src, dst, dist):
                 nonlocal edge_count
@@ -2599,8 +2668,30 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                 _add_edge(slot, 0, dist)
                 slot += 1
 
-            assert slot == max_total_nodes, \
-                f"slot={slot} != max_total_nodes={max_total_nodes}"
+            # --- Frontier slots (nearest unexplored regions) ---
+            # Reserved K slots, populated only for prospecting agents (exploration
+            # is their job). Skipped for omniscient global-state queries.
+            if (not _global_state and self.gnn_num_frontier_nodes > 0
+                    and agent.capabilities[CAP.PROSPECT]):
+                frontiers = self._compute_frontier_targets(
+                    agent, self.gnn_num_frontier_nodes
+                )
+                for rep, size_norm in frontiers:
+                    pos_r = relative_position(rep)
+                    dist = np.linalg.norm(pos_r)
+                    _write_node(slot, self.NODE_TYPE.FRONTIER,
+                                normalize(pos_r), np.zeros(2, dtype=np.float32),
+                                extra=size_norm)
+                    nv[slot] = 1.0
+                    _add_edge(slot, 0, dist)
+                    slot += 1
+
+            # Entity slots must fill exactly up to the reserved frontier block;
+            # unused frontier slots remain zero-padded (nv=0, no edge).
+            assert slot <= max_total_nodes, \
+                f"slot={slot} > max_total_nodes={max_total_nodes}"
+            assert slot >= max_total_nodes - self.gnn_num_frontier_nodes, \
+                f"slot={slot} left non-frontier slots unfilled"
             assert edge_count <= max_edges, \
                 f"edge_count={edge_count} exceeds max_edges={max_edges}"
 
@@ -2629,7 +2720,9 @@ class parallel_env_graph_obs(parallel_env_map_obs):
         edge_index = [[], []]  # Edge connections
         edge_features = []  # Edge features
 
-        def add_node(node_type, pos, vel):
+        def add_node(node_type, pos, vel, extra=0.0):
+            # `extra` is the trailing scalar feature (frontier region size,
+            # normalized); it is 0 for all non-frontier node types.
             role_mask = np.zeros(int(max(self.NODE_TYPE) + 1), dtype=np.float32)
             role_mask[node_type] = 1.0
             node_features.append([
@@ -2637,7 +2730,8 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                 pos[0],
                 pos[1],
                 vel[0],
-                vel[1]
+                vel[1],
+                extra
             ])
             return len(node_features) - 1  # Return index of the new node
 
@@ -2694,6 +2788,23 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                 np.array([0.0, 0.0], dtype=np.float32)
             )
             add_edge(node, node_ego, dist)
+
+        # Add exploration frontier nodes (nearest unexplored regions). Skipped for
+        # omniscient global-state queries, which have nothing left to explore.
+        if not _global_state and self.gnn_num_frontier_nodes > 0:
+            for rep, size_norm in self._compute_frontier_targets(
+                agent, self.gnn_num_frontier_nodes
+            ):
+                pos = relative_position(rep)
+                dist = np.linalg.norm(pos)
+                pos = normalize(pos)
+                node = add_node(
+                    self.NODE_TYPE.FRONTIER,
+                    pos,
+                    np.array([0.0, 0.0], dtype=np.float32),
+                    extra=size_norm
+                )
+                add_edge(node, node_ego, dist)
 
         # Convert to tensors.
         node_features = torch.tensor(node_features, dtype=torch.float32)
