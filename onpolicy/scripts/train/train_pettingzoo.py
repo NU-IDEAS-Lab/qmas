@@ -237,6 +237,9 @@ def main(args):
     torch.backends.cudnn.benchmark = True
     # This disables the fast path for nn.TransformerEncoder and nn.functional.MultiheadAttention, which crash on ideas2.
     torch.backends.mha.set_fastpath_enabled(False)
+    torch.backends.cuda.enable_flash_sdp(False)
+    torch.backends.cuda.enable_mem_efficient_sdp(False)
+    torch.backends.cuda.enable_math_sdp(True)
 
     # cuda
     if all_args.cuda and torch.cuda.is_available():
