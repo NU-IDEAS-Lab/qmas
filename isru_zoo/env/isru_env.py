@@ -1053,7 +1053,8 @@ class parallel_env(ParallelEnv):
         REWARD_COMMUNICATION = -5.0
         REWARD_NO_COMMUNICATION = 5.0
         REWARD_EXTRACTOR_ON_RESOURCE = 0.05
-        REWARD_DEPOSIT = 0.0
+        REWARD_EXTRACTOR_PICKUP = 5.0
+        REWARD_DEPOSIT = 5.0
         REWARD_EXTRACT = 100000.0
         REWARD_CLOSEST_RESOURCE = 0.2
         REWARD_UNCERTAINTY_REDUCTION = 0.1
@@ -1086,11 +1087,14 @@ class parallel_env(ParallelEnv):
         uncertainty_sum_prev = {}
         visible_cells_prev = {}
         nearest_resource_dist_prev = {}
+        resource_mask_prev = {}
         for agent in self.agents:
             # Visible cells.
             visible_cells_prev[agent] = self._get_visible_cell_count(agent)
             cargo_prev[agent] = sum(agent.cargo.values())
             visible_resource_cells_prev[agent] = self._get_visible_cell_count(agent, use_resource_mask=True)
+
+            resource_mask_prev[agent] = agent.mask_resources_observed.copy()
 
             # Uncertainty sum.
             uncertainty_sum_prev[agent] = agent.uncertainty.sum()
@@ -1200,6 +1204,7 @@ class parallel_env(ParallelEnv):
                                 agent.cargo[r.resource_id] = agent.cargo.get(r.resource_id, 0.0) + take
                                 info_dict["resources/step_picked_up"] += take
                                 # reward_dict[agent] += REWARD_EXTRACT
+                                reward_dict[extractor] += REWARD_EXTRACTOR_PICKUP * take
                         elif val < 0:
                             r = self.idx_to_res[idx]
                             want_drop = float(-val)
@@ -1211,7 +1216,7 @@ class parallel_env(ParallelEnv):
                                 depot.stock += drop
                                 agent.cargo[r.resource_id] -= drop
                                 info_dict["resources/step_dropped_off"] += drop
-                                # reward_dict[agent] += REWARD_DEPOSIT
+                                reward_dict[agent] += REWARD_DEPOSIT * drop
 
                 if agent.capabilities[CAP.EXTRACT]:
                     # Provide reward for Extractors that are sitting on a resource tile.
@@ -1301,20 +1306,33 @@ class parallel_env(ParallelEnv):
             r_cargo = max(0.0, resources_held_agent - cargo_prev.get(agent, 0.0)) / total_resources
             r_deposited = (resources_deposited - deposited_prev) / total_resources
 
+            newly_prospected = agent.mask_resources_observed & ~resource_mask_prev.get(
+                agent, np.zeros_like(agent.mask_resources_observed)
+            )
+            newly_discovered = 0
+            for r in self.possible_resources:
+                newly_discovered += np.sum((self.map_resources[r] > 0) & newly_prospected)
+            r_discovery = newly_discovered / total_resources
+
             if agent.capabilities[CAP.PROSPECT]:
                 w_deposited = 0.0
                 w_cargo = 0.0
                 w_exploration = 100.0
+                w_discovery = 100.0
             else:
                 w_deposited = 100.0
                 w_cargo = 10.0
                 w_exploration = 0.0
+                w_discovery = 0.0
 
-            r_intrinsic = w_deposited * r_deposited + w_cargo * r_cargo + w_exploration * r_exploration
+            r_intrinsic = (w_deposited * r_deposited + w_cargo * r_cargo
+                           + w_exploration * r_exploration + w_discovery * r_discovery)
             reward_dict[agent] += r_intrinsic
 
-            # Provide uncertainty reduction reward.
-            if agent in comms_requests_explicit or agent in comms_requests_relative:
+            # Provide uncertainty reduction reward
+            if agent.capabilities[CAP.PROSPECT] and (
+                agent in comms_requests_explicit or agent in comms_requests_relative
+            ):
                 uncertainty_sum = agent.uncertainty.sum()
                 if uncertainty_sum < uncertainty_sum_prev[agent]:
                     reward_dict[agent] += REWARD_UNCERTAINTY_REDUCTION * (uncertainty_sum_prev[agent] - uncertainty_sum)
