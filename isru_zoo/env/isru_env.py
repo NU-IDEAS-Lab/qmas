@@ -1320,7 +1320,7 @@ class parallel_env(ParallelEnv):
                 w_exploration = 100.0
                 w_discovery = 100.0
             else:
-                w_deposited = 100.0
+                w_deposited = 20.0
                 w_cargo = 10.0
                 w_exploration = 0.0
                 w_discovery = 0.0
