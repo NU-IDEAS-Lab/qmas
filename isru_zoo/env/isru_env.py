@@ -1052,13 +1052,13 @@ class parallel_env(ParallelEnv):
         REWARD_NO_EXPLORATION = -1.0
         REWARD_COMMUNICATION = -5.0
         REWARD_NO_COMMUNICATION = 5.0
-        REWARD_EXTRACTOR_ON_RESOURCE = 0.05
+        REWARD_EXTRACTOR_ON_RESOURCE = 1.0
         REWARD_EXTRACTOR_PICKUP = 5.0
-        REWARD_DEPOSIT = 5.0
+        REWARD_DEPOSIT = 0.0
         REWARD_EXTRACT = 100000.0
         REWARD_CLOSEST_RESOURCE = 0.2
         REWARD_UNCERTAINTY_REDUCTION = 0.1
-        REWARD_DONE = 10000.0
+        REWARD_DONE = 1000000.0
 
         self.step_count += 1
 
@@ -1204,7 +1204,7 @@ class parallel_env(ParallelEnv):
                                 agent.cargo[r.resource_id] = agent.cargo.get(r.resource_id, 0.0) + take
                                 info_dict["resources/step_picked_up"] += take
                                 # reward_dict[agent] += REWARD_EXTRACT
-                                reward_dict[extractor] += REWARD_EXTRACTOR_PICKUP * take
+                                # reward_dict[extractor] += REWARD_EXTRACTOR_PICKUP * take
                         elif val < 0:
                             r = self.idx_to_res[idx]
                             want_drop = float(-val)
@@ -1216,7 +1216,7 @@ class parallel_env(ParallelEnv):
                                 depot.stock += drop
                                 agent.cargo[r.resource_id] -= drop
                                 info_dict["resources/step_dropped_off"] += drop
-                                reward_dict[agent] += REWARD_DEPOSIT * drop
+                                # reward_dict[agent] += REWARD_DEPOSIT * drop
 
                 if agent.capabilities[CAP.EXTRACT]:
                     # Provide reward for Extractors that are sitting on a resource tile.
@@ -1320,7 +1320,7 @@ class parallel_env(ParallelEnv):
                 w_exploration = 100.0
                 w_discovery = 100.0
             else:
-                w_deposited = 20.0
+                w_deposited = 100.0
                 w_cargo = 10.0
                 w_exploration = 0.0
                 w_discovery = 0.0
