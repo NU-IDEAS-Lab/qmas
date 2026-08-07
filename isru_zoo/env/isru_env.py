@@ -2570,8 +2570,8 @@ class parallel_env_graph_obs(parallel_env_map_obs):
         ''' Returns the observation space for the given agent. '''
 
         if self.gnn_use_dense_obs:
-            # one-hot role + posX, posY, velX, velY + frontier region-size scalar
-            node_feat_dim = int(max(self.NODE_TYPE)) + 1 + 5
+            # one-hot role + posX, posY, velX, velY + frontier region-size scalar + cargo fraction
+            node_feat_dim = int(max(self.NODE_TYPE)) + 1 + 6
             edge_feat_dim = 1  # distance
             max_total_nodes = (
                 len(self.possible_agents)
@@ -2626,10 +2626,10 @@ class parallel_env_graph_obs(parallel_env_map_obs):
             "role": spaces.Box(low=0, high=int(max(self.NODE_TYPE)), dtype=np.int32),
             "graph": spaces.Graph(
                 node_space = spaces.Box(
-                    # max(NODE_TYPE), posX, posY, velX, velY, frontier region-size scalar
+                    # max(NODE_TYPE), posX, posY, velX, velY, frontier region-size scalar, cargo fraction
                     low = -np.inf,
                     high = np.inf,
-                    shape = (int(max(self.NODE_TYPE)) + 1 + 5,),
+                    shape = (int(max(self.NODE_TYPE)) + 1 + 6,),
                     dtype=np.float32
                 ),
                 edge_space = spaces.Box(
@@ -2691,6 +2691,34 @@ class parallel_env_graph_obs(parallel_env_map_obs):
         def normalize(vec):
             return vec / (np.linalg.norm(vec) + 1e-6)
 
+        def cargo_fraction(entity):
+            ''' Fraction of carry capacity currently held by `entity` (0 for non-CARRY
+            entities). This is the one piece of state a Hauler-type agent's own decision
+            (seek a resource vs. return to the depot) fundamentally depends on, so it
+            must be a real observation feature -- not something a masking/prediction
+            scheme can recover, since it isn't a hidden value of an existing feature,
+            it's a dimension that would otherwise never exist in the feature vector. '''
+            if not entity.capabilities.get(CAP.CARRY, False):
+                return 0.0
+            capacity = entity.capabilities.get(CAP.CARRY_CAPACITY, 1.0)
+            return sum(entity.cargo.values()) / capacity if capacity else 0.0
+
+        def visible_via_relay(pos):
+            ''' True if `pos` is currently within any communication sender's own
+            observation radius. In parallel_env_map_obs, "full" communication mode
+            propagates every sender's own local sightings to the receiver (each agent
+            trivially "sees" its own cell, so this is how every agent ends up knowing
+            every other agent's current position under full comms -- see that class's
+            observe()). This graph observation only ever used `senders` to union the
+            cumulative "ever discovered" resource masks, never to relay a sender's
+            current sightings, so a Hauler could never actually perceive a distant
+            Extractor's position even under communication_mode="full". This restores
+            that parity. '''
+            return any(
+                np.linalg.norm(np.asarray(pos, dtype=np.float32) - sender.position) <= sender.observation_radius
+                for sender in senders
+            )
+
         if self.gnn_use_dense_obs:
             layout = self._gnn_dense_layout
             max_total_nodes = layout["max_total_nodes"]
@@ -2706,15 +2734,17 @@ class parallel_env_graph_obs(parallel_env_map_obs):
             ea = np.zeros((max_edges, edge_feat_dim), dtype=np.float32)
             edge_count = 0
 
-            def _write_node(slot, node_type, pos, vel, extra=0.0):
+            def _write_node(slot, node_type, pos, vel, extra=0.0, cargo=0.0):
                 """Populate node features for the given slot (does NOT touch nv).
 
                 `extra` is the trailing scalar feature (frontier region size,
-                normalized); it is 0 for all non-frontier node types.
+                normalized); it is 0 for all non-frontier node types. `cargo` is the
+                fraction of carry capacity currently held; it is 0 for non-CARRY node
+                types and for CARRY-capable agents with empty cargo.
                 """
                 role = np.zeros(int(max(self.NODE_TYPE) + 1), dtype=np.float32)
                 role[node_type] = 1.0
-                nf[slot] = np.concatenate([role, pos, vel, [np.float32(extra)]])
+                nf[slot] = np.concatenate([role, pos, vel, [np.float32(extra)], [np.float32(cargo)]])
 
             def _add_edge(src, dst, dist):
                 nonlocal edge_count
@@ -2742,7 +2772,8 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                     agent.mask_resources_observed |= sender.mask_resources_observed
 
             # --- Slot 0: ego (always visible) ---
-            _write_node(0, agent.role, np.array([0.0, 0.0]), normalize(agent.velocity))
+            _write_node(0, agent.role, np.array([0.0, 0.0]), normalize(agent.velocity),
+                        cargo=cargo_fraction(agent))
             nv[0] = 1.0
 
             # --- Slots 1..N_agents-1: other agents ---
@@ -2755,8 +2786,8 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                 pos = relative_position(other_agent.position)
                 dist = np.linalg.norm(pos)
                 _write_node(slot, other_agent.role, normalize(pos),
-                            normalize(other_agent.velocity))
-                if dist <= obs_radius:
+                            normalize(other_agent.velocity), cargo=cargo_fraction(other_agent))
+                if dist <= obs_radius or visible_via_relay(other_agent.position):
                     nv[slot] = 1.0
                     _add_edge(slot, 0, dist)
                 slot += 1
@@ -2778,7 +2809,10 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                                     normalize(pos), np.zeros(2, dtype=np.float32))
                         # nv: mirror map-obs prospector rule.
                         # Global-state queries are omniscient (bypass prospector rule).
-                        in_visible = visible_area[rpos_int[0], rpos_int[1]]
+                        # A cell is "in view" either directly (ego's own radius) or via
+                        # relay (a communication sender currently has it in range) --
+                        # matching parallel_env_map_obs's full-comms merge behavior.
+                        in_visible = visible_area[rpos_int[0], rpos_int[1]] or visible_via_relay(rpos)
                         if _global_state or agent.capabilities[CAP.PROSPECT]:
                             resource_visible = in_visible
                         else:
@@ -2854,9 +2888,11 @@ class parallel_env_graph_obs(parallel_env_map_obs):
         edge_index = [[], []]  # Edge connections
         edge_features = []  # Edge features
 
-        def add_node(node_type, pos, vel, extra=0.0):
+        def add_node(node_type, pos, vel, extra=0.0, cargo=0.0):
             # `extra` is the trailing scalar feature (frontier region size,
-            # normalized); it is 0 for all non-frontier node types.
+            # normalized); it is 0 for all non-frontier node types. `cargo` is the
+            # fraction of carry capacity currently held; it is 0 for non-CARRY node
+            # types and for CARRY-capable agents with empty cargo.
             role_mask = np.zeros(int(max(self.NODE_TYPE) + 1), dtype=np.float32)
             role_mask[node_type] = 1.0
             node_features.append([
@@ -2865,7 +2901,8 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                 pos[1],
                 vel[0],
                 vel[1],
-                extra
+                extra,
+                cargo
             ])
             return len(node_features) - 1  # Return index of the new node
 
@@ -2878,7 +2915,8 @@ class parallel_env_graph_obs(parallel_env_map_obs):
         node_ego = add_node(
             agent.role,
             np.array([0.0, 0.0], dtype=np.float32),
-            normalize(agent.velocity)
+            normalize(agent.velocity),
+            cargo=cargo_fraction(agent)
         )
 
         # Add other agents.
@@ -2886,12 +2924,13 @@ class parallel_env_graph_obs(parallel_env_map_obs):
             if other_agent != agent:
                 pos = relative_position(other_agent.position)
                 dist = np.linalg.norm(pos)
-                if dist <= obs_radius:
+                if dist <= obs_radius or visible_via_relay(other_agent.position):
                     pos = normalize(pos)
                     node = add_node(
                         other_agent.role,
                         pos,
-                        normalize(other_agent.velocity)
+                        normalize(other_agent.velocity),
+                        cargo=cargo_fraction(other_agent)
                     )
                     add_edge(node, node_ego, dist)
 
@@ -2901,7 +2940,7 @@ class parallel_env_graph_obs(parallel_env_map_obs):
             for pos in resource_positions:
                 pos = relative_position(pos)
                 dist = np.linalg.norm(pos)
-                if dist <= obs_radius:
+                if dist <= obs_radius or visible_via_relay(pos + agent.position):
                     pos = normalize(pos)
                     node = add_node(
                         self.NODE_TYPE.RESOURCE,
