@@ -49,6 +49,38 @@ def add_args(parser):
                         help="The maximum amount of resources a hauler can carry.")
     parser.add_argument("--hauler_pickup_threshold", type=float, default=1.5,
                         help="Max Euclidean distance (in grid units) a Hauler must be within of any Extractor to pick up resources.")
+    parser.add_argument("--reward_extractor_on_resource", type=float, default=1.0,
+                        help="Per-step reward for an Extractor standing on a resource tile.")
+    parser.add_argument("--reward_extractor_pickup", type=float, default=5.0,
+                        help="Reward for an Extractor when a Hauler picks up resources from its tile, scaled by the amount taken.")
+    parser.add_argument("--reward_hauler_pickup", type=float, default=0.0,
+                        help="Reward for a Hauler when it picks up resources, scaled by the amount taken.")
+    parser.add_argument("--reward_hauler_delivery", type=float, default=0.0,
+                        help="Individual reward for a Hauler when it drops off resources at a depot, scaled by the amount dropped. "
+                             "Additive with the shared team-wide deposit reward.")
+    parser.add_argument("--reward_approach_resource", type=float, default=0.2,
+                        help="Reward per unit distance closed toward the shaping target while a Hauler is not carrying cargo.")
+    parser.add_argument("--reward_approach_depot", type=float, default=0.2,
+                        help="Reward per unit distance closed toward the nearest depot while a Hauler is carrying cargo.")
+    parser.add_argument("--reward_approach_resource_target", type=str, default="nearest_resource",
+                        choices=["nearest_resource", "nearest_extractor_on_resource"],
+                        help="What an empty Hauler's approach-shaping reward targets: the nearest raw resource cell, "
+                             "or the nearest Extractor that is currently standing on a resource (falls back to the "
+                             "nearest raw resource cell if none).")
+    parser.add_argument("--reward_uncertainty_reduction", type=float, default=0.1,
+                        help="Reward for a Prospector reducing uncertainty in a communicated-about area.")
+    parser.add_argument("--reward_done", type=float, default=1_000_000.0,
+                        help="One-time reward (divided by step count) for fully depositing all resources.")
+    parser.add_argument("--reward_no_communication", type=float, default=5.0,
+                        help="Reward for not requesting communication (only applies outside 'full' communication_mode).")
+    parser.add_argument("--reward_w_deposited", type=float, default=100.0,
+                        help="Weight on the shared team-wide fractional-deposited intrinsic reward term.")
+    parser.add_argument("--reward_w_cargo", type=float, default=10.0,
+                        help="Weight on the individual fractional-cargo-increase intrinsic reward term.")
+    parser.add_argument("--reward_w_exploration", type=float, default=100.0,
+                        help="Weight on the fractional-newly-visible-cells intrinsic reward term (Prospectors only).")
+    parser.add_argument("--reward_w_discovery", type=float, default=100.0,
+                        help="Weight on the fractional-newly-discovered-resources intrinsic reward term (Prospectors only).")
     parser.add_argument("--noisy_memory", action="store_true",
                         help="Whether to allow the agent to see areas which are explored but not currently visible, with added noise.")
     parser.add_argument("--gnn_num_frontier_nodes", type=int, default=4,
@@ -227,6 +259,20 @@ class parallel_env(ParallelEnv):
             available_actions_mask: bool = False,
             hauler_capacity: float = 10.0,
             hauler_pickup_threshold: float = 1.5,
+            reward_extractor_on_resource: float = 1.0,
+            reward_extractor_pickup: float = 5.0,
+            reward_hauler_pickup: float = 0.0,
+            reward_hauler_delivery: float = 0.0,
+            reward_approach_resource: float = 0.2,
+            reward_approach_depot: float = 0.2,
+            reward_approach_resource_target: str = "nearest_resource",
+            reward_uncertainty_reduction: float = 0.1,
+            reward_done: float = 1_000_000.0,
+            reward_no_communication: float = 5.0,
+            reward_w_deposited: float = 100.0,
+            reward_w_cargo: float = 10.0,
+            reward_w_exploration: float = 100.0,
+            reward_w_discovery: float = 100.0,
             noisy_memory: bool = False,
             communication_mode: str = "nearest",
             observation_mode_global: str = "coords",
@@ -255,6 +301,20 @@ class parallel_env(ParallelEnv):
         self.default_observation_radius = observation_radius
         self.default_hauler_capacity = hauler_capacity
         self.hauler_pickup_threshold = hauler_pickup_threshold
+        self.reward_extractor_on_resource = reward_extractor_on_resource
+        self.reward_extractor_pickup = reward_extractor_pickup
+        self.reward_hauler_pickup = reward_hauler_pickup
+        self.reward_hauler_delivery = reward_hauler_delivery
+        self.reward_approach_resource = reward_approach_resource
+        self.reward_approach_depot = reward_approach_depot
+        self.reward_approach_resource_target = reward_approach_resource_target
+        self.reward_uncertainty_reduction = reward_uncertainty_reduction
+        self.reward_done = reward_done
+        self.reward_no_communication = reward_no_communication
+        self.reward_w_deposited = reward_w_deposited
+        self.reward_w_cargo = reward_w_cargo
+        self.reward_w_exploration = reward_w_exploration
+        self.reward_w_discovery = reward_w_discovery
         self.noisy_memory = noisy_memory
         self.communication_mode = communication_mode
         self.observation_mode_global = observation_mode_global
@@ -1047,23 +1107,20 @@ class parallel_env(ParallelEnv):
             info_dict (dict): A dictionary containing additional information for each agent.
         '''
 
-        # Reward constants.
-        REWARD_COLLISION = -2.0
-        REWARD_NO_EXPLORATION = -1.0
-        REWARD_COMMUNICATION = -5.0
-        REWARD_NO_COMMUNICATION = 5.0
-        REWARD_EXTRACTOR_ON_RESOURCE = 1.0
-        REWARD_EXTRACTOR_PICKUP = 5.0
-        REWARD_DEPOSIT = 0.0
-        REWARD_EXTRACT = 100000.0
-        REWARD_CLOSEST_RESOURCE = 0.2
-        REWARD_UNCERTAINTY_REDUCTION = 0.1
-        REWARD_DONE = 1000000.0
-
         self.step_count += 1
 
         obs_dict = {}
         reward_dict = {agent: 0.0 for agent in self.possible_agents}
+        reward_components = {agent: {} for agent in self.possible_agents}
+
+        def add_reward(agent, component, value):
+            ''' Accumulates reward_dict[agent] while also recording it under a named
+            component, so the breakdown driving an agent's total reward is legible
+            (surfaced per-agent in info_dict["reward_components"]). '''
+            if value != 0.0:
+                reward_components[agent][component] = reward_components[agent].get(component, 0.0) + value
+            reward_dict[agent] += value
+
         truncated_dict = {agent: False for agent in self.possible_agents}
         info_dict = {
             "resources/discovered": 0.0,
@@ -1087,6 +1144,7 @@ class parallel_env(ParallelEnv):
         uncertainty_sum_prev = {}
         visible_cells_prev = {}
         nearest_resource_dist_prev = {}
+        nearest_depot_dist_prev = {}
         resource_mask_prev = {}
         for agent in self.agents:
             # Visible cells.
@@ -1099,10 +1157,16 @@ class parallel_env(ParallelEnv):
             # Uncertainty sum.
             uncertainty_sum_prev[agent] = agent.uncertainty.sum()
 
-            # Nearest resource distance.
-            resource_pos = self._get_nearest_resource(agent.position)
+            # Nearest resource distance (target depends on reward_approach_resource_target).
+            resource_pos = self._get_approach_resource_target(agent)
             if resource_pos is not None:
                 nearest_resource_dist_prev[agent] = np.linalg.norm(agent.position - resource_pos)
+
+            # Nearest depot distance (only relevant once a Hauler-type agent is carrying cargo).
+            if agent.capabilities[CAP.CARRY] and cargo_prev[agent] > 0:
+                depot = self._get_nearest_entity(agent.position, entity_type=ENTITY_TYPE.DEPOT)
+                if depot is not None:
+                    nearest_depot_dist_prev[agent] = np.linalg.norm(agent.position - depot.position)
         
         # Perform agent actions.
         for agent in self.agents:
@@ -1136,7 +1200,6 @@ class parallel_env(ParallelEnv):
                 # Correct agent velocity to reflect actual movement (in case of collisions).
                 if not np.allclose(agent.position - position_prev, agent.velocity):
                     agent.velocity = agent.position - position_prev
-                    # reward_dict[agent] += REWARD_COLLISION
                     stack_value[agent] = False
 
                 # Check for how long the agent has been stationary.
@@ -1161,9 +1224,8 @@ class parallel_env(ParallelEnv):
                             comms_position_relative = action["communication"]["relative_position"]
                             comms_requests_relative[agent] = comms_position_relative
                         info_dict["communication/requests_made"] += 1
-                        # reward_dict[agent] += REWARD_COMMUNICATION
                     else:
-                        reward_dict[agent] += REWARD_NO_COMMUNICATION
+                        add_reward(agent, "no_communication", self.reward_no_communication)
 
                 # Corrected resource handling for Hauler agents
                 if agent.capabilities[CAP.CARRY]:
@@ -1203,8 +1265,8 @@ class parallel_env(ParallelEnv):
                                 # Add to the hauler's cargo
                                 agent.cargo[r.resource_id] = agent.cargo.get(r.resource_id, 0.0) + take
                                 info_dict["resources/step_picked_up"] += take
-                                # reward_dict[agent] += REWARD_EXTRACT
-                                # reward_dict[extractor] += REWARD_EXTRACTOR_PICKUP * take
+                                add_reward(extractor, "extractor_pickup", self.reward_extractor_pickup * take)
+                                add_reward(agent, "hauler_pickup", self.reward_hauler_pickup * take)
                         elif val < 0:
                             r = self.idx_to_res[idx]
                             want_drop = float(-val)
@@ -1216,7 +1278,7 @@ class parallel_env(ParallelEnv):
                                 depot.stock += drop
                                 agent.cargo[r.resource_id] -= drop
                                 info_dict["resources/step_dropped_off"] += drop
-                                # reward_dict[agent] += REWARD_DEPOSIT * drop
+                                add_reward(agent, "hauler_delivery", self.reward_hauler_delivery * drop)
 
                 if agent.capabilities[CAP.EXTRACT]:
                     # Provide reward for Extractors that are sitting on a resource tile.
@@ -1228,7 +1290,7 @@ class parallel_env(ParallelEnv):
                             if self.map_resources[r][px, py] > 0:
                                 # Extractor is sitting on a resource tile.
                                 info_dict["extractors/num_in_place"] += 1
-                                reward_dict[agent] += REWARD_EXTRACTOR_ON_RESOURCE
+                                add_reward(agent, "extractor_on_resource", self.reward_extractor_on_resource)
 
         # Calculate the percentage of resources deposited.
         total_resources = sum(r.quantity for r in self.possible_resources)
@@ -1267,10 +1329,10 @@ class parallel_env(ParallelEnv):
                     comm_uncertainty = agent.uncertainty[visible]
 
                     # Provide reward based on the number of newly visible cells in that area.
-                    reward_dict[agent] += 1.0 * comm_newly_visible_cells / np.sum(visible)
+                    add_reward(agent, "comm_newly_visible", 1.0 * comm_newly_visible_cells / np.sum(visible))
 
                     # Provide reward based on the level of uncertainty of cells in that area.
-                    reward_dict[agent] += 0.1 * np.mean(comm_uncertainty)
+                    add_reward(agent, "comm_uncertainty", 0.1 * np.mean(comm_uncertainty))
 
             # Perform observation.
             agent_observation, fixed_mask = self.observe(
@@ -1290,12 +1352,6 @@ class parallel_env(ParallelEnv):
                 info_dict[agent]["observation_global"] = agent_observation_global
                 info_dict[agent]["visibility_mask_global"] = fixed_mask_global
 
-            # Check whether anything new was explored.
-            # visible_cells = self._get_visible_cell_count(agent)
-            # if visible_cells <= visible_cells_prev[agent]:
-                # reward_dict[agent] += REWARD_NO_EXPLORATION
-                # stack_value[agent] = False
-            
             # Provide intrinsic reward (delta-based: reward the change this step caused).
             total_cells = np.prod(self.world_dims)
             visible_cells = self._get_visible_cell_count(agent, use_resource_mask=True)
@@ -1317,17 +1373,37 @@ class parallel_env(ParallelEnv):
             if agent.capabilities[CAP.PROSPECT]:
                 w_deposited = 0.0
                 w_cargo = 0.0
-                w_exploration = 100.0
-                w_discovery = 100.0
+                w_exploration = self.reward_w_exploration
+                w_discovery = self.reward_w_discovery
             else:
-                w_deposited = 100.0
-                w_cargo = 10.0
+                w_deposited = self.reward_w_deposited
+                w_cargo = self.reward_w_cargo
                 w_exploration = 0.0
                 w_discovery = 0.0
 
-            r_intrinsic = (w_deposited * r_deposited + w_cargo * r_cargo
-                           + w_exploration * r_exploration + w_discovery * r_discovery)
-            reward_dict[agent] += r_intrinsic
+            add_reward(agent, "deposited_shared", w_deposited * r_deposited)
+            add_reward(agent, "cargo_individual", w_cargo * r_cargo)
+            add_reward(agent, "exploration", w_exploration * r_exploration)
+            add_reward(agent, "discovery", w_discovery * r_discovery)
+
+            # Provide dense navigation shaping for Hauler-type agents: reward closing distance
+            # to the nearest resource while empty, or to the nearest depot while carrying cargo.
+            # Without this, pickup/dropoff are the only reward signals available to these agents,
+            # which are too sparse to learn navigation from in a large world.
+            if agent.capabilities[CAP.CARRY]:
+                was_carrying = cargo_prev.get(agent, 0.0) > 0
+                if was_carrying and agent in nearest_depot_dist_prev:
+                    depot = self._get_nearest_entity(agent.position, entity_type=ENTITY_TYPE.DEPOT)
+                    if depot is not None:
+                        new_dist = np.linalg.norm(agent.position - depot.position)
+                        add_reward(agent, "approach_depot",
+                                   self.reward_approach_depot * (nearest_depot_dist_prev[agent] - new_dist))
+                elif not was_carrying and agent in nearest_resource_dist_prev:
+                    resource_pos = self._get_approach_resource_target(agent)
+                    if resource_pos is not None:
+                        new_dist = np.linalg.norm(agent.position - resource_pos)
+                        add_reward(agent, "approach_resource",
+                                   self.reward_approach_resource * (nearest_resource_dist_prev[agent] - new_dist))
 
             # Provide uncertainty reduction reward
             if agent.capabilities[CAP.PROSPECT] and (
@@ -1335,11 +1411,12 @@ class parallel_env(ParallelEnv):
             ):
                 uncertainty_sum = agent.uncertainty.sum()
                 if uncertainty_sum < uncertainty_sum_prev[agent]:
-                    reward_dict[agent] += REWARD_UNCERTAINTY_REDUCTION * (uncertainty_sum_prev[agent] - uncertainty_sum)
-            
+                    add_reward(agent, "uncertainty_reduction",
+                               self.reward_uncertainty_reduction * (uncertainty_sum_prev[agent] - uncertainty_sum))
+
             # Provide a completion reward.
             if end_done and not self.done_rewarded:
-                reward_dict[agent] += REWARD_DONE / self.step_count
+                add_reward(agent, "done_bonus", self.reward_done / self.step_count)
 
         if end_done:
             self.done_rewarded = True
@@ -1356,6 +1433,7 @@ class parallel_env(ParallelEnv):
         info_dict["resources/total"] = total_resources
         for agent in self.possible_agents:
             info_dict[f"rewards/{agent}"] = reward_dict[agent]
+            info_dict[agent]["reward_components"] = reward_components[agent]
 
         # Handle end of episode.
         # if end_truncate or end_done:
@@ -1403,6 +1481,32 @@ class parallel_env(ParallelEnv):
                     dmin = d
                     nearest_pos = loc
         return nearest_pos
+
+
+    def _get_approach_resource_target(self, agent):
+        '''
+        Returns the position an empty Hauler-type agent's approach-shaping reward should
+        target: either the nearest raw resource cell, or (per reward_approach_resource_target)
+        the nearest Extractor currently standing on a resource tile, falling back to the
+        nearest raw resource cell if no Extractor is currently so positioned. Using the raw
+        nearest cell can pull a Hauler toward tiles no Extractor is attending, where pickup
+        is impossible; targeting an Extractor-on-resource keeps the shaping aimed at a tile
+        the Hauler can actually collect from.
+        '''
+        if self.reward_approach_resource_target == "nearest_extractor_on_resource":
+            best_pos, best_dist = None, np.inf
+            for other in self.agents:
+                if not other.capabilities[CAP.EXTRACT]:
+                    continue
+                ex_pos_int = other.grid_position
+                if any(self.map_resources[r][ex_pos_int[0], ex_pos_int[1]] > 0 for r in self.possible_resources):
+                    d = np.linalg.norm(agent.position - other.position)
+                    if d < best_dist:
+                        best_dist = d
+                        best_pos = other.position
+            if best_pos is not None:
+                return best_pos
+        return self._get_nearest_resource(agent.position)
 
 
     def _get_observation_radius_mask(self, position, radius):
