@@ -16,6 +16,9 @@ args = [
 
     "--hauler_capacity", "10",
 
+    "--reward_hauler_delivery", "30.0",
+    "--reward_approach_resource_target", "nearest_extractor_on_resource",
+
     # "--world_no_reset",
     "--world_size", "20",
     "--num_obstacles", "0",
@@ -44,6 +47,7 @@ args = [
     "--gnn_hidden_size", "64",
     "--use_centralized_V",
     "--use_gae",
+
     "--share_policy",
 
     "--use_ReLU",
@@ -72,11 +76,11 @@ args = [
 
     "--seed", "0",
 
-    "--n_rollout_threads", "201",
+    "--n_rollout_threads", "150",
     "--threaded_training",
     "--n_training_threads", "16",
     "--cuda",
-    "--cuda_idx", "5",
+    "--cuda_idx", "4",
     "--cuda_idx_predictor", "6",
 
     "--save_interval", "200000",
@@ -84,6 +88,9 @@ args = [
     "--results_dir", "/data/group/mas/qmas/results",
     "--use_wandb",
 ]
+
+import sys
+args = args + sys.argv[1:]
 
 if __name__ == "__main__":
     main(args)

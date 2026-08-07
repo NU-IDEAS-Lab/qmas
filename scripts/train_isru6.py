@@ -1,14 +1,10 @@
 from onpolicy.scripts.train.train_pettingzoo import main
 
 import os
-import sys
-
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
-QUICK = "--quick" in sys.argv
-
 args = [
-    "--experiment_name", "isru-2e2h1p-e200-r10-h10-o20-20x20-separated",
+    "--experiment_name", "isru-2e2h1p-e200-r10-h10-o20-20x20",
     "--project_name", "qmas",
     "--env_class", "isru_zoo.isru_v0.parallel_env_graph_obs",
     "--user_name", "ideas-mas",
@@ -19,6 +15,9 @@ args = [
     "--num_superbots", "0",
 
     "--hauler_capacity", "10",
+
+    "--reward_hauler_delivery", "30.0",
+    "--reward_approach_resource_target", "nearest_extractor_on_resource",
 
     # "--world_no_reset",
     "--world_size", "20",
@@ -77,18 +76,21 @@ args = [
 
     "--seed", "0",
 
-    "--n_rollout_threads", "201",
+    "--n_rollout_threads", "150",
     "--threaded_training",
     "--n_training_threads", "16",
     "--cuda",
     "--cuda_idx", "5",
-    "--cuda_idx_predictor", "7",
+    "--cuda_idx_predictor", "6",
 
     "--save_interval", "200000",
     # "--save_checkpoints",
     "--results_dir", "/data/group/mas/qmas/results",
     "--use_wandb",
 ]
+
+import sys
+args = args + sys.argv[1:]
 
 if __name__ == "__main__":
     main(args)
