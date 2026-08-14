@@ -4,17 +4,20 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-    "--experiment_name", "isru-3superBot-e200-r10-h10-o20-20x20",
+    "--experiment_name", "isru-2e2h1p-e200-r10-h10-o20-20x20-reqBroadcast",
     "--project_name", "qmas",
     "--env_class", "isru_zoo.isru_v0.parallel_env_graph_obs",
     "--user_name", "ideas-mas",
 
-    "--num_extractors", "0",
-    "--num_haulers", "0",
-    "--num_prospectors", "0",
-    "--num_superbots", "3",
+    "--num_extractors", "2",
+    "--num_haulers", "2",
+    "--num_prospectors", "1",
+    "--num_superbots", "0",
 
     "--hauler_capacity", "10",
+
+    "--reward_hauler_delivery", "30.0",
+    "--reward_approach_resource_target", "nearest_extractor_on_resource",
 
     # "--world_no_reset",
     "--world_size", "20",
@@ -29,7 +32,7 @@ args = [
     "--observation_mask",
     # "--available_actions_mask",
 
-    "--communication_mode", "full",
+    "--communication_mode", "broadcast",
     "--movement_mode", "velocity",
 
     "--num_env_steps", "15000000",
@@ -44,7 +47,9 @@ args = [
     "--gnn_hidden_size", "64",
     "--use_centralized_V",
     "--use_gae",
-    "--share_policy",
+
+    "--no-share_policy",
+
     "--use_ReLU",
     "--hidden_size", "128",
     "--layer_N", "3",
@@ -71,17 +76,21 @@ args = [
 
     "--seed", "0",
 
-    "--n_rollout_threads", "201",
+    "--n_rollout_threads", "150",
     "--threaded_training",
     "--n_training_threads", "16",
     "--cuda",
     "--cuda_idx", "5",
+    "--cuda_idx_predictor", "6",
 
     "--save_interval", "200000",
     # "--save_checkpoints",
     "--results_dir", "/data/group/mas/qmas/results",
     "--use_wandb",
 ]
+
+import sys
+args = args + sys.argv[1:]
 
 if __name__ == "__main__":
     main(args)
