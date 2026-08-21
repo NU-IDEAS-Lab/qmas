@@ -2793,37 +2793,58 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                 slot += 1
 
             # --- Resource slots (quantity_max slots per resource type) ---
-            # Features are written for every existing resource, visible or not.
-            # nv mirrors the map-obs prospector rule.
             for r in self.possible_resources:
-                resource_positions = np.argwhere(self.map_resources[r] > 0).astype(np.float32)
+                block_start = slot
 
-                for i in range(r.quantity_max):
-                    if i < resource_positions.shape[0]:
-                        rpos = resource_positions[i]
-                        rpos_int = rpos.astype(np.int32)
+                if _global_state:
+                    resource_positions = np.argwhere(self.map_resources[r] > 0).astype(np.float32)
+                    for i in range(r.quantity_max):
+                        if i < resource_positions.shape[0]:
+                            rpos = resource_positions[i]
+                            rpos_int = rpos.astype(np.int32)
+                            pos = relative_position(rpos)
+                            dist = np.linalg.norm(pos)
+                            _write_node(block_start + i, self.NODE_TYPE.RESOURCE,
+                                        normalize(pos), np.zeros(2, dtype=np.float32))
+                            nv[block_start + i] = 1.0
+                            _add_edge(block_start + i, 0, dist)
+                else:
+                    slots = agent.resource_slots[r.resource_id]
+
+                    present_positions = np.argwhere(self.map_resources[r] > 0)
+                    newly_discovered = []
+                    for pos_int in present_positions:
+                        pos_key = (int(pos_int[0]), int(pos_int[1]))
+                        if pos_key in slots:
+                            continue
+                        in_view = (visible_area[pos_key[0], pos_key[1]]
+                                   or visible_via_relay(np.asarray(pos_key, dtype=np.float32)))
+                        if not in_view:
+                            continue
+                        if not agent.capabilities[CAP.PROSPECT] and not agent.mask_resources_observed[pos_key]:
+                            continue
+                        newly_discovered.append(pos_key)
+
+                    for pos_key in sorted(newly_discovered):
+                        if len(slots) < r.quantity_max:
+                            slots[pos_key] = len(slots)
+
+                    for pos_key, idx in slots.items():
+                        rpos = np.asarray(pos_key, dtype=np.float32)
                         pos = relative_position(rpos)
                         dist = np.linalg.norm(pos)
-                        # Always write features with actual state.
-                        _write_node(slot, self.NODE_TYPE.RESOURCE,
-                                    normalize(pos), np.zeros(2, dtype=np.float32))
-                        # nv: mirror map-obs prospector rule.
-                        # Global-state queries are omniscient (bypass prospector rule).
-                        # A cell is "in view" either directly (ego's own radius) or via
-                        # relay (a communication sender currently has it in range) --
-                        # matching parallel_env_map_obs's full-comms merge behavior.
-                        in_visible = visible_area[rpos_int[0], rpos_int[1]] or visible_via_relay(rpos)
-                        if _global_state or agent.capabilities[CAP.PROSPECT]:
-                            resource_visible = in_visible
-                        else:
-                            resource_visible = (
-                                in_visible
-                                and agent.mask_resources_observed[rpos_int[0], rpos_int[1]]
-                            )
-                        if resource_visible:
-                            nv[slot] = 1.0
-                            _add_edge(slot, 0, dist)
-                    slot += 1
+                        still_present = self.map_resources[r][pos_key] > 0
+                        if still_present:
+                            # Always write features with actual state.
+                            _write_node(block_start + idx, self.NODE_TYPE.RESOURCE,
+                                        normalize(pos), np.zeros(2, dtype=np.float32))
+                        in_view = (visible_area[pos_key[0], pos_key[1]]
+                                   or visible_via_relay(rpos))
+                        if in_view:
+                            nv[block_start + idx] = 1.0
+                            _add_edge(block_start + idx, 0, dist)
+
+                slot = block_start + r.quantity_max
 
             # --- Depot slots (always visible, no radius check) ---
             depot_positions = np.argwhere(self.map_depots > 0).astype(np.float32)

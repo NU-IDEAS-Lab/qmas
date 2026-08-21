@@ -122,8 +122,10 @@ class Agent(Entity):
     def reset(self, *args, resources=[], **kwargs):
         super().reset(*args, **kwargs)
         self.cargo = {}
+        self.resource_slots = {}
         for r in resources:
             self.cargo[r.resource_id] = 0.0
+            self.resource_slots[r.resource_id] = {}
         self.steps_stationary = 0
         self.mask_observed = np.zeros(self.world_dims, dtype=bool)
         self.mask_resources_observed = np.zeros(self.world_dims, dtype=bool)
