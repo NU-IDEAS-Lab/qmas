@@ -71,7 +71,7 @@ def add_args(parser):
                         help="Reward for a Prospector reducing uncertainty in a communicated-about area.")
     parser.add_argument("--reward_done", type=float, default=1_000_000.0,
                         help="One-time reward (divided by step count) for fully depositing all resources.")
-    parser.add_argument("--reward_no_communication", type=float, default=5.0,
+    parser.add_argument("--reward_no_communication", type=float, default=0.05,
                         help="Reward for not requesting communication (only applies outside 'full' communication_mode).")
     parser.add_argument("--reward_w_deposited", type=float, default=100.0,
                         help="Weight on the shared team-wide fractional-deposited intrinsic reward term.")
@@ -268,7 +268,7 @@ class parallel_env(ParallelEnv):
             reward_approach_resource_target: str = "nearest_resource",
             reward_uncertainty_reduction: float = 0.1,
             reward_done: float = 1_000_000.0,
-            reward_no_communication: float = 5.0,
+            reward_no_communication: float = 0.05,
             reward_w_deposited: float = 100.0,
             reward_w_cargo: float = 10.0,
             reward_w_exploration: float = 100.0,
