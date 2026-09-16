@@ -747,14 +747,22 @@ class parallel_env(ParallelEnv):
             ax_hr.scatter(positions[:, 1], positions[:, 0], label="Self", marker="s", s=150, facecolors='none', edgecolors='black', linewidths=2)
 
             if last_action is not None:
-                if last_action["communication"]["request"][0] > 0.5:
+                comm_action = last_action.get("communication", {})
+                requested = comm_action.get("request", [0.0])[0] > 0.5
+                rel_pos = comm_action.get("relative_position")
+                if requested and rel_pos is not None:
                     # Plot a line from the agent to the requested position.
-                    rel_pos = last_action["communication"]["relative_position"]
                     ax_hr.arrow(
                         positions[0, 1], positions[0, 0],
                         rel_pos[1], rel_pos[0],
                         head_width=0.5, head_length=0.5,
                         fc='blue', ec='blue', linestyle='--', alpha=0.5
+                    )
+                elif requested:
+                    ax_hr.scatter(
+                        positions[0, 1], positions[0, 0],
+                        marker="o", s=400, facecolors='none', edgecolors='blue',
+                        linewidths=2, linestyle='--',
                     )
 
 
