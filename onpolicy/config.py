@@ -432,7 +432,8 @@ def get_config():
                              "for this to take effect.")
     parser.add_argument("--comm_uq_threshold_temperature", type=float, default=1.0,
                         help="Temperature T scaling the Bernoulli logits in the UQ-threshold "
-                             "comm gate used by action_method='neighbors_with_comm_uq_threshold'. "
+                             "comm gate used by action_method='neighbors_with_comm_uq_threshold' "
+                             "(patrolling) or communication_mode='broadcast_uq_threshold' (ISRU). "
                              "Smaller is sharper, approaching a deterministic comparison u > threshold.")
 
     # One-module variant parameters.

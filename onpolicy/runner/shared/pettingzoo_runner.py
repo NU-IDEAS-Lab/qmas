@@ -741,13 +741,17 @@ class PettingzooRunner(Runner):
         return pred, uncertainty, prediction_prev, prediction_error, True
 
     def _push_uq_to_env(self, env_wrapper, uncertainty_now, n_threads):
-        """Push a per-thread per-agent scalar UQ summary to the env wrapper. No-op unless
-        action_method == "neighbors_with_comm_uq_threshold", which is the only action_method
-        whose env.step reads predictor uncertainty. `uncertainty_now` is the per-agent
-        uncertainty vector returned by the predictor (shape (n_threads * n_agents, D))
-        or None when no prediction is available — in that case zeros are pushed so the
-        env's gate is in a defined state."""
-        if "action_method" not in self.all_args or self.all_args.action_method != "neighbors_with_comm_uq_threshold":
+        """Push a per-thread per-agent scalar UQ summary to the env wrapper. No-op unless the
+        env is configured with a UQ-threshold comm gate — action_method ==
+        "neighbors_with_comm_uq_threshold" (patrolling) or communication_mode ==
+        "broadcast_uq_threshold" (ISRU) — the only configurations whose env.step reads
+        predictor uncertainty. `uncertainty_now` is the per-agent uncertainty vector returned
+        by the predictor (shape (n_threads * n_agents, D)) or None when no prediction is
+        available — in that case zeros are pushed so the env's gate is in a defined state."""
+        action_method = getattr(self.all_args, "action_method", None)
+        communication_mode = getattr(self.all_args, "communication_mode", None)
+        if (action_method != "neighbors_with_comm_uq_threshold"
+                and communication_mode != "broadcast_uq_threshold"):
             return
         if uncertainty_now is None:
             u_per_agent = np.zeros((n_threads, self.num_agents), dtype=np.float32)

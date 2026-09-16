@@ -90,9 +90,10 @@ def add_args(parser):
                         choices=["moore", "velocity"],
                         help="The movement mode for agents: 'moore' uses discrete Moore neighborhood movement, 'velocity' uses continuous velocity control.")
     parser.add_argument("--communication_mode", type=str, default="nearest",
-                        choices=["nearest", "broadcast", "full"],
+                        choices=["nearest", "broadcast", "broadcast_uq_threshold", "full"],
                         help="How communication requests are handled: 'nearest' queries one nearby agent, "
                              "'broadcast' queries all other agents, "
+                             "'broadcast_uq_threshold' is as described in thesis, "
                              "'full' provides all agents' observations.")
     parser.add_argument("--observation_mode_global", type=str, default="coords",
                         choices=["map", "coords"],
@@ -275,6 +276,7 @@ class parallel_env(ParallelEnv):
             reward_w_discovery: float = 100.0,
             noisy_memory: bool = False,
             communication_mode: str = "nearest",
+            comm_uq_threshold_temperature: float = 1.0,
             observation_mode_global: str = "coords",
             movement_mode: str = "moore",
             render_mode: str = "human",
@@ -317,6 +319,8 @@ class parallel_env(ParallelEnv):
         self.reward_w_discovery = reward_w_discovery
         self.noisy_memory = noisy_memory
         self.communication_mode = communication_mode
+        self.comm_uq_threshold_temperature = comm_uq_threshold_temperature
+        self._predictor_uncertainty = None
         self.observation_mode_global = observation_mode_global
         self.movement_mode = movement_mode
         self.gnn_use_dense_obs = gnn_use_dense_obs
@@ -921,6 +925,14 @@ class parallel_env(ParallelEnv):
                     low=0, high=1, shape=(1,), dtype=np.int32
                 ),
             })
+        elif self.communication_mode == "broadcast_uq_threshold":
+            comm_space = spaces.Dict({
+                "comm_threshold": spaces.Box(
+                    low=np.array([-np.inf], dtype=np.float32),
+                    high=np.array([np.inf], dtype=np.float32),
+                    dtype=np.float32
+                ),
+            })
         elif self.communication_mode == "full":
             comm_space = None  # Full communication does not require an action component
         else:
@@ -952,11 +964,26 @@ class parallel_env(ParallelEnv):
         return spaces.Dict(action_space_dict)
 
 
+    def set_predictor_uncertainty(self, uncertainty):
+        ''' Cache the runner-provided per-agent UQ summary used by the in-env UQ-threshold
+            communication gate.
+
+            uncertainty: array-like of shape (num_agents,) holding a per-agent scalar summary
+            of the predictor's uncertainty for this step. Order matches self.possible_agents.
+            The next call to step() reads this when
+            communication_mode == "broadcast_uq_threshold". '''
+        self._predictor_uncertainty = np.asarray(uncertainty, dtype=np.float32).reshape(-1)
+
+
     @functools.cache
     def available_actions_space(self, agent):
         ''' Generate a Space for the available actions, given the action space. '''
 
         action_space = self.action_space(agent)
+        if self.communication_mode == "broadcast_uq_threshold" and isinstance(action_space, spaces.Dict):
+            action_space = spaces.Dict({
+                k: v for k, v in action_space.spaces.items() if k != "communication"
+            })
         def get_available_action_space(action_space):
             if action_space.__class__.__name__ in ["Tuple", "Dict"]:
                 return spaces.Dict({k: get_available_action_space(v) for k, v in action_space.spaces.items()})
@@ -1018,8 +1045,8 @@ class parallel_env(ParallelEnv):
             else:
                 result["movement"][move] = 1
 
-        # Communication is always available.
-        result["communication"]["request"] = np.ones_like(result["communication"]["request"])
+        if "request" in result.get("communication", {}):
+            result["communication"]["request"] = np.ones_like(result["communication"]["request"])
 
         # if agent.capabilities[CAP.CARRY]:
         #     for i, r in enumerate(self.possible_resources):
@@ -1213,6 +1240,26 @@ class parallel_env(ParallelEnv):
                     senders = {other for other in self.possible_agents if other is not agent}
                     comms_requests_explicit[agent] = senders
                     info_dict["communication/requests_made"] += 1
+                elif self.communication_mode == "broadcast_uq_threshold":
+                    threshold = float(np.asarray(action["communication"]["comm_threshold"]).reshape(-1)[0])
+                    agent_idx = self.possible_agents.index(agent)
+                    if (self._predictor_uncertainty is not None
+                            and agent_idx < len(self._predictor_uncertainty)):
+                        u = float(self._predictor_uncertainty[agent_idx])
+                        T = max(self.comm_uq_threshold_temperature, 1e-6)
+                        p = 1.0 / (1.0 + np.exp(-(u - threshold) / T))
+                        comms_request = bool(np.random.random() < p)
+                    else:
+                        comms_request = False
+                    info_dict[agent]["comm_threshold"] = threshold
+                    info_dict[agent]["comm_gate_fired"] = float(comms_request)
+                    if comms_request and len(self.possible_agents) > 1:
+                        senders = {other for other in self.possible_agents if other is not agent}
+                        if senders:
+                            comms_requests_explicit[agent] = senders
+                        info_dict["communication/requests_made"] += 1
+                    else:
+                        add_reward(agent, "no_communication", self.reward_no_communication)
                 else:
                     comms_request = bool(action["communication"]["request"][0] == 1)
                     if comms_request and len(self.possible_agents) > 1:
