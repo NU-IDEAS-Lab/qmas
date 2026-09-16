@@ -10,5 +10,6 @@ __pycache__/
 .vscode/
 
 *.zarr
+*.pkl
 
 /onpolicy/scripts/results/
