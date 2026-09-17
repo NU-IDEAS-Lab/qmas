@@ -1,86 +1,117 @@
-from onpolicy.scripts.train.train_pettingzoo import main
-
+from copy import copy
+import multiprocessing
+import importlib
 import os
-os.environ["WANDB__SERVICE_WAIT"] = "300"
 
-args = [
-    "--experiment_name", "isru-fullTest-2superBot-e200-r10-h10-o20-20x20-commsFull",
-    "--project_name", "qmas",
-    "--env_class", "isru_zoo.isru_v0.parallel_env_graph_obs",
-    "--user_name", "ideas-mas",
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-	"--num_extractors", "0",
-    "--num_haulers", "0",
-    "--num_prospectors", "0",
-    "--num_superbots", "2",
-
-    "--hauler_capacity", "10",
-
-    # "--world_no_reset",
-    "--world_size", "20",
-    "--num_obstacles", "0",
-    "--num_resources", "10",
-    # "--randomize_num_resources",
-    # "--curriculum_num_resources",
-
-    "--noisy_memory",
-
-    "--observation_radius", "20",
-    # "--observation_mask",
-    # "--available_actions_mask",
-
-    "--communication_mode", "full",
-    "--movement_mode", "velocity",
-
-    # "--share_reward",
-
-    "--num_env_steps", "15000000",
-    "--episode_length", "200",
-    "--max_cycles", "200",
-    "--num_mini_batch", "10",
-
-    "--algorithm_class", "qmas.variant_two_modules.new.algorithm.QmasAlgorithm",
-    "--policy_class", "qmas.variant_two_modules.new.policy.QmasPolicy",
-    "--algorithm_name", "mappo",
-    "--use_centralized_V",
-    "--use_gae",
-    "--share_policy",
-    "--use_ReLU",
-    "--hidden_size", "128",
-    "--layer_N", "3",
-
-	"--use_gnn_policy",
-    # "--use_gnn_mlp_policy",
-    "--gnn_dropout_rate", "0.5",
-
-    "--diffusion_model_type", "dit1d",
-    "--prediction_disable",
-
-    "--state_encoder",
-
-    # "--seed", "2",
-
-    "--n_rollout_threads", "50",
-    "--threaded_training",
-    "--cuda",
-    # "--cuda_idx", "5",
-    # "--cuda_idx_predictor", "7",
-
-    "--save_interval", "200000",
-    # "--save_checkpoints",
-    "--results_dir", "/data/group/mas/qmas/results",
-    "--use_wandb",
+cuda_idx = [0, 1, 2, 3, 4, 5, 6, 7]
+scripts = [
+    # {
+    #     "script": "train_patrolling",
+    #     "overrides": {
+    #         "algorithm_name": "rmappo",
+    #     }
+    # },
+    # {
+    #     "script": "train_patrolling",
+    #     "overrides": {
+    #         "observation_mask": False,
+    #     }
+    # },
+    {
+        "script": "train_isru2"
+    },
+    {
+        "script": "train_isru3"
+    },
+    {
+        "script": "train_isru5",
+        # "overrides": {
+        #     "ex_env_communication_mode": "merge_minimum_uq",
+        # }
+    },
+    {
+        "script": "train_isru6",
+        # "overrides": {
+        #     "ex_env_communication_mode": "merge_minimum_uq",
+        # }
+    },
 ]
 
-# Run using multiple different seeds in different processes.
-import multiprocessing
+
+# Replace args function.
+def argreplace(args, arg_name, arg_value):
+    if f"--{arg_name}" in args:
+        if type(arg_value) == bool:
+            if arg_value:
+                if f"--no-{arg_name}" in args:
+                    args.remove("--no-" + arg_name)
+                args.append(f"--{arg_name}")
+            else:
+                if f"--{arg_name}" in args:
+                    args.remove(f"--{arg_name}")
+                args.append("--no-" + arg_name)
+        else:
+            index = args.index(f"--{arg_name}")
+            args[index + 1] = arg_value
+    else:
+        if type(arg_value) == bool:
+            if arg_value:
+                args.append(f"--{arg_name}")
+            else:
+                args.append("--no-" + arg_name)
+        else:
+            args += [f"--{arg_name}", arg_value]
+    return args
 
 threads = []
-cuda_idx = [5, 5, 7, 7]
-for i in range(len(cuda_idx)):
-    args_seeded = args + ["--seed", str(i)]
-    args_seeded += ["--cuda_idx", str(cuda_idx[i])]
-    p = multiprocessing.Process(target=main, args=(args_seeded,))
+for i, script in enumerate(scripts):
+    module = importlib.import_module(f"{script['script']}")
+    args = copy(module.args)
+    # args = argreplace(args, "cuda_idx", str(cuda_idx[i]))
+    # args = argreplace(args, "state_encoder_output_dim", f"128")
+    # args = argreplace(args, "observation_mask", True)
+
+    # args = argreplace(args, "ex_env_communication_mode", "merge_minimum_uq")
+
+    # args = argreplace(args, "n_rollout_threads", "66")
+    # args = argreplace(args, "num_env_steps", "1000000")
+    # args = argreplace(args, "num_mini_batch", "30")
+    # args = argreplace(args, "use_linear_lr_decay", False)
+    # args = argreplace(args, "gnn_neighbor_scoring", True)
+    # args = argreplace(args, "gnn_skip_connections", True)
+    # args = argreplace(args, "use_gnn_mlp_policy", False)
+    # args = argreplace(args, "gnn_layer_N", "2")
+    # args = argreplace(args, "gnn_hidden_size", "64")
+    # args = argreplace(args, "ppo_epoch", "15")
+    # args = argreplace(args, "gnn_use_dense_obs", True)
+    # args = argreplace(args, "state_encoder", False)
+    # args = argreplace(args, "disable_observation_global", True)
+    # args = argreplace(args, "prediction_history_include_actions", True)
+    # args = argreplace(args, "algorithm_name", "mappo")
+
+    # args = argreplace(args, "diffusion_model_type", "gnn")
+    # args = argreplace(args, "diffusion_sample_steps", "5")
+    # args = argreplace(args, "diffusion_autoregression_steps", "7")
+    # args = argreplace(args, "gnn_diffusion_depth", "2")
+    # args = argreplace(args, "gnn_diffusion_d_model", "32")
+    # args = argreplace(args, "gnn_diffusion_temporal_depth", "1")
+
+    # args = argreplace(args, "data_chunk_length", "2")
+    # args = argreplace(args, "recurrent_N", "1")
+
+    args = argreplace(args, "experiment_name", f"{args.get('experiment_name', 'experiment').replace('e100', 'e50')}")
+    args = argreplace(args, "episode_length", "50")
+    args = argreplace(args, "max_cycles", "50")
+
+    # args = argreplace(args, "use_wandb", False)
+
+    overrides = script.get("overrides", {})
+    for key in overrides:
+        args = argreplace(args, key, overrides[key])
+
+    p = multiprocessing.Process(target=module.main, args=(args,))
     p.start()
     threads.append(p)
 
