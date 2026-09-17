@@ -101,7 +101,8 @@ for i, script in enumerate(scripts):
     # args = argreplace(args, "data_chunk_length", "2")
     # args = argreplace(args, "recurrent_N", "1")
 
-    args = argreplace(args, "experiment_name", f"{args.get('experiment_name', 'experiment').replace('e100', 'e50')}")
+    current_experiment_name = args[args.index("--experiment_name") + 1] if "--experiment_name" in args else "experiment"
+    args = argreplace(args, "experiment_name", current_experiment_name.replace("e100", "e50"))
     args = argreplace(args, "episode_length", "50")
     args = argreplace(args, "max_cycles", "50")
 
