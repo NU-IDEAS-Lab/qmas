@@ -5,7 +5,7 @@ import os
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-cuda_idx = [0, 1, 2, 3, 4, 5, 6, 7]
+cuda_idx = [0, 1, 5, 7]
 scripts = [
     # {
     #     "script": "train_patrolling",
@@ -23,19 +23,19 @@ scripts = [
         "script": "train_isru2"
     },
     {
-        "script": "train_isru3"
+        "script": "train_isru3",
+        "overrides": {
+            "cuda_idx_predictor": "4",
+        }
     },
     {
-        "script": "train_isru5",
-        # "overrides": {
-        #     "ex_env_communication_mode": "merge_minimum_uq",
-        # }
+        "script": "train_isru5"
     },
     {
         "script": "train_isru6",
-        # "overrides": {
-        #     "ex_env_communication_mode": "merge_minimum_uq",
-        # }
+        "overrides": {
+            "cuda_idx_predictor": "5",
+        }
     },
 ]
 
@@ -74,6 +74,7 @@ for i, script in enumerate(scripts):
     # args = argreplace(args, "observation_mask", True)
 
     # args = argreplace(args, "ex_env_communication_mode", "merge_minimum_uq")
+    args = argreplace(args, "comm_uq_threshold_temperature", "0.1")
 
     # args = argreplace(args, "n_rollout_threads", "66")
     # args = argreplace(args, "num_env_steps", "1000000")
@@ -102,9 +103,9 @@ for i, script in enumerate(scripts):
     # args = argreplace(args, "recurrent_N", "1")
 
     current_experiment_name = args[args.index("--experiment_name") + 1] if "--experiment_name" in args else "experiment"
-    args = argreplace(args, "experiment_name", current_experiment_name.replace("e100", "e50"))
-    args = argreplace(args, "episode_length", "50")
-    args = argreplace(args, "max_cycles", "50")
+    args = argreplace(args, "experiment_name", current_experiment_name.replace("e100", "e150"))
+    args = argreplace(args, "episode_length", "150")
+    args = argreplace(args, "max_cycles", "150")
 
     # args = argreplace(args, "use_wandb", False)
 
