@@ -58,8 +58,11 @@ def main(args):
     validateArgs(all_args)
 
     # Torch configuration.
-    # This is equivalent to torch.backends.cuda.matmul.allow_tf32 = True
-    torch.set_float32_matmul_precision('high')
+    # Disable TF32 (full FP32 precision). TF32 is only used on Ampere+ GPUs (e.g. A5000 on ideas2),
+    # where its reduced precision caused NaNs late in training. Pre-Ampere GPUs (Titan RTX) never used it.
+    torch.set_float32_matmul_precision('highest')
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cudnn.allow_tf32 = False
     torch._dynamo.config.compiled_autograd = True
     torch.backends.cudnn.benchmark = True
 
