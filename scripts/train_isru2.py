@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-    "--experiment_name", "isru-2e2h1p-e100-r10-h2-o20-15x15-noPrediction-reqBroadcast",
+    "--experiment_name", "isru-2e2h1p-e150-r10-h2-o20-15x15-noPrediction-reqBroadcast",
     "--project_name", "qmas",
     "--env_class", "isru_zoo.isru_v0.parallel_env_graph_obs",
     "--user_name", "ideas-mas",
@@ -36,8 +36,8 @@ args = [
     "--movement_mode", "velocity",
 
     "--num_env_steps", "15000000",
-    "--episode_length", "100",
-    "--max_cycles", "100",
+    "--episode_length", "150",
+    "--max_cycles", "150",
     "--num_mini_batch", "10",
 
     "--algorithm_class", "qmas.variant_two_modules.new.algorithm.QmasAlgorithm",

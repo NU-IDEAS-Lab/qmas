@@ -5,7 +5,7 @@ import os
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-cuda_idx = [0, 1, 5, 7]
+cuda_idx = [1, 5, 6, 7]
 scripts = [
     # {
     #     "script": "train_patrolling",
@@ -25,7 +25,7 @@ scripts = [
     {
         "script": "train_isru3",
         "overrides": {
-            "cuda_idx_predictor": "4",
+            "cuda_idx_predictor": "0",
         }
     },
     {
@@ -34,7 +34,7 @@ scripts = [
     {
         "script": "train_isru6",
         "overrides": {
-            "cuda_idx_predictor": "5",
+            "cuda_idx_predictor": "4",
         }
     },
 ]
@@ -69,7 +69,7 @@ threads = []
 for i, script in enumerate(scripts):
     module = importlib.import_module(f"{script['script']}")
     args = copy(module.args)
-    # args = argreplace(args, "cuda_idx", str(cuda_idx[i]))
+    args = argreplace(args, "cuda_idx", str(cuda_idx[i]))
     # args = argreplace(args, "state_encoder_output_dim", f"128")
     # args = argreplace(args, "observation_mask", True)
 
@@ -103,9 +103,12 @@ for i, script in enumerate(scripts):
     # args = argreplace(args, "recurrent_N", "1")
 
     current_experiment_name = args[args.index("--experiment_name") + 1] if "--experiment_name" in args else "experiment"
-    args = argreplace(args, "experiment_name", current_experiment_name.replace("e100", "e150"))
-    args = argreplace(args, "episode_length", "150")
-    args = argreplace(args, "max_cycles", "150")
+    args = argreplace(args, "experiment_name", current_experiment_name.replace("h2", "h1"))
+    args = argreplace(args, "hauler_capacity", "1")
+    # current_experiment_name = args[args.index("--experiment_name") + 1] if "--experiment_name" in args else "experiment"
+    # args = argreplace(args, "experiment_name", current_experiment_name.replace("e100", "e150"))
+    # args = argreplace(args, "episode_length", "150")
+    # args = argreplace(args, "max_cycles", "150")
 
     # args = argreplace(args, "use_wandb", False)
 
