@@ -457,7 +457,9 @@ class parallel_env(ParallelEnv):
             obs, fixed_mask = self.observe(agent)
             observation[agent] = obs
             info[agent]["visibility_mask"] = fixed_mask
-        
+            # No comms have happened yet on reset (mirrors patrolling_zoo.py's reset()).
+            info[agent]["received_comms"] = False
+
         self.reset_count += 1
 
         return observation, info
@@ -478,6 +480,7 @@ class parallel_env(ParallelEnv):
                 agent,
             )
             info[agent]["visibility_mask"] = fixed_mask
+            info[agent]["received_comms"] = False
 
             # Provide the globally situated observation.
             if hasattr(self, "get_observation_and_comms_situated"):
@@ -1388,6 +1391,14 @@ class parallel_env(ParallelEnv):
 
                     # Provide reward based on the level of uncertainty of cells in that area.
                     add_reward(agent, "comm_uncertainty", 0.1 * np.mean(comm_uncertainty))
+
+            # Communication received flag: True iff at least one sender actually ended up
+            # in senders_set this step (mirrors patrolling_zoo.py's semantics — a request
+            # that resolved to zero senders, e.g. "nearest" mode finding no agent near the
+            # requested position, does NOT set this flag). Consumed by
+            # pettingzoo_runner.py's _apply_ex_env_comms_merge via Pettingzoo_Env.py's
+            # info stacking.
+            info_dict[agent]["received_comms"] = bool(senders_set)
 
             # Perform observation.
             agent_observation, fixed_mask = self.observe(

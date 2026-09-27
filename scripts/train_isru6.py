@@ -4,7 +4,7 @@ import os
 os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 args = [
-    "--experiment_name", "isru-2e2h1p-e150-r10-h2-o20-15x15",
+    "--experiment_name", "isru-2e2h1p-e150-r10-h2-o20-15x15-mergeMinUQ",
     "--project_name", "qmas",
     "--env_class", "isru_zoo.isru_v0.parallel_env_graph_obs",
     "--user_name", "ideas-mas",
@@ -69,6 +69,7 @@ args = [
     "--prediction_uq_injection_method", "append",
     # "--prediction_disable",
     "--prediction_ensemble_size", "3",
+    "--ex_env_communication_mode", "merge_minimum_uq",
 
     # "--state_encoder",
     "--disable_observation_global",
