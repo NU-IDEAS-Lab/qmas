@@ -1171,8 +1171,15 @@ class parallel_env(ParallelEnv):
             "communication/requests_made": 0,
         }
         info_dict.update({agent: {} for agent in self.possible_agents})
+        info_dict.update({f"communication/requests_made_by_agent/{agent}": 0 for agent in self.possible_agents})
         comms_requests_relative = {}
         comms_requests_explicit = {}
+
+        def record_comms_request(agent):
+            ''' Records a communication request team-wide and for `agent` individually. '''
+            info_dict["communication/requests_made"] += 1
+            info_dict[f"communication/requests_made_by_agent/{agent}"] += 1
+
         stack_value = {a: True for a in self.possible_agents}
 
         # Pre-movement calculations.
@@ -1250,7 +1257,7 @@ class parallel_env(ParallelEnv):
                 if self.communication_mode == "full":
                     senders = {other for other in self.possible_agents if other is not agent}
                     comms_requests_explicit[agent] = senders
-                    info_dict["communication/requests_made"] += 1
+                    record_comms_request(agent)
                 elif self.communication_mode == "broadcast_uq_threshold":
                     threshold = float(np.asarray(action["communication"]["comm_threshold"]).reshape(-1)[0])
                     agent_idx = self.possible_agents.index(agent)
@@ -1268,7 +1275,7 @@ class parallel_env(ParallelEnv):
                         senders = {other for other in self.possible_agents if other is not agent}
                         if senders:
                             comms_requests_explicit[agent] = senders
-                        info_dict["communication/requests_made"] += 1
+                        record_comms_request(agent)
                     else:
                         add_reward(agent, "no_communication", self.reward_no_communication)
                 else:
@@ -1281,7 +1288,7 @@ class parallel_env(ParallelEnv):
                         else:
                             comms_position_relative = action["communication"]["relative_position"]
                             comms_requests_relative[agent] = comms_position_relative
-                        info_dict["communication/requests_made"] += 1
+                        record_comms_request(agent)
                     else:
                         add_reward(agent, "no_communication", self.reward_no_communication)
 
