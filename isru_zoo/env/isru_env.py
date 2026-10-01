@@ -43,6 +43,12 @@ def add_args(parser):
                         help="Whether to keep the same map between resets.")
     parser.add_argument("--observation_radius", type=int, default=10,
                         help="The radius within which agents can observe each other and resources.")
+    parser.add_argument("--observation_radius_random_min", type=float, default=0.0,
+                        help="The minimum random observation radius. If `observation_radius_random_max` > "
+                             "`observation_radius_random_min`, a radius shared by all agents is drawn "
+                             "uniformly from this range at each reset (mirrors patrolling_zoo.py).")
+    parser.add_argument("--observation_radius_random_max", type=float, default=0.0,
+                        help="The maximum random observation radius. See `observation_radius_random_min`.")
     parser.add_argument("--available_actions_mask", action="store_true",
                         help="Whether to return an available actions mask for each agent.")
     parser.add_argument("--hauler_capacity", type=float, default=10.0,
@@ -262,6 +268,8 @@ class parallel_env(ParallelEnv):
             world_size: int = 50,
             world_no_reset: bool = False,
             observation_radius: int = 10,
+            observation_radius_random_min: float = 0.0,
+            observation_radius_random_max: float = 0.0,
             available_actions_mask: bool = False,
             hauler_capacity: float = 10.0,
             hauler_pickup_threshold: float = 1.5,
@@ -307,6 +315,8 @@ class parallel_env(ParallelEnv):
         self.mask_observations = False
         self.mask_available_actions = available_actions_mask
         self.default_observation_radius = observation_radius
+        self.observation_radius_random_min = observation_radius_random_min
+        self.observation_radius_random_max = observation_radius_random_max
         self.default_hauler_capacity = hauler_capacity
         self.hauler_pickup_threshold = hauler_pickup_threshold
         self.reward_extractor_on_resource = reward_extractor_on_resource
@@ -447,6 +457,13 @@ class parallel_env(ParallelEnv):
                 resources=self.possible_resources,
                 position=start_position,
             )
+
+        # Randomize the observation radius (shared by all agents for the episode). This is
+        # drawn after map generation so that seeded maps are unchanged by enabling it.
+        if self.randomize_observation_radius:
+            radius = np.random.uniform(self.observation_radius_random_min, self.observation_radius_random_max)
+            for agent in self.possible_agents:
+                agent.observation_radius = radius
 
         # Reset other state.
         self.step_count = 0
@@ -1400,7 +1417,7 @@ class parallel_env(ParallelEnv):
                     senders_set.add(sender)
                 
                 # Determine the visible cells around the requested position.
-                visible = self._get_observation_radius_mask(absolute_request_position, self.default_observation_radius)
+                visible = self._get_observation_radius_mask(absolute_request_position, agent.observation_radius)
 
                 # Check if any visible.
                 if np.any(visible):
@@ -1595,6 +1612,12 @@ class parallel_env(ParallelEnv):
             if best_pos is not None:
                 return best_pos
         return self._get_nearest_resource(agent.position)
+
+
+    @property
+    def randomize_observation_radius(self):
+        ''' Whether the observation radius is randomized at each reset. '''
+        return self.observation_radius_random_max > self.observation_radius_random_min
 
 
     def _get_observation_radius_mask(self, position, radius):
@@ -2504,6 +2527,10 @@ class parallel_env_partial_obs(parallel_env_map_obs):
     def observation_space(self, agent):
         ''' Returns the observation space for the given agent. '''
 
+        if self.randomize_observation_radius:
+            raise ValueError("parallel_env_partial_obs does not support a randomized observation radius, "
+                             "since its observation shape depends on the radius.")
+
         map_width = 2 * agent.observation_radius + 1
         return spaces.Dict({
             "role": spaces.Discrete(len(AGENT_ROLE)),
@@ -2708,6 +2735,7 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                     shape=(1,),
                     dtype=np.float32,
                 ),
+                **self._observation_radius_space(),
             })
 
         obs_space = spaces.Dict({
@@ -2727,10 +2755,19 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                     shape = (1,),
                     dtype=np.float32
                 )
-            )
+            ),
+            **self._observation_radius_space(),
         })
 
         return obs_space
+
+
+    def _observation_radius_space(self):
+        ''' The observation radius subspace, present only when the radius is randomized
+            (so that observation shapes, and thus trained models, are unchanged otherwise). '''
+        if not self.randomize_observation_radius:
+            return {}
+        return {"observation_radius": spaces.Box(low=0.0, high=np.inf, shape=(1,), dtype=np.float32)}
 
 
     def _compute_frontier_targets(self, agent, k):
@@ -2991,6 +3028,12 @@ class parallel_env_graph_obs(parallel_env_map_obs):
                 "num_edges": np.ones((1,), dtype=np.float32),
             }
 
+            # Observation radius (always visible). Reports the agent's actual radius, even for
+            # global-state queries made with an infinite radius.
+            if self.randomize_observation_radius:
+                obs["observation_radius"] = np.array([agent.observation_radius], dtype=np.float32)
+                obs_mask["observation_radius"] = np.ones((1,), dtype=np.float32)
+
             return obs, obs_mask
 
         node_features = []  # Node features
@@ -3108,9 +3151,11 @@ class parallel_env_graph_obs(parallel_env_map_obs):
             "role": np.array([agent.role], dtype=np.int32),
             "graph": graph,
         }
+        if self.randomize_observation_radius:
+            obs["observation_radius"] = np.array([agent.observation_radius], dtype=np.float32)
 
         # Set up the fixed mask.
-        fixed_mask = np.array([True, True], dtype=bool)  # role and graph are always visible
+        fixed_mask = np.ones(len(obs), dtype=bool)  # role, graph and observation_radius are always visible
 
         return obs, fixed_mask
 
