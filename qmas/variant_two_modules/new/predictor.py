@@ -534,8 +534,10 @@ class Predictor(torch.nn.Module):
             trajectory = trajectory.unsqueeze(0)  # Add sample dimension.
         if visibility_mask == None:
             visibility_mask = torch.ones_like(trajectory)  # Default to all visible.
-        elif not has_sample_dim:
-            visibility_mask = visibility_mask.unsqueeze(0) # Add sample dimension.
+        else:
+            visibility_mask = visibility_mask.clone()
+            if not has_sample_dim:
+                visibility_mask = visibility_mask.unsqueeze(0) # Add sample dimension.
 
         # Normalize first, then apply visibility mask so unknown entries remain neutralized.
         trajectory = self.normalize_trajectory(trajectory)
