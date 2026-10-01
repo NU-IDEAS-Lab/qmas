@@ -72,7 +72,7 @@ def add_args(parser):
     parser.add_argument("--reward_done", type=float, default=1_000_000.0,
                         help="One-time reward (divided by step count) for fully depositing all resources.")
     parser.add_argument("--reward_no_communication", type=float, default=0.05,
-                        help="Reward for not requesting communication (only applies outside 'full' communication_mode).")
+                        help="Reward for not requesting communication (only applies outside 'full' and 'bernoulli' communication_mode).")
     parser.add_argument("--reward_w_deposited", type=float, default=100.0,
                         help="Weight on the shared team-wide fractional-deposited intrinsic reward term.")
     parser.add_argument("--reward_w_cargo", type=float, default=10.0,
@@ -90,11 +90,16 @@ def add_args(parser):
                         choices=["moore", "velocity"],
                         help="The movement mode for agents: 'moore' uses discrete Moore neighborhood movement, 'velocity' uses continuous velocity control.")
     parser.add_argument("--communication_mode", type=str, default="nearest",
-                        choices=["nearest", "broadcast", "broadcast_uq_threshold", "full"],
+                        choices=["nearest", "broadcast", "broadcast_uq_threshold", "bernoulli", "full"],
                         help="How communication requests are handled: 'nearest' queries one nearby agent, "
                              "'broadcast' queries all other agents, "
                              "'broadcast_uq_threshold' is as described in thesis, "
+                             "'bernoulli' receives from all other agents with fixed probability "
+                             "`communication_probability` each step (no communication action), "
                              "'full' provides all agents' observations.")
+    parser.add_argument("--communication_probability", type=float, default=0.1,
+                        help="The per-agent, per-step probability of successful communication "
+                             "(only applies to 'bernoulli' communication_mode).")
     parser.add_argument("--observation_mode_global", type=str, default="coords",
                         choices=["map", "coords"],
                         help="Format for globally situated observation in info['observation_global']. "
@@ -277,6 +282,7 @@ class parallel_env(ParallelEnv):
             noisy_memory: bool = False,
             communication_mode: str = "nearest",
             comm_uq_threshold_temperature: float = 1.0,
+            communication_probability: float = 0.1,
             observation_mode_global: str = "coords",
             movement_mode: str = "moore",
             render_mode: str = "human",
@@ -320,6 +326,7 @@ class parallel_env(ParallelEnv):
         self.noisy_memory = noisy_memory
         self.communication_mode = communication_mode
         self.comm_uq_threshold_temperature = comm_uq_threshold_temperature
+        self.communication_probability = communication_probability
         self._predictor_uncertainty = None
         self.observation_mode_global = observation_mode_global
         self.movement_mode = movement_mode
@@ -944,8 +951,8 @@ class parallel_env(ParallelEnv):
                     dtype=np.float32
                 ),
             })
-        elif self.communication_mode == "full":
-            comm_space = None  # Full communication does not require an action component
+        elif self.communication_mode in ("full", "bernoulli"):
+            comm_space = None  # Full and Bernoulli communication do not require an action component
         else:
             raise ValueError(f"Unsupported communication_mode: {self.communication_mode}")
 
@@ -1258,6 +1265,14 @@ class parallel_env(ParallelEnv):
                     senders = {other for other in self.possible_agents if other is not agent}
                     comms_requests_explicit[agent] = senders
                     record_comms_request(agent)
+                elif self.communication_mode == "bernoulli":
+                    # Fixed-rate comm (mirrors patrolling_zoo.py's "bernoulli" communication_model):
+                    # each step, receive from all other agents with probability `communication_probability`.
+                    if np.random.random() < self.communication_probability:
+                        senders = {other for other in self.possible_agents if other is not agent}
+                        if senders:
+                            comms_requests_explicit[agent] = senders
+                            record_comms_request(agent)
                 elif self.communication_mode == "broadcast_uq_threshold":
                     threshold = float(np.asarray(action["communication"]["comm_threshold"]).reshape(-1)[0])
                     agent_idx = self.possible_agents.index(agent)

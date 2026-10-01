@@ -216,3 +216,60 @@ class TestPerAgentCommsRequestStat(unittest.TestCase):
 
         self.assertEqual(info[f"communication/requests_made_by_agent/{prospector}"], 0)
         self.assertEqual(info[f"communication/requests_made_by_agent/{extractor}"], 1)
+
+
+class TestBernoulliComms(unittest.TestCase):
+    ''' Verifies the fixed-rate "bernoulli" communication_mode, which mirrors
+    patrolling_zoo.py's "bernoulli" communication_model: no communication action, and
+    each agent receives from all other agents with probability `communication_probability`. '''
+
+    def test_no_communication_action(self):
+        environment = make_env(num_agents=2, communication_mode="bernoulli")
+        for agent in environment.possible_agents:
+            self.assertNotIn("communication", environment.action_space(agent).spaces)
+
+    def step_once(self, probability, num_agents=2):
+        environment = make_env(num_agents=num_agents, communication_mode="bernoulli",
+                               communication_probability=probability)
+        environment.reset(seed=42)
+        action_dict = {
+            agent: make_action(environment, agent, request=False)
+            for agent in environment.agents
+        }
+        _, rewards, _, _, info = environment.step(action_dict)
+        return environment, rewards, info
+
+    def test_probability_one_always_receives(self):
+        environment, _, info = self.step_once(1.0, num_agents=3)
+        for agent in environment.possible_agents:
+            self.assertIs(info[agent]["received_comms"], True)
+            self.assertEqual(info[f"communication/requests_made_by_agent/{agent}"], 1)
+        self.assertEqual(info["communication/requests_made"], 3)
+
+    def test_probability_zero_never_receives(self):
+        environment, _, info = self.step_once(0.0, num_agents=3)
+        for agent in environment.possible_agents:
+            self.assertIs(info[agent]["received_comms"], False)
+        self.assertEqual(info["communication/requests_made"], 0)
+
+    def test_single_agent_never_receives(self):
+        environment, _, info = self.step_once(1.0, num_agents=1)
+        agent = environment.possible_agents[0]
+        self.assertIs(info[agent]["received_comms"], False)
+        self.assertEqual(info["communication/requests_made"], 0)
+
+    def test_empirical_rate_matches_probability(self):
+        environment = make_env(num_agents=2, communication_mode="bernoulli",
+                               communication_probability=0.3)
+        environment.reset(seed=0)
+        received, total = 0, 0
+        for _ in range(500):
+            action_dict = {
+                agent: make_action(environment, agent, request=False)
+                for agent in environment.agents
+            }
+            _, _, _, _, info = environment.step(action_dict)
+            for agent in environment.possible_agents:
+                received += int(info[agent]["received_comms"])
+                total += 1
+        self.assertAlmostEqual(received / total, 0.3, delta=0.05)
