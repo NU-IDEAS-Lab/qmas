@@ -132,3 +132,87 @@ class TestReceivedComms(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestPerAgentCommsRequestStat(unittest.TestCase):
+    ''' Verifies the per-agent "communication/requests_made_by_agent/<agent>" info
+    stat, which lets each agent's request rate be tracked separately (e.g. checking
+    that a Prospector learns never to request) rather than only in the team-wide
+    "communication/requests_made" sum. '''
+
+    def test_per_agent_counts_match_request_bits(self):
+        environment = make_env(num_agents=2, communication_mode="broadcast")
+        environment.reset(seed=42)
+        agent0, agent1 = environment.agents
+
+        action_dict = {
+            agent0: make_action(environment, agent0, request=True),
+            agent1: make_action(environment, agent1, request=False),
+        }
+        _, _, _, _, info = environment.step(action_dict)
+
+        self.assertEqual(info[f"communication/requests_made_by_agent/{agent0}"], 1)
+        self.assertEqual(info[f"communication/requests_made_by_agent/{agent1}"], 0)
+        # The per-agent counts must sum to the team-wide total.
+        self.assertEqual(info["communication/requests_made"], 1)
+
+    def test_per_agent_key_present_for_every_agent_when_nobody_requests(self):
+        ''' The key must exist (as 0) even for an agent that never requests, otherwise
+        a policy that has learned not to communicate would simply stop being logged. '''
+        environment = make_env(num_agents=2, communication_mode="broadcast")
+        environment.reset(seed=42)
+
+        action_dict = {
+            agent: make_action(environment, agent, request=False)
+            for agent in environment.agents
+        }
+        _, _, _, _, info = environment.step(action_dict)
+
+        for agent in environment.possible_agents:
+            self.assertEqual(info[f"communication/requests_made_by_agent/{agent}"], 0)
+        self.assertEqual(info["communication/requests_made"], 0)
+
+    def test_full_mode_counts_every_agent(self):
+        ''' In "full" mode there is no request action -- every agent communicates every
+        step, so each per-agent count should be 1. '''
+        environment = make_env(num_agents=2, communication_mode="full")
+        environment.reset(seed=42)
+
+        action_dict = {
+            agent: make_action(environment, agent, request=True)
+            for agent in environment.agents
+        }
+        _, _, _, _, info = environment.step(action_dict)
+
+        for agent in environment.possible_agents:
+            self.assertEqual(info[f"communication/requests_made_by_agent/{agent}"], 1)
+        self.assertEqual(info["communication/requests_made"], len(environment.possible_agents))
+
+    def test_prospector_and_extractor_tracked_separately(self):
+        ''' The motivating case: a Prospector and an Extractor in the same episode must
+        get distinct keys, so a Prospector that never requests is visible on its own
+        even while other agents keep communicating. '''
+        environment = parallel_env(
+            num_extractors=1,
+            num_haulers=0,
+            num_prospectors=1,
+            num_superbots=0,
+            world_size=10,
+            num_obstacles=0,
+            num_resources=2,
+            communication_mode="broadcast",
+        )
+        environment.reset(seed=42)
+
+        by_class = {type(agent).__name__.lower(): agent for agent in environment.agents}
+        self.assertEqual(set(by_class), {"prospector", "extractor"})
+        prospector, extractor = by_class["prospector"], by_class["extractor"]
+
+        action_dict = {
+            prospector: make_action(environment, prospector, request=False),
+            extractor: make_action(environment, extractor, request=True),
+        }
+        _, _, _, _, info = environment.step(action_dict)
+
+        self.assertEqual(info[f"communication/requests_made_by_agent/{prospector}"], 0)
+        self.assertEqual(info[f"communication/requests_made_by_agent/{extractor}"], 1)
