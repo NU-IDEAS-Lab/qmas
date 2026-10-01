@@ -818,11 +818,16 @@ class PettingzooRunner(Runner):
 
         # Per-element argmin across agents within each thread → (n_threads, 1, D), then gather the
         # corresponding per-element predictions.
-        best_idx = torch.argmin(uq_per, dim=1, keepdim=True)
+        best_uq, best_idx = torch.min(uq_per, dim=1, keepdim=True)
         best_preds = torch.gather(pred_per, dim=1, index=best_idx)  # (n_threads, 1, D)
 
-        # Merge only at receiver rows; non-receivers keep their own predictions.
-        merge_select = receivers_mask.unsqueeze(-1)  # (n_threads, n_agents, 1)
+        # Merge only at receiver rows, and only on a STRICT uncertainty improvement. Ties keep the
+        # receiver's own value, which is what protects its direct observations: the diffuser pins
+        # observed elements via fix_mask, so every ensemble member agrees there and their
+        # uncertainty is exactly 0 -- it can tie, but it can never strictly lose. Without this, a
+        # neighbour whose ensemble had collapsed to a spurious 0 won the argmin purely by having a
+        # lower agent index, and overwrote ground truth the receiver could see for itself.
+        merge_select = receivers_mask.unsqueeze(-1) & (best_uq < uq_per)
         pred_per = torch.where(merge_select, best_preds.expand_as(pred_per), pred_per)
         pred_now = pred_per.reshape(B, D)
 
