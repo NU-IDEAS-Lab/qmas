@@ -46,7 +46,13 @@ class PettingzooRunner(Runner):
         self._reset_pred_diagnostics()
 
         self.env_infos = defaultdict(list)
-               
+
+        # Per-agent "did this agent receive comms last step" flags, consumed by
+        # _apply_ex_env_comms_merge. Kept separate from self.env_infos because run() clears that
+        # dict wholesale every log interval, which silently turned the merge into a no-op on the
+        # first step after each flush.
+        self._last_received_comms = None
+
         if self.all_args.torch_compile:
             self.train_compiled = torch.compile(self.train, fullgraph=False, mode="reduce-overhead")
 
@@ -270,6 +276,8 @@ class PettingzooRunner(Runner):
         # raw (pre-UQ-padding) obs so the predictor sees the correct observation size.
         self.train_prediction_prev = None
         self.train_trajectory.reset()
+        # No comms have happened yet in a fresh episode.
+        self._last_received_comms = None
 
         if observation_global_raw is not None:
             traj_obs = observation_global_raw
@@ -353,7 +361,7 @@ class PettingzooRunner(Runner):
             pred_now = self._apply_ex_env_comms_merge(
                 pred_now,
                 uncertainty_now,
-                self.env_infos.get("received_comms", []),
+                self._last_received_comms,
                 self.train_prediction_prev,
             )
 
@@ -543,6 +551,10 @@ class PettingzooRunner(Runner):
         for key in keys:
             if type(key) == str:
                 self.env_infos[key] = [i[key] for i in infos]
+
+        # Keep the comms flags outside self.env_infos, which run() clears every log interval.
+        if "received_comms" in infos[0]:
+            self._last_received_comms = [i["received_comms"] for i in infos]
 
         # Calculate masks.
         masks = torch.ones((self.n_rollout_threads, self.num_agents, 1))
@@ -781,7 +793,7 @@ class PettingzooRunner(Runner):
 
         Timing: the caller is responsible for passing flags that describe the same env transition as
         ``pred_now``'s target obs (i.e., the most-recent step seen by the predictor). In ``collect`` this
-        is ``self.env_infos`` (populated by the prior iteration's ``insert()``); in ``eval``/``render`` it's
+        is ``self._last_received_comms`` (populated by the prior iteration's ``insert()``); in ``eval``/``render`` it's
         the cached previous-iter ``infos`` list.
 
         Persistence: writing back at receiver rows lets the next predictor call autoregress on the
@@ -804,7 +816,7 @@ class PettingzooRunner(Runner):
         # Build the per-(thread, agent) receivers mask. The caller may pass per-thread scalars (whole
         # thread received) or per-agent arrays; both are accepted.
         receivers_mask = torch.zeros((n_threads, n_agents), dtype=torch.bool)
-        for t_idx, flag in enumerate(list(received_comms_per_thread)[:n_threads]):
+        for t_idx, flag in enumerate(list(received_comms_per_thread or [])[:n_threads]):
             if isinstance(flag, (list, tuple, np.ndarray, torch.Tensor)):
                 receivers_mask[t_idx] = torch.as_tensor(np.asarray(flag), dtype=torch.bool).reshape(-1)[:n_agents]
             else:
