@@ -2,6 +2,9 @@
 
 This repository contains the policy/training code for the QMAS Task Allocation Project.
 
+Code from this repository has been used for the following publications:
+* AAMAS 2027 submission: [89a19d9f5dedf2032d01967d6e81e410d624eba6](https://github.com/NU-IDEAS-Lab/qmas/commit/89a19d9f5dedf2032d01967d6e81e410d624eba6)
+
 ## Package Description
 Packages are as follows:
 
@@ -27,7 +30,3 @@ Packages are as follows:
     ```
     python -m pip install -e .
     ```
-
-## Operation
-
-WIP...
